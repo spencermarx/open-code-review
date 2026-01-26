@@ -1,0 +1,199 @@
+# OpenSpec Configuration for Open Code Review
+# This context is injected into every OpenSpec planning request.
+
+schema: spec-driven
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROJECT CONTEXT
+# ─────────────────────────────────────────────────────────────────────────────
+
+context: |
+  ## Purpose
+  
+  Open Code Review (OCR) is an AI-powered code review framework that simulates
+  a real engineering team review process. It orchestrates multiple AI "Principal
+  Engineers" who independently review code from different perspectives, engage
+  in discourse to challenge each other's findings, and produce unified,
+  actionable feedback.
+  
+  ## Goals
+  
+  - Simulate real team code review with multiple independent reviewers and discourse
+  - Provide contextual review by exploring beyond the diff
+  - Enable zero-friction setup through automatic context discovery
+  - Allow team customization of personas, standards, and redundancy
+  - Support natural language interaction ("review my code" just works)
+  - Maintain cross-tool compatibility via the Agent Skills standard
+  
+  ## Tech Stack
+  
+  | Component | Technology |
+  |-----------|------------|
+  | Monorepo | NX 22 (integrated) |
+  | Language | TypeScript 5+ (strict mode) |
+  | Runtime | Node.js ≥20.0.0 |
+  | Package Manager | pnpm 9+ |
+  | Bundler | esbuild (via @nx/esbuild) |
+  | CLI Framework | Commander.js 13+ |
+  | Prompts | @inquirer/prompts 7+ |
+  | File Watching | chokidar 4+ |
+  | Agent Framework | Agent Skills standard (SKILL.md) |
+  | Configuration | YAML + Markdown |
+  
+  ## Architecture
+  
+  Two-package monorepo:
+  - `packages/agents/` — Skills, commands, reviewer personas (pure markdown)
+  - `packages/cli/` — TypeScript CLI for installation and session management
+  
+  Key patterns:
+  - Config-based context discovery (.ocr/config.yaml)
+  - OpenSpec integration for pulling project context and specs
+  - Multi-agent orchestration (Tech Lead → Reviewers → Discourse → Synthesis)
+  - Session storage in .ocr/sessions/{date}-{branch}/
+  
+  ## Key Design Decisions
+  
+  | Decision | Rationale |
+  |----------|-----------|
+  | Agent Skills architecture | Works with Claude Code, Cursor, Windsurf, and any Agent Skills-compatible tool |
+  | Config-based context discovery | .ocr/config.yaml pulls OpenSpec context, AGENTS.md, CLAUDE.md automatically |
+  | Pure markdown skills | No runtime dependencies for agent assets; maximum portability |
+  | TypeScript CLI | Modern tooling for installation, updates, and session management |
+  | Redundancy configuration | Critical reviewers can run multiple times for higher confidence |
+  
+  ## Important Constraints
+  
+  ### Technical Constraints
+  - ESM only (no CommonJS)
+  - TypeScript strict mode required
+  - Git 2.0+ required
+  - Session data stored locally (.ocr/ directory, gitignored)
+  - Cross-platform paths (use node:path APIs)
+  
+  ### Design Constraints
+  - Zero-configuration for basic use
+  - Natural language activation ("review my code")
+  - Reviewer personas must be human-editable markdown
+  - All configuration in YAML or markdown
+  - Config preserved across updates (never overwrite user customizations)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RULES
+# ─────────────────────────────────────────────────────────────────────────────
+
+rules:
+  proposal:
+    - Include impact assessment for cross-package changes
+    - Mark breaking changes with **BREAKING** prefix
+    - Reference affected specs by capability name
+  
+  specs:
+    - Use SHALL/MUST for normative requirements
+    - Every requirement must have at least one scenario
+    - Use #### Scenario: format (4 hashtags)
+    - Keep scenarios testable with clear WHEN/THEN structure
+  
+  design:
+    - Document alternatives considered
+    - Include migration plan for breaking changes
+    - Reference project conventions from this config
+  
+  tasks:
+    - Break into 2-hour maximum chunks
+    - Order by dependency (implement foundations first)
+    - Include test tasks for new functionality
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CODE STYLE CONVENTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+conventions:
+  typescript:
+    - Use type over interface for consistency
+    - Use discriminated unions for state machines
+    - No any, type assertions, or non-null assertions
+    - Use unknown for truly unknown types
+    - Exhaustive switch with never default case
+  
+  markdown:
+    - ATX-style headers (#, ##, ###)
+    - One blank line before and after headers
+    - Fenced code blocks with language identifiers
+    - Wrap prose at 80-100 characters
+  
+  yaml:
+    - 2-space indentation
+    - Quote strings with special characters
+    - Use comments for non-obvious configuration
+  
+  naming:
+    files: kebab-case (context-discovery.md, reviewer-task.md)
+    identifiers: camelCase for functions/variables
+    reviewers: lowercase single word (principal, security, quality)
+    commands: kebab-case (add-reviewer, ocr-review)
+    sessions: "{YYYY-MM-DD}-{branch-name}"
+  
+  git:
+    commits: |
+      Conventional commits: <type>(<scope>): <description>
+      Types: feat, fix, docs, style, refactor, test, chore
+      Examples:
+        feat(cli): add progress command with live updates
+        fix(installer): preserve config.yaml on update
+    branches: |
+      main: Production-ready
+      develop: Integration branch
+      feature/*: New features
+      fix/*: Bug fixes
+      docs/*: Documentation updates
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TESTING PHILOSOPHY
+# ─────────────────────────────────────────────────────────────────────────────
+
+testing:
+  approach: |
+    Follow Khorikov's classical (Detroit) school of testing:
+    - Test observable behavior, not implementation details
+    - Use real dependencies; mock only external systems
+    - Tests must survive refactoring without breaking
+    - Verify outputs and side effects, not internal state
+  
+  four_pillars:
+    - Protection against regressions
+    - Resistance to refactoring
+    - Fast feedback
+    - Maintainability
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DOMAIN CONCEPTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+domain:
+  concepts:
+    reviewer: AI persona with specific expertise (security, quality, testing)
+    redundancy: Running critical reviewers multiple times for confidence
+    discourse: Phase where reviewers discuss and challenge findings
+    context_discovery: Loading project standards from config.yaml and references
+    tech_lead: Orchestrating agent that coordinates the review process
+    session: Review artifacts stored in .ocr/sessions/{date}-{branch}/
+  
+  review_targets:
+    - Staged changes (default)
+    - Unstaged changes
+    - Commit ranges
+    - Pull requests
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXTERNAL DEPENDENCIES
+# ─────────────────────────────────────────────────────────────────────────────
+
+dependencies:
+  required:
+    - Git 2.0+ for version control operations
+    - Node.js 20+ for CLI runtime
+    - Agent Skills runtime (Claude Code, Cursor, Windsurf, etc.)
+  
+  optional:
+    - GitHub CLI (gh) for PR posting and review features
