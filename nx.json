@@ -27,7 +27,16 @@
       "conventionalCommits": true
     },
     "changelog": {
+      "workspaceChangelog": {
+        "file": "CHANGELOG.md",
+        "createRelease": "github"
+      },
       "projectChangelogs": true
+    },
+    "git": {
+      "commit": true,
+      "commitMessage": "chore(release): {version}",
+      "tag": true
     }
   }
 }

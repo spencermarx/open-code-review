@@ -133,6 +133,50 @@ When adding features:
 - Keep `.ocr/` and `packages/agents/` in sync
 - Update `README.md` if user-facing behavior changes
 
+## 🚀 Releasing (Maintainers)
+
+OCR uses [Nx Release](https://nx.dev/features/manage-releases) to coordinate npm publishing and GitHub releases.
+
+### Release Process
+
+```bash
+# 1. Ensure you're on main with latest changes
+git checkout main && git pull
+
+# 2. Run the release (dry-run first)
+pnpm nx release --dry-run
+
+# 3. If everything looks good, run the actual release
+pnpm nx release
+
+# 4. Push the release commit and tags
+git push --follow-tags
+```
+
+### What Happens
+
+The `nx release` command:
+1. **Bumps versions** based on conventional commits (feat → minor, fix → patch)
+2. **Updates CHANGELOGs** in each package and root
+3. **Creates a git commit** with message `chore(release): {version}`
+4. **Tags the release** (e.g., `v1.0.4`)
+5. **Publishes to npm** (`@open-code-review/cli`, `@open-code-review/agents`)
+6. **Creates a GitHub Release** with changelog notes
+
+### Prerequisites
+
+- **npm**: Logged in with publish access (`npm whoami`)
+- **GitHub**: `GITHUB_TOKEN` env var or `gh` CLI authenticated
+- **Clean working tree**: No uncommitted changes
+
+### Manual Version Bump
+
+To release a specific version:
+
+```bash
+pnpm nx release --specifier=1.1.0
+```
+
 ## 🤝 Code of Conduct
 
 Be respectful, inclusive, and constructive. We're all here to build something useful together.
