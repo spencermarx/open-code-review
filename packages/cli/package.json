@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@inquirer/prompts": "^7.2.0",
-    "@open-code-review/agents": "^1.0.0",
+    "@open-code-review/agents": "workspace:*",
     "chalk": "^5.4.1",
     "chokidar": "^4.0.3",
     "commander": "^13.0.0",
