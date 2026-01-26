@@ -1,0 +1,31 @@
+{
+  "name": "open-code-review",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Open Code Review - AI-powered multi-agent code review",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/spencermarx/open-code-review"
+  },
+  "license": "MIT",
+  "author": "Spencer Marx",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "nx build cli",
+    "test": "nx test cli",
+    "lint": "nx lint cli"
+  },
+  "devDependencies": {
+    "@nx/esbuild": "^22.0.0",
+    "@nx/js": "^22.0.0",
+    "@types/node": "^22.10.5",
+    "esbuild": "^0.24.0",
+    "nx": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.4"
+  }
+}
