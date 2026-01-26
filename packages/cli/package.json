@@ -1,0 +1,42 @@
+{
+  "name": "@open-code-review/cli",
+  "version": "1.0.0",
+  "description": "CLI for Open Code Review - Multi-environment setup and progress tracking",
+  "type": "module",
+  "bin": {
+    "ocr": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "code-review",
+    "ai",
+    "cli",
+    "claude",
+    "cursor",
+    "windsurf"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/spencermarx/open-code-review",
+    "directory": "packages/cli"
+  },
+  "license": "MIT",
+  "author": "Spencer Marx",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.2.0",
+    "@open-code-review/agents": "workspace:*",
+    "chalk": "^5.4.1",
+    "chokidar": "^4.0.3",
+    "commander": "^13.0.0",
+    "log-update": "^7.0.2",
+    "ora": "^8.1.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

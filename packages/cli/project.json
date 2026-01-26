@@ -1,0 +1,57 @@
+{
+  "name": "cli",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/cli/src",
+  "projectType": "application",
+  "tags": ["scope:cli", "type:app"],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "main": "packages/cli/src/index.ts",
+        "outputPath": "packages/cli/dist",
+        "outputFileName": "index.js",
+        "tsConfig": "packages/cli/tsconfig.json",
+        "format": ["esm"],
+        "platform": "node",
+        "target": "node20",
+        "bundle": true,
+        "minify": false,
+        "esbuildOptions": {
+          "banner": {
+            "js": "#!/usr/bin/env node"
+          }
+        }
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx packages/cli/src/index.ts",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "init": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx packages/cli/src/index.ts init",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "progress": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx packages/cli/src/index.ts progress",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "update": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx packages/cli/src/index.ts update",
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  }
+}
