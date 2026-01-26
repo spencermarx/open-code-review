@@ -1,0 +1,86 @@
+# Open Code Review Configuration
+# This file is installed to .ocr/config.yaml and customized per-project.
+# Context here is injected into every review request.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROJECT CONTEXT
+# ─────────────────────────────────────────────────────────────────────────────
+# Injected into ALL review requests. Keep it tight—focus on what reviewers
+# genuinely need to know that isn't obvious from the code itself.
+
+# context: |
+#   Tech stack: TypeScript, React, Node.js, PostgreSQL
+#   Architecture: Monorepo with NX, ESM only
+#   Testing: Jest + React Testing Library, mock only external services
+#   Critical constraint: All public APIs must be backwards compatible
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONTEXT DISCOVERY
+# ─────────────────────────────────────────────────────────────────────────────
+# Files to read during Phase 1 (Context Discovery). OCR merges these into
+# the review context automatically.
+
+context_discovery:
+  # OpenSpec integration - pull project context and active specs
+  openspec:
+    enabled: true
+    config: "openspec/config.yaml"      # Project conventions from OpenSpec
+    specs: "openspec/specs/**/*.md"     # Merged specs for architectural context
+    active_changes: "openspec/changes/**/*.md"  # In-flight change proposals
+  
+  # AI assistant configuration files (auto-detected)
+  references:
+    - "AGENTS.md"
+    - "CLAUDE.md"
+    - ".cursorrules"
+    - ".windsurfrules"
+    - ".github/copilot-instructions.md"
+    - "CONTRIBUTING.md"
+  
+  # Additional project-specific files to include
+  # additional:
+  #   - "docs/ARCHITECTURE.md"
+  #   - "docs/API_STANDARDS.md"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REVIEW RULES
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-severity rules for reviewers. Only add what's not obvious.
+
+# rules:
+#   critical:
+#     - Security vulnerabilities (injection, path traversal, secrets in code)
+#     - Breaking changes without migration path
+#     - Data loss or corruption risks
+#   important:
+#     - Silent error handling (catch without action)
+#     - Missing user-facing error messages
+#     - Performance regressions in hot paths
+#   consider:
+#     - Naming consistency
+#     - Documentation gaps
+#     - Test coverage for edge cases
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REVIEWER TEAM
+# ─────────────────────────────────────────────────────────────────────────────
+
+default_team:
+  principal: 2    # Holistic architecture review
+  quality: 2      # Code quality and maintainability
+  # security: 1   # Auto-added for auth/API/data changes
+  # testing: 1    # Auto-added for logic-heavy changes
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OUTPUT & WORKFLOW
+# ─────────────────────────────────────────────────────────────────────────────
+
+output:
+  session_dir: ".ocr/sessions"
+
+discourse:
+  enabled: true   # Set false or use --quick to skip reviewer debate phase
+
+github:
+  auto_prompt_post: false
+  comment_format: "single"  # "single" or "inline"
