@@ -46,17 +46,29 @@ ocr progress
 - Injects instructions into `AGENTS.md` / `CLAUDE.md`
 - Detects and configures Claude Code, Cursor, and Windsurf
 
-### Option B: Manual Installation (Plugin Mode)
+### Option B: Claude Code Plugin
 
-For direct integration without the CLI:
+Install directly from the marketplace:
+
+```bash
+# In Claude Code, run:
+/plugin marketplace add spencermarx/open-code-review
+
+# Then install the plugin:
+/plugin install open-code-review@spencermarx-open-code-review
+```
+
+### Option C: Manual Installation
+
+For other AI assistants (Cursor, Windsurf, etc.) without the CLI:
 
 ```bash
 # Clone the repository
-git clone https://github.com/open-code-review/open-code-review.git
+git clone https://github.com/spencermarx/open-code-review.git
 
 # Copy the agents package to your project
-cp -r open-code-review/packages/agents/skills/ocr ~/.your-tool/skills/
-cp -r open-code-review/packages/agents/commands ~/.your-tool/commands/
+cp -r open-code-review/packages/agents/skills/ocr .cursor/skills/
+cp -r open-code-review/packages/agents/commands .cursor/commands/
 ```
 
 Or reference the skill directly in your agent's configuration.
