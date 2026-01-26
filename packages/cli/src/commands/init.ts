@@ -14,16 +14,14 @@ import {
   type InstallResult,
 } from "../lib/installer.js";
 import { injectIntoProjectFiles } from "../lib/injector.js";
+import { printBanner } from "../lib/banner.js";
 
 export const initCommand = new Command("init")
   .description("Set up OCR for AI coding environments")
   .option("-t, --tools <tools>", 'Comma-separated tool IDs or "all"')
   .option("--no-inject", "Skip injecting instructions into AGENTS.md/CLAUDE.md")
   .action(async (options: { tools?: string; inject: boolean }) => {
-    console.log();
-    console.log(chalk.bold.cyan("  Open Code Review"));
-    console.log(chalk.dim("  AI-powered multi-agent code review"));
-    console.log();
+    printBanner();
 
     const targetDir = process.cwd();
     let selectedTools: AIToolConfig[];

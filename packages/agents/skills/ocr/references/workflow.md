@@ -69,6 +69,7 @@ At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
 ```json
 {
   "session_id": "{id}",
+  "status": "active",
   "current_phase": "reviews",
   "phase_number": 4,
   "completed_phases": ["context", "requirements", "analysis"],
@@ -76,6 +77,8 @@ At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
   "updated_at": "2026-01-26T17:05:00Z"
 }
 ```
+
+**Status values**: `active` (in progress), `closed` (complete and dismissed)
 
 **Phase values**: `context`, `requirements`, `analysis`, `reviews`, `aggregation`, `discourse`, `synthesis`, `complete`
 
@@ -92,7 +95,7 @@ Before proceeding to each phase, verify the required artifacts exist:
 | 5 | ≥2 files in `reviews/` | Aggregated findings (inline), update `state.json` |
 | 6 | Reviews complete | `discourse.md`, update `state.json` |
 | 7 | `discourse.md` exists | `final.md`, update `state.json` |
-| 8 | `final.md` exists | Present to user, set phase to `complete` |
+| 8 | `final.md` exists | Present to user, set `status: "closed"` and `current_phase: "complete"` |
 
 **NEVER skip directly to `final.md`** — this breaks progress tracking.
 
@@ -485,7 +488,7 @@ See `references/synthesis.md` for template.
 
 ## Phase 8: Present
 
-**Goal**: Display results and optionally post to GitHub.
+**Goal**: Display results, optionally post to GitHub, and close the session.
 
 ### Steps
 
@@ -507,9 +510,27 @@ See `references/synthesis.md` for template.
    - Check for `gh` CLI: `which gh`
    - Post as PR comment: `gh pr comment {number} --body-file final.md`
 
-3. Confirm session saved:
+3. **Close the session** by updating `state.json`:
+   ```json
+   {
+     "session_id": "{id}",
+     "status": "closed",
+     "current_phase": "complete",
+     "phase_number": 8,
+     "completed_phases": ["context", "requirements", "analysis", "reviews", "aggregation", "discourse", "synthesis"],
+     "updated_at": "{now}"
+   }
    ```
-   Review saved to: .ocr/sessions/{id}/final.md
+   
+   > **IMPORTANT**: Setting `status: "closed"` ensures:
+   > - The `ocr progress` CLI stops showing this session
+   > - The session won't be picked up for resume
+   > - The session remains accessible via `/ocr-history` and `/ocr-show`
+
+4. Confirm session saved:
+   ```
+   ✓ Review complete
+   → .ocr/sessions/{id}/final.md
    ```
 
 ---

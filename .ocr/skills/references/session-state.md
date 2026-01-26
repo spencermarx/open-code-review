@@ -24,6 +24,7 @@ This means:
 {
   "session_id": "2026-01-26-main",
   "branch": "main",
+  "status": "active",
   "started_at": "2026-01-26T17:00:00Z",
   "current_phase": "reviews",
   "phase_number": 4,
@@ -35,6 +36,22 @@ This means:
   "updated_at": "2026-01-26T17:05:00Z"
 }
 ```
+
+## Session Status
+
+The `status` field controls session visibility:
+
+| Status | Meaning | Progress CLI | Agent Resume |
+|--------|---------|--------------|---------------|
+| `active` | In progress | Shows in auto-detect | Can resume |
+| `closed` | Complete and dismissed | Skipped | Cannot resume |
+
+**Lifecycle:**
+1. Session created → `status: "active"`
+2. Review in progress → `status: "active"`, `current_phase` updates
+3. Phase 8 complete → `status: "closed"`, `current_phase: "complete"`
+
+The `ocr progress` command only auto-detects sessions with `status: "active"`. Closed sessions are accessible via `/ocr-history` and `/ocr-show`.
 
 ## Phase Transitions
 
@@ -48,7 +65,7 @@ The Tech Lead MUST update `state.json` at each phase boundary:
 | reviews | After spawning each reviewer (update `reviewers.complete`) |
 | discourse | After writing `discourse.md` |
 | synthesis | After writing `final.md` |
-| complete | After presenting to user |
+| complete | After presenting to user, set `status: "closed"` |
 
 ## Writing State
 
@@ -59,6 +76,7 @@ When transitioning phases:
 cat > .ocr/sessions/{id}/state.json << 'EOF'
 {
   "session_id": "{id}",
+  "status": "active",
   "current_phase": "reviews",
   "phase_number": 4,
   "completed_phases": ["context", "requirements", "analysis"],
@@ -67,6 +85,22 @@ cat > .ocr/sessions/{id}/state.json << 'EOF'
     "complete": []
   },
   "updated_at": "2026-01-26T17:05:00Z"
+}
+EOF
+```
+
+When closing a session (Phase 8 complete):
+
+```bash
+# Update state.json to close the session
+cat > .ocr/sessions/{id}/state.json << 'EOF'
+{
+  "session_id": "{id}",
+  "status": "closed",
+  "current_phase": "complete",
+  "phase_number": 8,
+  "completed_phases": ["context", "requirements", "analysis", "reviews", "aggregation", "discourse", "synthesis"],
+  "updated_at": "2026-01-26T17:30:00Z"
 }
 EOF
 ```

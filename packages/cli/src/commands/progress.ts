@@ -49,11 +49,30 @@ type SessionState = {
   complete: boolean;
 };
 
-function getSessionsDir(targetDir: string): string {
-  return join(targetDir, ".ocr", "sessions");
+/**
+ * Check if a session is active (not closed)
+ */
+function isSessionActive(sessionPath: string): boolean {
+  const statePath = join(sessionPath, "state.json");
+  if (!existsSync(statePath)) {
+    return true; // No state.json = potentially new session, treat as active
+  }
+
+  try {
+    const stateContent = readFileSync(statePath, "utf-8");
+    const state: StateJson = JSON.parse(stateContent);
+    // Sessions without status field are treated as active (backwards compatibility)
+    // Sessions with status: "closed" are not active
+    return state.status !== "closed";
+  } catch {
+    return true; // Parse error = treat as active
+  }
 }
 
-function findLatestSession(sessionsDir: string): string | null {
+/**
+ * Find the latest active session (status !== "closed")
+ */
+function findLatestActiveSession(sessionsDir: string): string | null {
   if (!existsSync(sessionsDir)) {
     return null;
   }
@@ -66,7 +85,15 @@ function findLatestSession(sessionsDir: string): string | null {
     .sort()
     .reverse();
 
-  return sessions[0] ?? null;
+  // Find first active session (most recent first)
+  for (const session of sessions) {
+    const sessionPath = join(sessionsDir, session);
+    if (isSessionActive(sessionPath)) {
+      return session;
+    }
+  }
+
+  return null;
 }
 
 function countFindings(filePath: string): number {
@@ -90,8 +117,11 @@ function formatReviewerName(filename: string): string {
   return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
+type SessionStatus = "active" | "closed";
+
 type StateJson = {
   session_id: string;
+  status?: SessionStatus;
   current_phase: ReviewPhase;
   phase_number: number;
   completed_phases: string[];
@@ -175,84 +205,79 @@ function parseFromStateJson(
 }
 
 function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
 }
 
-const PHASE_INFO: Array<{ key: ReviewPhase; label: string; icon: string }> = [
-  { key: "context", label: "Context Discovery", icon: "📋" },
-  { key: "requirements", label: "Requirements Gathering", icon: "📝" },
-  { key: "analysis", label: "Tech Lead Analysis", icon: "🔍" },
-  { key: "reviews", label: "Parallel Reviews", icon: "👥" },
-  { key: "aggregation", label: "Aggregate Findings", icon: "📊" },
-  { key: "discourse", label: "Reviewer Discourse", icon: "💬" },
-  { key: "synthesis", label: "Final Synthesis", icon: "✨" },
-  { key: "complete", label: "Review Complete", icon: "🎉" },
+const PHASE_INFO: Array<{ key: ReviewPhase; label: string }> = [
+  { key: "context", label: "Context Discovery" },
+  { key: "requirements", label: "Requirements Gathering" },
+  { key: "analysis", label: "Tech Lead Analysis" },
+  { key: "reviews", label: "Parallel Reviews" },
+  { key: "aggregation", label: "Aggregate Findings" },
+  { key: "discourse", label: "Reviewer Discourse" },
+  { key: "synthesis", label: "Final Synthesis" },
+  { key: "complete", label: "Complete" },
 ];
 
-function getPhaseIcon(
-  phaseKey: ReviewPhase,
-  isComplete: boolean,
-  isCurrent: boolean,
-): string {
+function getPhaseStatus(isComplete: boolean, isCurrent: boolean): string {
   if (isComplete) return chalk.green("✓");
-  if (isCurrent) return chalk.yellow("●");
-  return chalk.dim("○");
+  if (isCurrent) return chalk.cyan("▸");
+  return chalk.dim("·");
 }
 
-function renderProgressBar(current: number, total: number): string {
-  const width = 20;
+function renderProgressBar(
+  current: number,
+  total: number,
+  label?: string,
+): string {
+  const width = 24;
   const filled = Math.round((current / total) * width);
   const empty = width - filled;
-  const bar = chalk.green("█".repeat(filled)) + chalk.dim("░".repeat(empty));
+  const bar = chalk.green("━".repeat(filled)) + chalk.dim("─".repeat(empty));
   const percent = Math.round((current / total) * 100);
-  return `${bar} ${percent}%`;
+  const percentStr = chalk.bold.white(`${percent}%`);
+  return label
+    ? `${bar}  ${percentStr} ${chalk.dim("·")} ${chalk.cyan(label)}`
+    : `${bar}  ${percentStr}`;
 }
 
 function renderProgress(state: SessionState): void {
-  // Collect output lines for log-update
   const lines: string[] = [];
   const log = (line: string = "") => lines.push(line);
 
-  // Header
-  const title = "Open Code Review - Live Progress";
-  const boxWidth = title.length + 4;
-  const border = "─".repeat(boxWidth);
-  log(chalk.bold.cyan(`  ┌${border}┐`));
-  log(
-    chalk.bold.cyan("  │") + chalk.bold(`  ${title}  `) + chalk.bold.cyan("│"),
-  );
-  log(chalk.bold.cyan(`  └${border}┘`));
+  // Minimal header
+  log();
+  log(chalk.bold.white("  Open Code Review"));
   log();
 
-  // Session info
+  // Session + elapsed on one line
   const elapsed = Date.now() - state.startTime;
-  log(chalk.dim(`  Session:  `) + chalk.white(state.session));
-  log(chalk.dim(`  Elapsed:  `) + chalk.white(formatDuration(elapsed)));
+  log(
+    chalk.dim("  ") +
+      chalk.white(state.session) +
+      chalk.dim("  ·  ") +
+      chalk.white(formatDuration(elapsed)),
+  );
   log();
 
-  // Progress bar
+  // Progress bar with current phase inline
   const progressPhases = state.complete ? 8 : state.phaseNumber;
-  log(`  ${renderProgressBar(progressPhases, 8)}`);
-  log();
-
-  // Current phase highlight
   const currentPhase = PHASE_INFO.find((p) => p.key === state.phase);
-  if (currentPhase && !state.complete) {
-    log(
-      chalk.bold(`  ${currentPhase.icon} `) +
-        chalk.bold.yellow(currentPhase.label) +
-        chalk.yellow(" in progress..."),
-    );
-    log();
-  }
-
-  // Phase checklist
-  log(chalk.dim("  ─── Workflow Phases ───"));
+  const phaseLabel = state.complete ? "Done" : currentPhase?.label;
+  log(`  ${renderProgressBar(progressPhases, 8, phaseLabel)}`);
   log();
 
+  // Phase completion map
   const phaseCompletion: Record<ReviewPhase, boolean> = {
     waiting: false,
     context: state.contextComplete,
@@ -265,38 +290,36 @@ function renderProgress(state: SessionState): void {
     complete: state.complete,
   };
 
+  // Compact phase list
   for (const phase of PHASE_INFO) {
     const isComplete = phaseCompletion[phase.key];
     const isCurrent = state.phase === phase.key && !state.complete;
-    const icon = getPhaseIcon(phase.key, isComplete, isCurrent);
+    const status = getPhaseStatus(isComplete, isCurrent);
 
-    let label = phase.label;
+    let label: string;
     if (isCurrent) {
-      label = chalk.yellow(label);
+      label = chalk.cyan.bold(phase.label);
     } else if (isComplete) {
-      label = chalk.white(label);
+      label = chalk.white(phase.label);
     } else {
-      label = chalk.dim(label);
+      label = chalk.dim(phase.label);
     }
 
-    log(`  ${icon} ${label}`);
+    log(`  ${status} ${label}`);
 
-    // Show reviewers under the reviews phase
+    // Show reviewers inline under reviews phase
     if (phase.key === "reviews" && state.reviewers.length > 0) {
-      for (const reviewer of state.reviewers) {
-        const reviewerIcon =
-          reviewer.status === "complete" ? chalk.green("✓") : chalk.dim("○");
-        const findings =
-          reviewer.findings > 0
-            ? chalk.cyan(
-                ` → ${reviewer.findings} finding${reviewer.findings > 1 ? "s" : ""}`,
-              )
-            : "";
-        log(
-          chalk.dim(`     └─ `) +
-            `${reviewerIcon} ${chalk.dim(reviewer.displayName)}${findings}`,
-        );
-      }
+      const reviewerLine = state.reviewers
+        .map((r) => {
+          const icon =
+            r.status === "complete" ? chalk.green("✓") : chalk.dim("○");
+          const name = chalk.dim(r.displayName);
+          const count =
+            r.findings > 0 ? chalk.cyan(` ${r.findings}`) : chalk.dim(" 0");
+          return `${icon} ${name}${count}`;
+        })
+        .join(chalk.dim("  │  "));
+      log(chalk.dim("    ") + reviewerLine);
     }
   }
 
@@ -308,69 +331,49 @@ function renderProgress(state: SessionState): void {
       (sum, r) => sum + r.findings,
       0,
     );
-    log(chalk.green.bold("  ✅ Review Complete!"));
-    if (totalFindings > 0) {
-      log(
-        chalk.dim(
-          `     ${totalFindings} total finding${totalFindings > 1 ? "s" : ""} identified`,
-        ),
-      );
-    }
-    log();
     log(
-      chalk.dim("  Results saved to: ") +
+      chalk.green.bold("  ✓ Complete") +
+        chalk.dim(" · ") +
+        chalk.white(
+          `${totalFindings} finding${totalFindings !== 1 ? "s" : ""}`,
+        ),
+    );
+    log(
+      chalk.dim("    ") +
+        chalk.dim("→ ") +
         chalk.white(`.ocr/sessions/${state.session}/final.md`),
     );
   } else {
-    log(chalk.dim("  Press Ctrl+C to exit"));
+    log(chalk.dim("  Ctrl+C to exit"));
   }
   log();
 
-  // Use log-update for flicker-free terminal updates
   logUpdate(lines.join("\n"));
 }
 
 function renderWaiting(): void {
-  // Collect output lines for log-update
   const lines: string[] = [];
   const log = (line: string = "") => lines.push(line);
 
-  // Header (matching the main progress UI)
-  const title = "Open Code Review - Live Progress";
-  const boxWidth = title.length + 4;
-  const border = "─".repeat(boxWidth);
-  log(chalk.bold.cyan(`  ┌${border}┐`));
+  log();
+  log(chalk.bold.white("  Open Code Review"));
+  log();
+  log(chalk.dim("  Waiting for session..."));
+  log();
+
+  // Empty progress bar
+  const bar = chalk.dim("─".repeat(24));
+  log(`  ${bar}  ${chalk.dim("0%")}`);
+  log();
+
+  // Minimal instructions
   log(
-    chalk.bold.cyan("  │") + chalk.bold(`  ${title}  `) + chalk.bold.cyan("│"),
+    chalk.dim("  Run ") + chalk.white("/ocr-review") + chalk.dim(" to start"),
   );
-  log(chalk.bold.cyan(`  └${border}┘`));
+  log();
+  log(chalk.dim("  Ctrl+C to exit"));
   log();
 
-  // Waiting state
-  log(chalk.dim("  Session:  ") + chalk.yellow("Waiting for session..."));
-  log();
-
-  // Progress bar (empty)
-  const bar = chalk.dim("░".repeat(20));
-  log(`  ${bar} 0%`);
-  log();
-
-  // Instructions
-  log(chalk.yellow("  ⏳ Waiting for a code review to begin..."));
-  log();
-  log(chalk.dim("  ─── How to Start ───"));
-  log();
-  log(
-    chalk.dim("  Run ") +
-      chalk.white("/ocr-review") +
-      chalk.dim(" in your AI assistant to begin"),
-  );
-  log(chalk.dim("  This display will update automatically"));
-  log();
-  log(chalk.dim("  Press Ctrl+C to exit"));
-  log();
-
-  // Use log-update for flicker-free terminal updates
   logUpdate(lines.join("\n"));
 }
 
@@ -446,7 +449,7 @@ export const progressCommand = new Command("progress")
     }
 
     // Auto-detect mode: watch for sessions
-    let currentSession = findLatestSession(sessionsDir);
+    let currentSession = findLatestActiveSession(sessionsDir);
     let currentSessionPath = currentSession
       ? join(sessionsDir, currentSession)
       : null;
