@@ -22,7 +22,7 @@
     "url": "https://github.com/spencermarx/open-code-review",
     "directory": "packages/cli"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "Spencer Marx",
   "engines": {
     "node": ">=20.0.0"

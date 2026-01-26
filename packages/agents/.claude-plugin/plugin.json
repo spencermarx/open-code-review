@@ -8,7 +8,7 @@
   },
   "homepage": "https://github.com/spencermarx/open-code-review",
   "repository": "https://github.com/spencermarx/open-code-review",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": [
     "code-review",
     "multi-agent",

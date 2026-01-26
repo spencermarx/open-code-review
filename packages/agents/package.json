@@ -21,7 +21,7 @@
     "url": "https://github.com/spencermarx/open-code-review",
     "directory": "packages/agents"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "Spencer Marx",
   "publishConfig": {
     "access": "public"
