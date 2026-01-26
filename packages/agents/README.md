@@ -1,83 +1,91 @@
 # @open-code-review/agents
 
-AI-native skills, commands, and reviewer personas for Open Code Review.
+The core skill definitions, reviewer personas, and workflow references for Open Code Review.
 
-## Overview
+## What This Package Contains
 
-This package contains static assets for AI-powered code review:
+This package provides the AI-readable assets that power multi-agent code review:
 
-- **Skills** (`skills/ocr/`) - Core skill definitions and workflow references
-- **Commands** (`commands/`) - Slash command definitions for AI tools
+```
+agents/
+├── skills/ocr/           # The OCR skill
+│   ├── SKILL.md          # Tech Lead orchestration logic
+│   ├── references/
+│   │   ├── workflow.md   # 8-phase review workflow
+│   │   ├── discourse.md  # Multi-agent debate rules
+│   │   ├── synthesis.md  # Finding aggregation guide
+│   │   └── reviewers/    # Persona definitions
+│   │       ├── principal.md
+│   │       ├── quality.md
+│   │       ├── security.md
+│   │       └── testing.md
+│   └── assets/
+│       ├── config.yaml   # Default configuration
+│       └── reviewer-template.md
+├── commands/             # Slash command definitions
+│   ├── review.md
+│   ├── doctor.md
+│   ├── history.md
+│   ├── show.md
+│   ├── reviewers.md
+│   └── post.md
+└── .claude-plugin/       # Claude Code plugin manifest
+    └── plugin.json
+```
 
 ## Installation
 
-### Option 1: CLI (Multi-Tool Support)
+### Via CLI (Recommended)
 
-Works with Claude Code, Cursor, Windsurf, and 10+ other AI tools:
+The CLI copies these assets to your project's `.ocr/` directory and configures your AI tools:
 
 ```bash
 npx @open-code-review/cli init
 ```
 
-### Option 2: Claude Code Plugin
+### Via Claude Code Plugin
 
-Native Claude Code integration with automatic updates:
+For Claude Code users who prefer plugin-based installation:
 
 ```bash
 # Add the marketplace
-/plugin marketplace add open-code-review/open-code-review
+/plugin marketplace add spencermarx/open-code-review
 
 # Install the plugin
-/plugin install open-code-review
+/plugin install open-code-review@spencermarx-open-code-review
 ```
 
-Or test locally:
+### Local Development
+
+Test the plugin locally with Claude Code:
 
 ```bash
 claude --plugin-dir ./packages/agents
 ```
 
-## Package Structure
+## Skill Architecture
 
-```
-packages/agents/
-├── .claude-plugin/
-│   └── plugin.json       # Claude Code plugin manifest
-├── commands/             # Slash commands (→ /open-code-review:review)
-│   ├── review.md
-│   ├── doctor.md
-│   └── ...
-└── skills/
-    └── ocr/              # Main OCR skill
-        ├── SKILL.md      # Core Tech Lead skill
-        ├── AGENTS.md     # AI assistant instructions
-        ├── references/   # Workflow, reviewers, etc.
-        └── assets/       # Templates, config
-```
+The `skills/ocr/SKILL.md` file defines the **Tech Lead** role—the orchestrator that:
 
-## Skills (`skills/ocr/`)
+1. Discovers project context (config, OpenSpec, reference files)
+2. Analyzes changes and identifies risk areas
+3. Selects and spawns reviewer personas
+4. Facilitates discourse between reviewers
+5. Synthesizes findings into a unified review
 
-| File | Description |
-|------|-------------|
-| `SKILL.md` | Core Tech Lead skill definition |
-| `AGENTS.md` | Instructions for AI assistants |
-| `references/workflow.md` | 8-phase review workflow |
-| `references/synthesis.md` | Finding synthesis guide |
-| `references/discourse.md` | Multi-agent discourse rules |
-| `references/reviewers/*.md` | Reviewer persona definitions |
-| `assets/config.yaml` | Configuration template (installed to `.ocr/config.yaml`) |
+Each reviewer in `references/reviewers/` is a specialized persona with distinct focus areas and anti-patterns to flag.
 
-## Commands (`commands/`)
+## Commands
 
-| Command | CLI Format | Plugin Format |
-|---------|------------|---------------|
-| `review.md` | `/ocr:review` | `/open-code-review:review` |
-| `doctor.md` | `/ocr:doctor` | `/open-code-review:doctor` |
-| `reviewers.md` | `/ocr:reviewers` | `/open-code-review:reviewers` |
-| `history.md` | `/ocr:history` | `/open-code-review:history` |
-| `show.md` | `/ocr:show` | `/open-code-review:show` |
-| `post.md` | `/ocr:post` | `/open-code-review:post` |
+| File | CLI Command | Plugin Command |
+|------|-------------|----------------|
+| `review.md` | `/ocr-review` | `/open-code-review:review` |
+| `doctor.md` | `/ocr-doctor` | `/open-code-review:doctor` |
+| `reviewers.md` | `/ocr-reviewers` | `/open-code-review:reviewers` |
+| `history.md` | `/ocr-history` | `/open-code-review:history` |
+| `show.md` | `/ocr-show` | `/open-code-review:show` |
+| `post.md` | `/ocr-post` | `/open-code-review:post` |
 
 ## License
 
-MIT
+Apache-2.0

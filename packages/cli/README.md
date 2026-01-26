@@ -1,64 +1,95 @@
 # @open-code-review/cli
 
-CLI for Open Code Review - Multi-environment setup and progress tracking.
+The command-line interface for Open Code Review. Handles multi-tool setup and provides real-time progress tracking for review sessions.
+
+## Why Use the CLI?
+
+The CLI solves two problems:
+
+1. **Multi-tool configuration**: If you use multiple AI assistants (Claude Code, Cursor, Windsurf), the CLI configures all of them with a single command—no manual copying of files between tool-specific directories.
+
+2. **Progress visibility**: AI-powered reviews take time. The `ocr progress` command shows what's happening in real-time, so you're not staring at a blank screen wondering if anything is working.
 
 ## Installation
 
 ```bash
-# Via npx (no install)
-npx @open-code-review/cli init
-
-# Via pnpm dlx
-pnpm dlx @open-code-review/cli init
-
-# Global install
+# Global install (recommended)
 npm install -g @open-code-review/cli
-ocr init
+
+# Or via pnpm
+pnpm add -g @open-code-review/cli
+
+# Or run directly without installing
+npx @open-code-review/cli init
 ```
 
 ## Commands
 
 ### `ocr init`
 
-Set up OCR for your AI coding environments.
+Initialize Open Code Review in your project.
 
 ```bash
-# Interactive mode - select tools via checkbox
+# Interactive mode — select which AI tools to configure
 ocr init
 
-# Non-interactive - specify tools
+# Non-interactive — specify tools directly
 ocr init --tools claude,windsurf,cursor
 
-# Install for all supported tools
+# Configure all detected tools
 ocr init --tools all
-
-# Skip AGENTS.md/CLAUDE.md injection
-ocr init --no-inject
 ```
+
+**What it does:**
+
+1. Creates `.ocr/` directory with skills, commands, and default config
+2. Detects installed AI tools (Claude Code, Cursor, Windsurf, etc.)
+3. Configures each tool with appropriate symlinks or copies
+4. Optionally injects OCR instructions into `AGENTS.md` / `CLAUDE.md`
 
 ### `ocr progress`
 
-Watch real-time progress of an active code review session.
+Watch a review session in real-time.
 
 ```bash
-# Auto-detect current session
+# Auto-detect the current session
 ocr progress
 
-# Specify session
-ocr progress --session 2025-01-26-feature-auth
+# Watch a specific session
+ocr progress --session 2026-01-26-feature-auth
 ```
+
+The progress display shows:
+
+- Current phase and elapsed time
+- Individual reviewer status
+- Finding counts as they're discovered
+- Overall completion percentage
 
 ## Supported AI Tools
 
-| Tool | Config Directory |
-|------|------------------|
-| Claude Code | `.claude/` |
-| Windsurf | `.windsurf/` |
-| Cursor | `.cursor/` |
-| GitHub Copilot | `.github/` |
-| Cline | `.cline/` |
-| Continue | `.continue/` |
-| And more... | See `ocr init --help` |
+| Tool | Config Directory | Detection |
+|------|------------------|-----------|
+| Claude Code | `.claude/` | Auto-detected |
+| Windsurf | `.windsurf/` | Auto-detected |
+| Cursor | `.cursor/` | Auto-detected |
+| GitHub Copilot | `.github/` | Auto-detected |
+| Cline | `.cline/` | Auto-detected |
+| Continue | `.continue/` | Auto-detected |
+
+The CLI detects which tools you have configured and offers to set up OCR for each.
+
+## After Installation
+
+Once initialized, use OCR through your AI assistant:
+
+```
+/ocr-review              # Start a code review
+/ocr-doctor              # Verify setup
+/ocr-history             # View past sessions
+```
+
+See the [main README](https://github.com/spencermarx/open-code-review) for full usage documentation.
 
 ## License
 
