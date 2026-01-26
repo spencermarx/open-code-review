@@ -1,0 +1,520 @@
+# OCR Review Workflow
+
+Complete 8-phase process for multi-agent code review.
+
+> ⚠️ **CRITICAL**: You MUST update `state.json` at each phase transition. The `ocr progress` CLI reads this file for accurate tracking.
+
+---
+
+## Phase 0: Session State Verification (ALWAYS DO FIRST)
+
+Before starting ANY work, verify the current session state to avoid duplicating work or losing progress.
+
+### Step 1: Check for existing session
+
+```bash
+# Get current branch
+BRANCH=$(git branch --show-current)
+DATE=$(date +%Y-%m-%d)
+SESSION_DIR=".ocr/sessions/${DATE}-${BRANCH}"
+
+# Check if session exists
+ls -la "$SESSION_DIR" 2>/dev/null
+```
+
+### Step 2: If `--fresh` flag provided
+
+Delete the existing session and start from scratch:
+```bash
+rm -rf "$SESSION_DIR"
+mkdir -p "$SESSION_DIR/reviews"
+```
+Then proceed to Phase 1.
+
+### Step 3: If session exists, verify state matches files
+
+Read `state.json` and verify actual files exist:
+
+| Phase Complete? | state.json check | File check |
+|-----------------|------------------|------------|
+| context | `"context"` in `completed_phases` | `context.md` exists |
+| requirements | `"requirements"` in `completed_phases` | `discovered-standards.md` exists |
+| reviews | `"reviews"` in `completed_phases` | ≥2 files in `reviews/` |
+| discourse | `"discourse"` in `completed_phases` | `discourse.md` exists |
+| synthesis | `"synthesis"` in `completed_phases` | `final.md` exists |
+
+### Step 4: Determine resume point
+
+- **state.json missing, files exist**: Recreate `state.json` based on file existence
+- **state.json exists, files match**: Resume from `current_phase`
+- **state.json and files mismatch**: Ask user which to trust
+- **No session exists**: Create session directory and start Phase 1
+
+### Step 5: Report to user
+
+Before proceeding, tell the user:
+```
+📍 Session: {session_id}
+📊 Current phase: {current_phase} (Phase {phase_number}/8)
+✅ Completed: {completed_phases}
+🔄 Action: [Starting fresh | Resuming from Phase X]
+```
+
+---
+
+## State Tracking
+
+At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
+
+```json
+{
+  "session_id": "{id}",
+  "current_phase": "reviews",
+  "phase_number": 4,
+  "completed_phases": ["context", "requirements", "analysis"],
+  "started_at": "2026-01-26T17:00:00Z",
+  "updated_at": "2026-01-26T17:05:00Z"
+}
+```
+
+**Phase values**: `context`, `requirements`, `analysis`, `reviews`, `aggregation`, `discourse`, `synthesis`, `complete`
+
+## Artifact Checklist
+
+Before proceeding to each phase, verify the required artifacts exist:
+
+| Phase | Required Before Starting | Artifact to Create |
+|-------|-------------------------|-------------------|
+| 1 | Session directory created | `discovered-standards.md`, `state.json` |
+| 2 | — | `context.md`, update `state.json` |
+| 3 | `context.md` exists | Tech Lead guidance (inline), update `state.json` |
+| 4 | `context.md` exists | `reviews/{reviewer}-{n}.md`, update `state.json` |
+| 5 | ≥2 files in `reviews/` | Aggregated findings (inline), update `state.json` |
+| 6 | Reviews complete | `discourse.md`, update `state.json` |
+| 7 | `discourse.md` exists | `final.md`, update `state.json` |
+| 8 | `final.md` exists | Present to user, set phase to `complete` |
+
+**NEVER skip directly to `final.md`** — this breaks progress tracking.
+
+## Session Storage
+
+**IMPORTANT**: Always store sessions in the project's `.ocr/sessions/` directory:
+
+```bash
+mkdir -p .ocr/sessions/{YYYY-MM-DD}-{branch}
+```
+
+This location is consistent regardless of how OCR is installed (CLI or plugin), enabling:
+- `npx @open-code-review/cli progress` to track reviews in real-time
+- `ocr history` and `ocr show` to access past sessions
+- Cross-tool compatibility (same session visible from any AI tool)
+
+## Phase 1: Context Discovery (Including Requirements)
+
+**Goal**: Build review context from config + discovered files + user requirements.
+
+### Steps
+
+**1a. Load OCR Configuration**
+
+Read `.ocr/config.yaml` for project-specific context and discovery settings:
+
+```bash
+cat .ocr/config.yaml
+```
+
+Extract:
+- `context:` — Direct project context (injected into all reviews)
+- `context_discovery.openspec` — OpenSpec integration settings
+- `context_discovery.references` — Files to discover
+- `rules:` — Per-severity review rules
+
+**1b. Pull OpenSpec Context (if enabled)**
+
+If `context_discovery.openspec.enabled: true`:
+
+```bash
+# Read OpenSpec project context
+cat openspec/config.yaml 2>/dev/null
+
+# Read merged specs for architectural context
+find openspec/specs -name "*.md" -type f 2>/dev/null
+
+# Check for active changes that affect the review
+find openspec/changes -name "*.md" -type f 2>/dev/null
+```
+
+**1c. Discover Reference Files**
+
+Read files listed in `context_discovery.references`:
+
+```bash
+# Check for AI assistant configuration
+cat AGENTS.md 2>/dev/null
+cat CLAUDE.md 2>/dev/null
+cat .cursorrules 2>/dev/null
+cat .windsurfrules 2>/dev/null
+
+# Check for contribution guidelines
+cat CONTRIBUTING.md 2>/dev/null
+```
+
+**1d. Gather User-Provided Requirements**
+
+Recognize requirements from ANY of these forms:
+- **Inline**: "review this against the requirement that..."
+- **Document reference**: "see the spec at path/to/spec.md" → Read the file
+- **Pasted text**: Bug reports, acceptance criteria, notes
+- **Ambiguous reference**: "check the auth spec" → Search for likely files or ask user
+
+If requirements provided, save to `requirements.md` in session directory.
+
+**1e. Merge Into discovered-standards.md**
+
+```markdown
+# Discovered Project Standards
+
+## OCR Config Context
+[content from .ocr/config.yaml context field]
+
+## OpenSpec Context  
+[content from openspec/config.yaml]
+
+## From: AGENTS.md
+[content]
+
+## From: CLAUDE.md
+[content]
+
+## Review Rules
+[rules from .ocr/config.yaml]
+```
+
+See `references/context-discovery.md` for detailed algorithm.
+
+### ✅ Phase 1 Checkpoint
+
+**STOP and verify before proceeding:**
+- [ ] `discovered-standards.md` written to session directory
+- [ ] If user provided requirements: `requirements.md` written
+
+---
+
+## Phase 2: Gather Change Context
+
+**Goal**: Understand what changed and why.
+
+### Steps
+
+1. Identify the review target:
+   - Staged changes: `git diff --cached`
+   - Unstaged changes: `git diff`
+   - Commit range: `git diff {range}`
+   - PR: `gh pr diff {number}`
+
+2. Gather supporting context:
+   ```bash
+   # Get the diff
+   git diff --cached > /tmp/ocr-diff.txt
+   
+   # Get recent commit messages for intent
+   git log --oneline -10
+   
+   # Get branch name
+   git branch --show-current
+   
+   # List affected files
+   git diff --cached --name-only
+   ```
+
+3. Create session directory:
+   ```bash
+   SESSION_ID="$(date +%Y-%m-%d)-$(git branch --show-current | tr '/' '-')"
+   mkdir -p .ocr/sessions/$SESSION_ID/reviews
+   ```
+
+4. Save context to `context.md`:
+   ```markdown
+   # Review Context
+   
+   **Session**: {SESSION_ID}
+   **Target**: staged changes
+   **Branch**: {branch}
+   **Files**: {count} files changed
+   
+   ## Change Summary
+   [Brief description of what changed]
+   
+   ## Affected Files
+   - path/to/file1.ts
+   - path/to/file2.ts
+   ```
+
+### ✅ Phase 2 Checkpoint
+
+**STOP and verify before proceeding:**
+- [ ] Session directory created: `.ocr/sessions/{id}/`
+- [ ] `reviews/` subdirectory created
+- [ ] `context.md` written with change summary
+
+---
+
+## Phase 3: Tech Lead Analysis
+
+**Goal**: Summarize changes, analyze against requirements, identify risks, select reviewers.
+
+### Steps
+
+1. Review requirements (if provided):
+   - What is the code SUPPOSED to do?
+   - What are the acceptance criteria?
+   - What edge cases are implied?
+
+2. Analyze the diff to understand:
+   - What functionality is being added/changed/removed?
+   - Does this align with requirements?
+   - What is the likely intent?
+   - What are the potential risk areas?
+
+3. Create dynamic guidance for reviewers:
+   ```markdown
+   ## Tech Lead Guidance
+   
+   ### Requirements Summary (if provided)
+   The changes should implement OAuth2 authentication per spec...
+   Key acceptance criteria:
+   - Users can log in via Google OAuth
+   - Session tokens expire after 24 hours
+   - Failed logins are rate-limited
+   
+   ### Change Summary
+   This PR adds user authentication via OAuth2...
+   
+   ### Requirements Assessment
+   - OAuth login: Implemented ✓
+   - Token expiry: Not visible in diff - verify implementation
+   - Rate limiting: Not found - may be missing
+   
+   ### Clarifying Questions (Tech Lead)
+   - The spec says "fast response" - what's the target latency?
+   - Should this include account lockout after N failures?
+   
+   ### Risk Areas
+   - **Security**: New auth flow needs careful review
+   - **Architecture**: New service layer pattern
+   
+   ### Focus Points
+   - Validate token handling
+   - Check for proper error handling
+   - Ensure tests cover edge cases
+   - Verify rate limiting is implemented
+   ```
+
+4. Select reviewers:
+   
+   **Default team** (always spawned):
+   - 2× Principal (holistic architecture review)
+   - 2× Quality (code quality review)
+   
+   **Optional reviewers** (added based on change type or user request):
+   | Change Type | Additional Reviewers |
+   |-------------|---------------------|
+   | Auth/Security changes | + 1× Security |
+   | API changes | + 1× Security |
+   | Logic changes | + 1× Testing |
+   | User says "add security" | + 1× Security |
+
+---
+
+## Phase 4: Spawn Reviewers
+
+**Goal**: Run each reviewer independently with configured redundancy.
+
+### Steps
+
+1. Load reviewer personas from `references/reviewers/`.
+
+2. Spawn tasks based on default team + detected needs:
+   ```
+   # Default team (always)
+   Spawn Task: principal-1
+   Spawn Task: principal-2
+   Spawn Task: quality-1
+   Spawn Task: quality-2
+   
+   # Optional (if auth/API/data changes OR user requested)
+   Spawn Task: security-1
+   
+   # Optional (if logic changes OR user requested)
+   Spawn Task: testing-1
+   ```
+
+3. Each task receives:
+   - Reviewer persona (from `references/reviewers/{name}.md`)
+   - Project context (from `discovered-standards.md`)
+   - **Requirements context (from `requirements.md` if provided)**
+   - Tech Lead guidance (including requirements assessment)
+   - The diff to review
+   - **Instruction to explore codebase with full agency**
+
+4. Save each review to `.ocr/sessions/{id}/reviews/{reviewer}-{n}.md`.
+
+See `references/reviewer-task.md` for the task template.
+
+### ✅ Phase 4 Checkpoint
+
+**STOP and verify before proceeding:**
+- [ ] At least 4 review files exist in `reviews/` directory
+- [ ] Each review file contains findings (even if "no issues found")
+- [ ] File naming follows `{reviewer}-{n}.md` pattern
+
+---
+
+## Phase 5: Aggregate Findings
+
+**Goal**: Merge redundant reviewer runs and mark confidence.
+
+### Steps
+
+1. For reviewers with redundancy > 1, compare findings:
+   - **Confirmed**: Found in all runs → Very High Confidence
+   - **Partial**: Found in some runs → Medium Confidence
+   - **Single**: Found in one run → Lower Confidence
+
+2. Deduplicate identical findings.
+
+3. Create aggregated findings per reviewer:
+   ```markdown
+   ## Security Reviewer (2 runs)
+   
+   ### Confirmed Findings (2/2 runs)
+   - SQL injection risk in query builder [VERY HIGH]
+   
+   ### Partial Findings (1/2 runs)
+   - Potential timing attack in comparison [MEDIUM]
+   ```
+
+---
+
+## Phase 6: Discourse
+
+**Goal**: Let reviewers challenge and build on each other's findings.
+
+> Skip this phase if `--quick` flag is used.
+
+### Steps
+
+1. Present all aggregated findings to each reviewer.
+
+2. Each reviewer responds using these types:
+   - **AGREE**: "I concur with Security's SQL injection finding..."
+   - **CHALLENGE**: "I disagree because the ORM sanitizes..."
+   - **CONNECT**: "This relates to my maintainability concern..."
+   - **SURFACE**: "Based on this discussion, I notice..."
+
+3. Save discourse to `.ocr/sessions/{id}/discourse.md`.
+
+See `references/discourse.md` for detailed instructions.
+
+### ✅ Phase 6 Checkpoint
+
+**STOP and verify before proceeding:**
+- [ ] `discourse.md` written to session directory
+- [ ] Contains AGREE/CHALLENGE/CONNECT/SURFACE responses
+- [ ] (Or if `--quick` flag: skip this phase, proceed to synthesis)
+
+---
+
+## Phase 7: Synthesis
+
+**Goal**: Produce final prioritized review.
+
+### Steps
+
+1. Aggregate all findings from Phase 5 and Phase 6.
+
+2. Deduplicate and merge related findings.
+
+3. Weight by confidence:
+   - Confirmed by redundancy: +2
+   - Agreed in discourse: +1
+   - Challenged and defended: +1
+   - Challenged and undefended: -1
+
+4. Categorize findings:
+   - **Must Fix**: Critical issues, security vulnerabilities
+   - **Should Fix**: Important improvements
+   - **Consider**: Nice-to-haves, style suggestions
+   - **What's Working Well**: Positive feedback
+
+5. **If requirements were provided**, include Requirements Assessment:
+   - Which requirements are fully met?
+   - Which requirements have gaps?
+   - Any deviations from requirements?
+   - Confidence level in requirements fulfillment
+
+6. **Collect and surface Clarifying Questions** from Tech Lead and all reviewers:
+   - Questions about requirements ambiguity
+   - Questions about scope boundaries
+   - Questions about edge cases
+   - Questions about intentional exclusions
+   
+   These go in a prominent "Clarifying Questions" section for stakeholder response.
+
+7. Save to `.ocr/sessions/{id}/final.md`.
+
+See `references/synthesis.md` for template.
+
+### ✅ Phase 7 Checkpoint
+
+**STOP and verify before proceeding:**
+- [ ] `final.md` written to session directory
+- [ ] Contains prioritized findings (Must Fix, Should Fix, Consider)
+- [ ] Contains Clarifying Questions section (if any)
+- [ ] If requirements provided: Contains Requirements Assessment
+
+---
+
+## Phase 8: Present
+
+**Goal**: Display results and optionally post to GitHub.
+
+### Steps
+
+1. Display the final review in a clear format:
+   ```markdown
+   # Code Review: {branch}
+   
+   ## Summary
+   {X} must-fix, {Y} should-fix, {Z} suggestions
+   
+   ## Must Fix
+   ...
+   
+   ## Should Fix
+   ...
+   ```
+
+2. If `--post` flag or PR target:
+   - Check for `gh` CLI: `which gh`
+   - Post as PR comment: `gh pr comment {number} --body-file final.md`
+
+3. Confirm session saved:
+   ```
+   Review saved to: .ocr/sessions/{id}/final.md
+   ```
+
+---
+
+## Quick Reference
+
+| Phase | Command/Action | Output |
+|-------|---------------|--------|
+| 1 | Search for context files | discovered-standards.md |
+| 2 | git diff, create session | context.md |
+| 3 | Analyze, select reviewers | guidance in context.md |
+| 4 | Spawn reviewer tasks | reviews/*.md |
+| 5 | Compare redundant runs | aggregated findings |
+| 6 | Reviewer discourse | discourse.md |
+| 7 | Synthesize and prioritize | final.md |
+| 8 | Display/post | Terminal output, GitHub |

@@ -1,0 +1,12 @@
+# OCR Session Directory .gitignore
+# Copy this to .ocr/.gitignore to exclude review sessions from git
+
+# Exclude all session data by default
+sessions/
+
+# Or selectively include/exclude:
+# sessions/*
+# !sessions/important-review/
+
+# Keep the directory structure
+!.gitignore

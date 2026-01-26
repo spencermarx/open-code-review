@@ -1,0 +1,34 @@
+{
+  "name": "open-code-review",
+  "owner": {
+    "name": "Spencer Marx",
+    "email": "spencer@aclarify.com"
+  },
+  "metadata": {
+    "description": "AI-powered multi-agent code review with specialized reviewer personas",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "open-code-review",
+      "source": "./packages/agents",
+      "description": "Multi-agent code review with Security, Performance, Quality, and Testing reviewers",
+      "version": "1.0.0",
+      "author": {
+        "name": "Spencer Marx",
+        "email": "spencer@aclarify.com"
+      },
+      "homepage": "https://github.com/spencermarx/open-code-review",
+      "repository": "https://github.com/spencermarx/open-code-review",
+      "license": "MIT",
+      "keywords": [
+        "code-review",
+        "multi-agent",
+        "ai",
+        "security",
+        "performance"
+      ],
+      "category": "developer-tools"
+    }
+  ]
+}
