@@ -1,3 +1,13 @@
+## 1.0.1 (2026-01-26)
+
+### 🩹 Fixes
+
+- revert premature cli package.json ref change ([a624843](https://github.com/spencermarx/open-code-review/commit/a624843))
+
+### ❤️ Thank You
+
+- Spencer Marx
+
 # Changelog
 
 All notable changes to Open Code Review will be documented in this file.
