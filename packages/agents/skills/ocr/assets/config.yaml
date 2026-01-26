@@ -25,6 +25,7 @@ context_discovery:
   openspec:
     enabled: true
     config: "openspec/config.yaml"      # Project conventions from OpenSpec
+    # config: "openspec/project.md"     # Use this for legacy OpenSpec projects
     specs: "openspec/specs/**/*.md"     # Merged specs for architectural context
     active_changes: "openspec/changes/**/*.md"  # In-flight change proposals
   
@@ -36,6 +37,7 @@ context_discovery:
     - ".windsurfrules"
     - ".github/copilot-instructions.md"
     - "CONTRIBUTING.md"
+    - "openspec/AGENTS.md"  # OpenSpec instructions (if present)
   
   # Additional project-specific files to include
   # additional:

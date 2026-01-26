@@ -32,10 +32,12 @@ rules:
 If `context_discovery.openspec.enabled: true`:
 
 ```
-openspec/config.yaml       # Project conventions
+{openspec.config}          # Project conventions (configurable path)
 openspec/specs/**/*.md     # Architectural specs
 openspec/changes/**/*.md   # Active change proposals
 ```
+
+**Note**: The `config` path supports both `.yaml` (extracts `context` field) and `.md` files (uses entire content). Legacy projects can set `config: "openspec/project.md"`.
 
 ### Priority 3: Reference Files
 
@@ -48,6 +50,7 @@ CLAUDE.md
 .windsurfrules
 .github/copilot-instructions.md
 CONTRIBUTING.md
+openspec/AGENTS.md
 ```
 
 ### Priority 4: Additional Files
@@ -84,13 +87,21 @@ def discover_context():
     # Priority 2: OpenSpec
     openspec = config.get('context_discovery', {}).get('openspec', {})
     if openspec.get('enabled', True):
-        if exists('openspec/config.yaml'):
-            os_config = read_yaml('openspec/config.yaml')
-            if os_config.get('context'):
+        config_path = openspec.get('config', 'openspec/config.yaml')
+        
+        if exists(config_path):
+            # Handle both .yaml and .md config files
+            if config_path.endswith('.yaml'):
+                os_config = read_yaml(config_path)
+                os_context = os_config.get('context')
+            else:
+                os_context = read(config_path)  # .md uses entire content
+            
+            if os_context:
                 discovered.append({
-                    'source': 'openspec/config.yaml',
+                    'source': config_path,
                     'priority': 2,
-                    'content': os_config['context']
+                    'content': os_context
                 })
         
         # Read specs for architectural context
@@ -120,8 +131,10 @@ def discover_context():
 # Read OCR config
 cat .ocr/config.yaml
 
-# Check OpenSpec
-cat openspec/config.yaml 2>/dev/null
+# Check OpenSpec (read config path from .ocr/config.yaml)
+# Supports both .yaml (extracts context field) and .md (uses full content)
+OPENSPEC_CONFIG=$(grep -A1 'openspec:' .ocr/config.yaml | grep 'config:' | awk '{print $2}' | tr -d '"')
+cat "${OPENSPEC_CONFIG:-openspec/config.yaml}" 2>/dev/null
 find openspec/specs -name "*.md" -type f 2>/dev/null
 
 # Check reference files

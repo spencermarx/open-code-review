@@ -133,9 +133,14 @@ Extract:
 
 If `context_discovery.openspec.enabled: true`:
 
+Read the `config` path from `.ocr/config.yaml` (defaults to `openspec/config.yaml`).
+- For `.yaml` files: extract the `context` field
+- For `.md` files: use entire content (legacy `openspec/project.md`)
+
 ```bash
-# Read OpenSpec project context
-cat openspec/config.yaml 2>/dev/null
+# Read OpenSpec project context (path from .ocr/config.yaml openspec.config)
+# Default: openspec/config.yaml, legacy: openspec/project.md
+cat openspec/config.yaml 2>/dev/null || cat openspec/project.md 2>/dev/null
 
 # Read merged specs for architectural context
 find openspec/specs -name "*.md" -type f 2>/dev/null
@@ -157,6 +162,9 @@ cat .windsurfrules 2>/dev/null
 
 # Check for contribution guidelines
 cat CONTRIBUTING.md 2>/dev/null
+
+# Check for OpenSpec instructions (legacy projects)
+cat openspec/AGENTS.md 2>/dev/null
 ```
 
 **1d. Gather User-Provided Requirements**
