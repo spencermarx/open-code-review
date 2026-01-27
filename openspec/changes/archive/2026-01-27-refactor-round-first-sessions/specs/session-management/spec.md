@@ -196,7 +196,8 @@ The system SHALL gracefully handle inconsistencies between `state.json` and file
 #### Scenario: Corrupt state.json
 - **GIVEN** `state.json` contains invalid JSON
 - **WHEN** CLI attempts to read state
-- **THEN** the system SHALL log a warning and reconstruct from filesystem
+- **THEN** the system SHOULD log a warning and MAY show "Waiting for session..." state
+- **NOTE**: Full filesystem reconstruction is a future enhancement
 
 #### Scenario: User creates empty round directory
 - **GIVEN** user manually creates `rounds/round-2/` with no contents

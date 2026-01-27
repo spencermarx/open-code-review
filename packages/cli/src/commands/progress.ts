@@ -203,13 +203,19 @@ function parseFromStateJson(
     preservedStartTime ??
     (effectiveStartTime ? new Date(effectiveStartTime).getTime() : Date.now());
 
-  const currentRound = state.current_round ?? 1;
   const roundsDir = join(sessionPath, "rounds");
-  const currentRoundDir = join(roundsDir, `round-${currentRound}`);
-  const reviewsDir = join(currentRoundDir, "reviews");
 
   // Derive rounds from filesystem (not from state.json)
   const rounds: RoundInfo[] = deriveRoundsFromFilesystem(roundsDir);
+
+  // Reconcile current_round: if state.json references a non-existent round,
+  // adjust to highest existing round
+  const highestExistingRound =
+    rounds.length > 0 ? Math.max(...rounds.map((r) => r.round)) : 1;
+  const stateRound = state.current_round ?? 1;
+  const currentRound = Math.min(stateRound, highestExistingRound);
+  const currentRoundDir = join(roundsDir, `round-${currentRound}`);
+  const reviewsDir = join(currentRoundDir, "reviews");
 
   // Parse reviewers from current round's reviews directory
   const reviewers: ReviewerStatus[] = [];

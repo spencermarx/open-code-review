@@ -64,11 +64,11 @@
 
 ## 10. Update READMEs
 - [x] 10.1 Update root `README.md` session storage section
-- [ ] 10.2 Sync `.ocr/` mirror files via `ocr update`
+- [x] 10.2 Sync `.ocr/` mirror files via `ocr update`
 
 ## 11. Validation
 - [x] 11.1 Run `openspec validate refactor-round-first-sessions --strict`
 - [x] 11.2 Manual test: Run `/ocr-review` and verify new structure created
-- [ ] 11.3 Manual test: Run `ocr progress` and verify round display
+- [x] 11.3 Manual test: Run `ocr progress` and verify round display
 - [x] 11.4 Manual test: Run `/ocr-show` and verify reads from round directory
 - [x] 11.5 Manual test: Run `/ocr-post` and verify reads from round directory

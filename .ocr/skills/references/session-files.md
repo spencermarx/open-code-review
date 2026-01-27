@@ -157,9 +157,12 @@ SESSION_ID="$(date +%Y-%m-%d)-$(git branch --show-current | tr '/' '-')"
   "phase_number": 4,
   "current_round": 1,
   "started_at": "{ISO-8601-timestamp}",
+  "round_started_at": "{ISO-8601-timestamp}",
   "updated_at": "{ISO-8601-timestamp}"
 }
 ```
+
+> **Note**: `round_started_at` is set when starting a new round (> 1) for accurate per-round timing display.
 
 **Derived from filesystem** (not stored in state.json):
 - Round count: enumerate `rounds/round-*/` directories

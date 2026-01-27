@@ -161,8 +161,16 @@ The CLI SHALL track all 8 review phases by reading `state.json` from the session
 - **THEN** it SHALL parse:
   - `current_phase` - The current workflow phase
   - `phase_number` - Numeric phase (1-8)
-  - `completed_phases` - Array of completed phase names
+  - `current_round` - Current round number
   - `started_at` - Session start timestamp
+  - `round_started_at` - Current round start timestamp (for multi-round timing)
+
+#### Scenario: Phase completion derived from state
+
+- **GIVEN** progress command displays phase checkmarks
+- **WHEN** determining which phases are complete
+- **THEN** it SHALL derive completion from `phase_number` (phases < current are complete)
+- **AND** it SHALL NOT count files or use hardcoded thresholds
 
 #### Scenario: Phase transitions
 
@@ -183,8 +191,6 @@ The CLI SHALL track all 8 review phases by reading `state.json` from the session
 - **GIVEN** OCR is running as a Claude Code plugin (not CLI installed)
 - **WHEN** the agent writes `state.json` to `.ocr/sessions/`
 - **THEN** `npx @open-code-review/cli progress` SHALL track the session correctly
-
----
 
 ### Requirement: Error Handling
 
