@@ -84,7 +84,7 @@ type SessionState = {
 };
 
 /**
- * Check if a session is active (not closed)
+ * Check if a session is active (not closed or complete)
  */
 function isSessionActive(sessionPath: string): boolean {
   const statePath = join(sessionPath, "state.json");
@@ -95,9 +95,13 @@ function isSessionActive(sessionPath: string): boolean {
   try {
     const stateContent = readFileSync(statePath, "utf-8");
     const state: StateJson = JSON.parse(stateContent);
-    // Sessions without status field are treated as active (backwards compatibility)
-    // Sessions with status: "closed" are not active
-    return state.status !== "closed";
+    // Session is NOT active if:
+    // - status is "closed", OR
+    // - current_phase is "complete" (handles legacy sessions without status field)
+    if (state.status === "closed" || state.current_phase === "complete") {
+      return false;
+    }
+    return true;
   } catch {
     return true; // Parse error = treat as active
   }
@@ -608,6 +612,25 @@ export const progressCommand = new Command("progress")
     let preservedStartTime: number | undefined;
 
     const updateDisplayImpl = () => {
+      // Re-check for latest active session if current session is complete/closed or doesn't exist
+      if (
+        !currentSessionPath ||
+        !existsSync(currentSessionPath) ||
+        !isSessionActive(currentSessionPath)
+      ) {
+        const latestActive = findLatestActiveSession(sessionsDir);
+        if (latestActive && latestActive !== currentSession) {
+          currentSession = latestActive;
+          currentSessionPath = join(sessionsDir, latestActive);
+          preservedStartTime = undefined; // Reset for new session
+          watchSession(currentSessionPath);
+        } else if (!latestActive) {
+          currentSession = null;
+          currentSessionPath = null;
+          preservedStartTime = undefined;
+        }
+      }
+
       if (currentSessionPath && existsSync(currentSessionPath)) {
         const state = parseSessionState(currentSessionPath, preservedStartTime);
         if (state) {
