@@ -85,6 +85,9 @@ export function ensureSessionsDir(targetDir: string): string {
 /**
  * Ensure a specific session directory exists, creating it JIT if needed.
  * Returns the session directory path.
+ *
+ * @note Only call for NEW sessions. For re-reviews on existing sessions,
+ * use the Round Resolution Algorithm from workflow.md instead.
  */
 export function ensureSessionDir(targetDir: string, sessionId: string): string {
   const sessionDir = join(targetDir, ".ocr", "sessions", sessionId);
@@ -93,10 +96,10 @@ export function ensureSessionDir(targetDir: string, sessionId: string): string {
     mkdirSync(sessionDir, { recursive: true });
   }
 
-  // Also ensure reviews subdirectory
-  const reviewsDir = join(sessionDir, "reviews");
-  if (!existsSync(reviewsDir)) {
-    mkdirSync(reviewsDir, { recursive: true });
+  // Also ensure rounds/round-1/reviews subdirectory for new sessions
+  const roundsDir = join(sessionDir, "rounds", "round-1", "reviews");
+  if (!existsSync(roundsDir)) {
+    mkdirSync(roundsDir, { recursive: true });
   }
 
   return sessionDir;

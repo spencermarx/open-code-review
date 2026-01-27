@@ -135,13 +135,19 @@ For complete workflow details, see `references/workflow.md`.
 
 ## Session Storage
 
-All review artifacts are stored in `.ocr/sessions/{date}-{branch}/`:
-- `context.md` - Change summary
-- `requirements.md` - User-provided requirements/specs (if any)
-- `discovered-standards.md` - Merged project context
-- `reviews/{reviewer}-{n}.md` - Individual reviews
-- `discourse.md` - Discourse results
-- `final.md` - Synthesized final review
+> **See `references/session-files.md` for the authoritative file manifest.**
+
+All review artifacts are stored in `.ocr/sessions/{YYYY-MM-DD}-{branch}/`:
+
+| File | Description |
+|------|-------------|
+| `state.json` | Session state for progress tracking |
+| `discovered-standards.md` | Merged project context (shared) |
+| `requirements.md` | User-provided requirements (shared, if any) |
+| `context.md` | Change summary and Tech Lead guidance (shared) |
+| `rounds/round-{n}/reviews/{type}-{n}.md` | Individual reviewer outputs (per-round) |
+| `rounds/round-{n}/discourse.md` | Cross-reviewer discussion (per-round) |
+| `rounds/round-{n}/final.md` | Synthesized final review (per-round) |
 
 ## Commands
 

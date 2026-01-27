@@ -60,6 +60,28 @@ The `SKILL.md` file defines the **Tech Lead** role—the orchestrator that:
 
 Each reviewer in `references/reviewers/` is a specialized persona. You can customize the built-in reviewers or add your own.
 
+## Session Structure
+
+OCR uses a **round-first architecture** for session storage:
+
+```
+.ocr/sessions/{YYYY-MM-DD}-{branch}/
+├── state.json              # Workflow state (current_round, phase)
+├── discovered-standards.md # Project context (shared across rounds)
+├── context.md              # Change analysis (shared)
+└── rounds/
+    ├── round-1/
+    │   ├── reviews/        # Individual reviewer outputs
+    │   ├── discourse.md    # Cross-reviewer discussion
+    │   └── final.md        # Synthesized review
+    └── round-2/            # Created on re-review
+        └── ...
+```
+
+**Multi-round reviews**: Running `/ocr-review` again on an existing session creates a new round (`round-2/`, `round-3/`, etc.) if the previous round is complete. This enables iterative "review → fix → re-review" workflows while preserving history.
+
+See `references/session-files.md` for the complete file manifest.
+
 ## Commands
 
 | File | Windsurf | Claude Code / Cursor |

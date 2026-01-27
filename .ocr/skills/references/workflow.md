@@ -2,7 +2,7 @@
 
 Complete 8-phase process for multi-agent code review.
 
-> ⚠️ **CRITICAL**: You MUST update `state.json` at each phase transition. The `ocr progress` CLI reads this file for accurate tracking.
+> ⚠️ **CRITICAL**: You MUST update `state.json` **BEFORE starting work** on each phase. The `ocr progress` CLI reads this file for real-time tracking. Update the `current_phase` and `phase_number` immediately when transitioning—do not wait until the phase is complete.
 
 ---
 
@@ -27,21 +27,54 @@ ls -la "$SESSION_DIR" 2>/dev/null
 Delete the existing session and start from scratch:
 ```bash
 rm -rf "$SESSION_DIR"
-mkdir -p "$SESSION_DIR/reviews"
+mkdir -p "$SESSION_DIR/rounds/round-1/reviews"
 ```
 Then proceed to Phase 1.
 
 ### Step 3: If session exists, verify state matches files
 
-Read `state.json` and verify actual files exist:
+Read `state.json` and verify actual files exist (see `references/session-files.md` for authoritative names):
 
-| Phase Complete? | state.json check | File check |
-|-----------------|------------------|------------|
-| context | `"context"` in `completed_phases` | `context.md` exists |
-| requirements | `"requirements"` in `completed_phases` | `discovered-standards.md` exists |
-| reviews | `"reviews"` in `completed_phases` | ≥2 files in `reviews/` |
-| discourse | `"discourse"` in `completed_phases` | `discourse.md` exists |
-| synthesis | `"synthesis"` in `completed_phases` | `final.md` exists |
+| Phase Complete? | File check |
+|-----------------|------------|
+| context | `discovered-standards.md` exists |
+| change-context | `context.md` exists |
+| analysis | `context.md` has Tech Lead guidance section |
+| reviews | ≥2 files in `rounds/round-{current_round}/reviews/` |
+| discourse | `rounds/round-{current_round}/discourse.md` exists |
+| synthesis | `rounds/round-{current_round}/final.md` exists |
+
+> **Note**: Phase completion is derived from filesystem (file existence). The `current_phase` field in `state.json` indicates which phase is active, not what's complete.
+
+### Step 3b: Round Resolution Algorithm
+
+Determine which round to use:
+
+```bash
+ROUNDS_DIR="$SESSION_DIR/rounds"
+
+# Count existing rounds
+if [ ! -d "$ROUNDS_DIR" ]; then
+  CURRENT_ROUND=1
+  mkdir -p "$ROUNDS_DIR/round-1/reviews"
+else
+  # Find highest round number
+  HIGHEST=$(ls -1 "$ROUNDS_DIR" | grep -E '^round-[0-9]+$' | sed 's/round-//' | sort -n | tail -1)
+  HIGHEST=${HIGHEST:-0}
+  
+  # Check if highest round is complete (has final.md)
+  if [ -f "$ROUNDS_DIR/round-$HIGHEST/final.md" ]; then
+    # Start new round
+    CURRENT_ROUND=$((HIGHEST + 1))
+    mkdir -p "$ROUNDS_DIR/round-$CURRENT_ROUND/reviews"
+  else
+    # Resume existing round
+    CURRENT_ROUND=$HIGHEST
+  fi
+fi
+```
+
+Update `state.json` with `current_round` value. **When starting a new round (CURRENT_ROUND > 1), also set `round_started_at` to the current timestamp** so the CLI progress timer shows elapsed time for the current round, not the entire session.
 
 ### Step 4: Determine resume point
 
@@ -56,7 +89,6 @@ Before proceeding, tell the user:
 ```
 📍 Session: {session_id}
 📊 Current phase: {current_phase} (Phase {phase_number}/8)
-✅ Completed: {completed_phases}
 🔄 Action: [Starting fresh | Resuming from Phase X]
 ```
 
@@ -72,32 +104,37 @@ At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
   "status": "active",
   "current_phase": "reviews",
   "phase_number": 4,
-  "completed_phases": ["context", "requirements", "analysis"],
+  "current_round": 1,
   "started_at": "{PRESERVE_ORIGINAL}",
+  "round_started_at": "{CURRENT_ISO_TIMESTAMP}",
   "updated_at": "{CURRENT_ISO_TIMESTAMP}"
 }
 ```
 
-**CRITICAL**: Generate timestamps dynamically (e.g., `date -u +"%Y-%m-%dT%H:%M:%SZ"` on macOS/Linux). Preserve `started_at` from session creation; always update `updated_at` with current time.
+**Minimal schema** — round metadata is derived from filesystem, not stored in state.json.
+
+**CRITICAL**: Generate timestamps dynamically (e.g., `date -u +"%Y-%m-%dT%H:%M:%SZ"` on macOS/Linux). Preserve `started_at` from session creation; set `round_started_at` when starting a new round (> 1); always update `updated_at` with current time.
 
 **Status values**: `active` (in progress), `closed` (complete and dismissed)
 
-**Phase values**: `context`, `requirements`, `analysis`, `reviews`, `aggregation`, `discourse`, `synthesis`, `complete`
+**Phase values**: `context`, `change-context`, `analysis`, `reviews`, `aggregation`, `discourse`, `synthesis`, `complete`
 
 ## Artifact Checklist
+
+> **See `references/session-files.md` for the authoritative file manifest.**
 
 Before proceeding to each phase, verify the required artifacts exist:
 
 | Phase | Required Before Starting | Artifact to Create |
 |-------|-------------------------|-------------------|
-| 1 | Session directory created | `discovered-standards.md`, `state.json` |
-| 2 | — | `context.md`, update `state.json` |
-| 3 | `context.md` exists | Tech Lead guidance (inline), update `state.json` |
-| 4 | `context.md` exists | `reviews/{reviewer}-{n}.md`, update `state.json` |
-| 5 | ≥2 files in `reviews/` | Aggregated findings (inline), update `state.json` |
-| 6 | Reviews complete | `discourse.md`, update `state.json` |
-| 7 | `discourse.md` exists | `final.md`, update `state.json` |
-| 8 | `final.md` exists | Present to user, set `status: "closed"` and `current_phase: "complete"` |
+| 1 | Session directory created | `state.json`, `discovered-standards.md`, `requirements.md` (if provided) |
+| 2 | `discovered-standards.md` exists | `context.md`, `rounds/round-1/reviews/` directory, update `state.json` |
+| 3 | `context.md` exists | Update `context.md` with Tech Lead guidance, update `state.json` |
+| 4 | `context.md` exists | `rounds/round-{n}/reviews/{type}-{n}.md` for each reviewer, update `state.json` |
+| 5 | ≥2 files in `rounds/round-{n}/reviews/` | Aggregated findings (inline), update `state.json` |
+| 6 | Reviews complete | `rounds/round-{n}/discourse.md`, update `state.json` |
+| 7 | `rounds/round-{n}/discourse.md` exists | `rounds/round-{n}/final.md`, update `state.json` |
+| 8 | `rounds/round-{n}/final.md` exists | Present to user, set `status: "closed"` and `current_phase: "complete"` |
 
 **NEVER skip directly to `final.md`** — this breaks progress tracking.
 
@@ -243,7 +280,7 @@ See `references/context-discovery.md` for detailed algorithm.
 3. Create session directory:
    ```bash
    SESSION_ID="$(date +%Y-%m-%d)-$(git branch --show-current | tr '/' '-')"
-   mkdir -p .ocr/sessions/$SESSION_ID/reviews
+   mkdir -p .ocr/sessions/$SESSION_ID/rounds/round-1/reviews
    ```
 
 4. Save context to `context.md`:
@@ -267,7 +304,7 @@ See `references/context-discovery.md` for detailed algorithm.
 
 **STOP and verify before proceeding:**
 - [ ] Session directory created: `.ocr/sessions/{id}/`
-- [ ] `reviews/` subdirectory created
+- [ ] `rounds/round-1/reviews/` subdirectory created
 - [ ] `context.md` written with change summary
 
 ---
@@ -370,16 +407,16 @@ See `references/context-discovery.md` for detailed algorithm.
    - The diff to review
    - **Instruction to explore codebase with full agency**
 
-4. Save each review to `.ocr/sessions/{id}/reviews/{reviewer}-{n}.md`.
+4. Save each review to `.ocr/sessions/{id}/rounds/round-{current_round}/reviews/{type}-{n}.md`.
 
 See `references/reviewer-task.md` for the task template.
 
 ### ✅ Phase 4 Checkpoint
 
 **STOP and verify before proceeding:**
-- [ ] At least 4 review files exist in `reviews/` directory
+- [ ] At least 4 review files exist in `rounds/round-{n}/reviews/` directory
 - [ ] Each review file contains findings (even if "no issues found")
-- [ ] File naming follows `{reviewer}-{n}.md` pattern
+- [ ] File naming follows `{type}-{n}.md` pattern (e.g., `principal-1.md`, `quality-2.md`)
 
 ---
 
@@ -425,14 +462,14 @@ See `references/reviewer-task.md` for the task template.
    - **CONNECT**: "This relates to my maintainability concern..."
    - **SURFACE**: "Based on this discussion, I notice..."
 
-3. Save discourse to `.ocr/sessions/{id}/discourse.md`.
+3. Save discourse to `.ocr/sessions/{id}/rounds/round-{current_round}/discourse.md`.
 
 See `references/discourse.md` for detailed instructions.
 
 ### ✅ Phase 6 Checkpoint
 
 **STOP and verify before proceeding:**
-- [ ] `discourse.md` written to session directory
+- [ ] `rounds/round-{n}/discourse.md` written to round directory
 - [ ] Contains AGREE/CHALLENGE/CONNECT/SURFACE responses
 - [ ] (Or if `--quick` flag: skip this phase, proceed to synthesis)
 
@@ -474,14 +511,14 @@ See `references/discourse.md` for detailed instructions.
    
    These go in a prominent "Clarifying Questions" section for stakeholder response.
 
-7. Save to `.ocr/sessions/{id}/final.md`.
+7. Save to `.ocr/sessions/{id}/rounds/round-{current_round}/final.md`.
 
 See `references/synthesis.md` for template.
 
 ### ✅ Phase 7 Checkpoint
 
 **STOP and verify before proceeding:**
-- [ ] `final.md` written to session directory
+- [ ] `rounds/round-{n}/final.md` written to round directory
 - [ ] Contains prioritized findings (Must Fix, Should Fix, Consider)
 - [ ] Contains Clarifying Questions section (if any)
 - [ ] If requirements provided: Contains Requirements Assessment
@@ -519,7 +556,7 @@ See `references/synthesis.md` for template.
      "status": "closed",
      "current_phase": "complete",
      "phase_number": 8,
-     "completed_phases": ["context", "requirements", "analysis", "reviews", "aggregation", "discourse", "synthesis"],
+     "current_round": 1,
      "updated_at": "{now}"
    }
    ```
@@ -532,7 +569,7 @@ See `references/synthesis.md` for template.
 4. Confirm session saved:
    ```
    ✓ Review complete
-   → .ocr/sessions/{id}/final.md
+   → .ocr/sessions/{id}/rounds/round-{n}/final.md
    ```
 
 ---
@@ -541,11 +578,11 @@ See `references/synthesis.md` for template.
 
 | Phase | Command/Action | Output |
 |-------|---------------|--------|
-| 1 | Search for context files | discovered-standards.md |
-| 2 | git diff, create session | context.md |
-| 3 | Analyze, select reviewers | guidance in context.md |
-| 4 | Spawn reviewer tasks | reviews/*.md |
+| 1 | Search for context files | `discovered-standards.md` |
+| 2 | git diff, create session | `context.md`, `rounds/round-1/reviews/` |
+| 3 | Analyze, select reviewers | guidance in `context.md` |
+| 4 | Spawn reviewer tasks | `rounds/round-{n}/reviews/*.md` |
 | 5 | Compare redundant runs | aggregated findings |
-| 6 | Reviewer discourse | discourse.md |
-| 7 | Synthesize and prioritize | final.md |
+| 6 | Reviewer discourse | `rounds/round-{n}/discourse.md` |
+| 7 | Synthesize and prioritize | `rounds/round-{n}/final.md` |
 | 8 | Display/post | Terminal output, GitHub |

@@ -1,8 +1,5 @@
-# session-management Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change add-ocr-core. Update Purpose after archive.
-## Requirements
 ### Requirement: Session Directory Structure
 
 The system SHALL store all review artifacts in a structured session directory with round-based organization.
@@ -52,22 +49,6 @@ The system SHALL store each reviewer's output in the round-specific reviews subd
   - Findings with severity and location
   - Positives
   - Questions for discourse
-
----
-
-### Requirement: Session Gitignore
-
-The system SHALL create a .gitignore to exclude session data by default.
-
-#### Scenario: Gitignore creation
-- **GIVEN** `.ocr/` directory is created
-- **WHEN** first session runs
-- **THEN** the system SHALL create `.ocr/.gitignore` containing `sessions/`
-
-#### Scenario: Optional commit
-- **GIVEN** user wants to commit review history
-- **WHEN** they remove `.ocr/.gitignore` or modify it
-- **THEN** session data MAY be committed to version control
 
 ---
 
@@ -129,22 +110,22 @@ The system SHALL maintain explicit state in `state.json` for reliable progress t
 
 ---
 
-### Requirement: Session History
+### Requirement: Session Uniqueness
 
-The system SHALL maintain accessible history of review sessions.
+The system SHALL handle multiple reviews on the same day and branch using review rounds.
 
-#### Scenario: List sessions
-- **GIVEN** multiple sessions exist in `.ocr/sessions/`
-- **WHEN** `/ocr:history` is invoked
-- **THEN** the system SHALL list sessions sorted by date (newest first)
+#### Scenario: Same-day re-review
+- **GIVEN** a session `2025-01-26-main` already exists with `rounds/round-1/` complete
+- **WHEN** another review runs on main branch on 2025-01-26
+- **THEN** the system SHALL:
+  - Create `rounds/round-2/` directory in the existing session
+  - Update `current_round` to 2 in `state.json`
+  - Preserve all `round-1/` artifacts unchanged
 
-#### Scenario: Session metadata
-- **GIVEN** a session directory exists
-- **WHEN** listing sessions
-- **THEN** the system SHALL extract metadata from `state.json`:
-  - Session ID and branch
-  - Current phase and status
-  - Start time and last update
+#### Scenario: Round history preservation
+- **GIVEN** multiple review rounds have been completed
+- **WHEN** a new round starts
+- **THEN** previous round artifacts SHALL remain unchanged and accessible
 
 ---
 
@@ -169,44 +150,7 @@ The system SHALL support retrieving and displaying past sessions from the curren
 
 ---
 
-### Requirement: Context Preservation
-
-The system SHALL preserve change context for historical reference.
-
-#### Scenario: Save change context
-- **GIVEN** review workflow gathers change information
-- **WHEN** context is collected
-- **THEN** the system SHALL save to `context.md`:
-  - Target (staged, commit range, or PR)
-  - Branch name
-  - Commit information
-  - Diff summary
-
-#### Scenario: Preserve discovered standards
-- **GIVEN** context discovery finds project files
-- **WHEN** context is merged
-- **THEN** the system SHALL save merged content to `discovered-standards.md` with source attribution
-
----
-
-### Requirement: Session Uniqueness
-
-The system SHALL handle multiple reviews on the same day and branch using review rounds.
-
-#### Scenario: Same-day re-review
-- **GIVEN** a session `2025-01-26-main` already exists with `rounds/round-1/` complete
-- **WHEN** another review runs on main branch on 2025-01-26
-- **THEN** the system SHALL:
-  - Create `rounds/round-2/` directory in the existing session
-  - Update `current_round` to 2 in `state.json`
-  - Preserve all `round-1/` artifacts unchanged
-
-#### Scenario: Round history preservation
-- **GIVEN** multiple review rounds have been completed
-- **WHEN** a new round starts
-- **THEN** previous round artifacts SHALL remain unchanged and accessible
-
----
+## ADDED Requirements
 
 ### Requirement: Round-Specific Artifacts
 
@@ -259,4 +203,3 @@ The system SHALL gracefully handle inconsistencies between `state.json` and file
 - **GIVEN** user manually creates `rounds/round-2/` with no contents
 - **WHEN** a new review is initiated
 - **THEN** the system SHALL treat the empty round as the target for the new review
-

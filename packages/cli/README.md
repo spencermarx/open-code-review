@@ -57,7 +57,9 @@ ocr progress
 ocr progress --session 2026-01-26-feature-auth
 ```
 
-Shows: current phase, elapsed time, reviewer status, finding counts, completion percentage.
+Shows: current phase, elapsed time, reviewer status, finding counts, completion percentage, and **current round**.
+
+**Multi-round support**: The progress display shows which round is active and tracks completion across rounds. When a round completes, running `/ocr-review` again starts a new round (`round-2/`, `round-3/`, etc.).
 
 ### `ocr update`
 
@@ -66,6 +68,26 @@ Update OCR skills and commands to the latest version.
 ```bash
 ocr update
 ```
+
+## Session Storage
+
+The CLI reads session state from `.ocr/sessions/{date}-{branch}/`:
+
+```
+.ocr/sessions/2026-01-26-feature-auth/
+├── state.json              # Workflow state (read by progress command)
+└── rounds/
+    ├── round-1/
+    │   ├── reviews/*.md    # Individual reviewer outputs
+    │   ├── discourse.md
+    │   └── final.md        # Completion indicator
+    └── round-2/            # Additional rounds if re-reviewed
+```
+
+The CLI derives round information from the filesystem:
+- **Round count**: Enumerated from `rounds/round-*/` directories
+- **Round completion**: Determined by `final.md` presence
+- **Reviewer progress**: Listed from `rounds/round-{n}/reviews/*.md`
 
 ## Supported AI Tools
 
