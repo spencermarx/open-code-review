@@ -29,8 +29,8 @@ This synthesis process is designed to mirror how high-performing engineering tea
 ### Step 1: Gather All Feedback
 
 Collect without filtering (see `references/session-files.md` for file names):
-- All individual reviews (`reviews/{type}-{n}.md`)
-- Discourse results (`discourse.md`) if available
+- All individual reviews from current round (`rounds/round-{n}/reviews/{type}-{n}.md`)
+- Discourse results (`rounds/round-{n}/discourse.md`) if available
 - Requirements context (`requirements.md`) if provided
 - Tech Lead's original analysis from `context.md`
 
@@ -270,13 +270,13 @@ Full reviews available in session directory:
 
 | Reviewer | Blockers | Suggestions | File |
 |----------|----------|-------------|------|
-| @principal-1 | 0 | 3 | `reviews/principal-1.md` |
-| @principal-2 | 0 | 2 | `reviews/principal-2.md` |
-| @quality-1 | 0 | 4 | `reviews/quality-1.md` |
-| @security-1 | 1 | 2 | `reviews/security-1.md` |
+| @principal-1 | 0 | 3 | `rounds/round-{n}/reviews/principal-1.md` |
+| @principal-2 | 0 | 2 | `rounds/round-{n}/reviews/principal-2.md` |
+| @quality-1 | 0 | 4 | `rounds/round-{n}/reviews/quality-1.md` |
+| @security-1 | 1 | 2 | `rounds/round-{n}/reviews/security-1.md` |
 
 **Session**: `.ocr/sessions/{session-id}/`
-**Discourse**: `discourse.md`
+**Discourse**: `rounds/round-{n}/discourse.md`
 ```
 
 ---

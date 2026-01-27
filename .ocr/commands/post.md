@@ -21,8 +21,9 @@ tags: [ocr, github, pr]
 
 1. Verify `gh` is available and authenticated
 2. Find the PR for current branch
-3. Read the session's `final.md`
-4. Post as PR comment via `gh pr comment`
+3. Determine current round from `state.json` → `current_round` (or enumerate `rounds/` directory)
+4. Read the session's `rounds/round-{current_round}/final.md`
+5. Post as PR comment via `gh pr comment`
 
 **Reference**
 - Run `/ocr-doctor` to check GitHub CLI status

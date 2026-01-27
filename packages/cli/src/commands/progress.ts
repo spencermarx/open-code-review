@@ -29,6 +29,7 @@ function debounce<T extends (...args: unknown[]) => void>(
  * Track last render state to detect context switches
  */
 let lastRenderType: "progress" | "waiting" | null = null;
+let lastLineCount = 0;
 
 /**
  * Total number of phases in the OCR review workflow
@@ -38,7 +39,7 @@ const TOTAL_PHASES = 8;
 type ReviewPhase =
   | "waiting"
   | "context"
-  | "requirements"
+  | "change-context"
   | "analysis"
   | "reviews"
   | "aggregation"
@@ -53,20 +54,29 @@ type ReviewerStatus = {
   findings: number;
 };
 
+type RoundInfo = {
+  round: number;
+  isComplete: boolean;
+  reviewers: string[];
+};
+
 type SessionState = {
   session: string;
   phase: ReviewPhase;
   phaseNumber: number;
   totalPhases: number;
-  // Phase completion flags
+  // Phase completion flags (derived from filesystem, not state.json)
   contextComplete: boolean;
-  requirementsComplete: boolean;
+  changeContextComplete: boolean;
   analysisComplete: boolean;
   reviewsComplete: boolean;
   aggregationComplete: boolean;
   discourseComplete: boolean;
   synthesisComplete: boolean;
-  // Reviewers
+  // Rounds
+  currentRound: number;
+  rounds: RoundInfo[];
+  // Reviewers (current round)
   reviewers: ReviewerStatus[];
   // Timing
   startTime: number;
@@ -148,12 +158,9 @@ type StateJson = {
   status?: SessionStatus;
   current_phase: ReviewPhase;
   phase_number: number;
-  completed_phases: string[];
-  reviewers?: {
-    assigned: string[];
-    complete: string[];
-  };
+  current_round?: number;
   started_at?: string;
+  round_started_at?: string; // When current round began (for multi-round timing)
   updated_at?: string;
 };
 
@@ -185,19 +192,28 @@ function parseFromStateJson(
   sessionPath: string,
   preservedStartTime?: number,
 ): SessionState {
+  // For multi-round sessions, prefer round_started_at over session started_at
+  // This ensures the timer shows elapsed time for the current round, not the whole session
+  const effectiveStartTime = state.round_started_at ?? state.started_at;
   const startTime =
     preservedStartTime ??
-    (state.started_at ? new Date(state.started_at).getTime() : Date.now());
+    (effectiveStartTime ? new Date(effectiveStartTime).getTime() : Date.now());
 
-  const completed = new Set(state.completed_phases);
-  const reviewsDir = join(sessionPath, "reviews");
+  const currentRound = state.current_round ?? 1;
+  const roundsDir = join(sessionPath, "rounds");
+  const currentRoundDir = join(roundsDir, `round-${currentRound}`);
+  const reviewsDir = join(currentRoundDir, "reviews");
 
-  // Parse reviewers from directory (more accurate than state file)
+  // Derive rounds from filesystem (not from state.json)
+  const rounds: RoundInfo[] = deriveRoundsFromFilesystem(roundsDir);
+
+  // Parse reviewers from current round's reviews directory
   const reviewers: ReviewerStatus[] = [];
+
   if (existsSync(reviewsDir)) {
-    const reviewFiles = readdirSync(reviewsDir).filter((f) =>
-      f.endsWith(".md"),
-    );
+    const entries = readdirSync(reviewsDir);
+    const reviewFiles = entries.filter((f) => f.endsWith(".md"));
+
     for (const file of reviewFiles) {
       const reviewPath = join(reviewsDir, file);
       const findings = countFindings(reviewPath);
@@ -210,22 +226,76 @@ function parseFromStateJson(
     }
   }
 
+  // Derive phase completion from filesystem (not from state.json)
+  // Phase 1 (context): Creates discovered-standards.md
+  const contextComplete = existsSync(
+    join(sessionPath, "discovered-standards.md"),
+  );
+  // Phase 2 (change-context): Creates context.md with change summary
+  const changeContextComplete = existsSync(join(sessionPath, "context.md"));
+  // Phase 3 (analysis): Appends Tech Lead guidance to context.md
+  // We can't distinguish Phase 2 vs 3 from filesystem alone - rely on state.json current_phase
+  const analysisComplete = changeContextComplete;
+  // Phase 4 (reviews): Complete when agent advances past phase 4
+  const reviewsComplete = state.phase_number > 4;
+  const discourseComplete = existsSync(join(currentRoundDir, "discourse.md"));
+  const synthesisComplete = existsSync(join(currentRoundDir, "final.md"));
+
   return {
     session,
     phase: state.current_phase,
     phaseNumber: state.phase_number,
     totalPhases: TOTAL_PHASES,
-    contextComplete: completed.has("context"),
-    requirementsComplete: completed.has("requirements"),
-    analysisComplete: completed.has("analysis"),
-    reviewsComplete: completed.has("reviews"),
-    aggregationComplete: completed.has("aggregation"),
-    discourseComplete: completed.has("discourse"),
-    synthesisComplete: completed.has("synthesis"),
+    contextComplete,
+    changeContextComplete,
+    analysisComplete,
+    reviewsComplete,
+    aggregationComplete: reviewsComplete, // Aggregation is inline
+    discourseComplete,
+    synthesisComplete,
+    currentRound,
+    rounds,
     reviewers,
     startTime,
     complete: state.current_phase === "complete",
   };
+}
+
+/**
+ * Derive round information from filesystem
+ */
+function deriveRoundsFromFilesystem(roundsDir: string): RoundInfo[] {
+  if (!existsSync(roundsDir)) {
+    return [];
+  }
+
+  const roundDirs = readdirSync(roundsDir)
+    .filter((d) => d.match(/^round-\d+$/))
+    .sort((a, b) => {
+      const numA = parseInt(a.replace("round-", ""));
+      const numB = parseInt(b.replace("round-", ""));
+      return numA - numB;
+    });
+
+  return roundDirs.map((dir) => {
+    const roundNum = parseInt(dir.replace("round-", ""));
+    const roundPath = join(roundsDir, dir);
+    const reviewsPath = join(roundPath, "reviews");
+    const finalPath = join(roundPath, "final.md");
+
+    // Get reviewers from reviews directory
+    const reviewers: string[] = [];
+    if (existsSync(reviewsPath)) {
+      const files = readdirSync(reviewsPath).filter((f) => f.endsWith(".md"));
+      reviewers.push(...files.map((f) => f.replace(".md", "")));
+    }
+
+    return {
+      round: roundNum,
+      isComplete: existsSync(finalPath),
+      reviewers,
+    };
+  });
 }
 
 function formatDuration(ms: number): string {
@@ -251,7 +321,7 @@ function formatDuration(ms: number): string {
 
 const PHASE_INFO: Array<{ key: ReviewPhase; label: string }> = [
   { key: "context", label: "Context Discovery" },
-  { key: "requirements", label: "Requirements Gathering" },
+  { key: "change-context", label: "Change Context" },
   { key: "analysis", label: "Tech Lead Analysis" },
   { key: "reviews", label: "Parallel Reviews" },
   { key: "aggregation", label: "Aggregate Findings" },
@@ -291,12 +361,17 @@ function renderProgress(state: SessionState): void {
   log(chalk.bold.white("  Open Code Review"));
   log();
 
-  // Session + elapsed on one line
+  // Session + round + elapsed on one line
   const elapsed = Date.now() - state.startTime;
+  const roundInfo =
+    state.currentRound > 1
+      ? chalk.cyan(` Round ${state.currentRound}`) + chalk.dim("  ·  ")
+      : "";
   log(
     chalk.dim("  ") +
       chalk.white(state.session) +
       chalk.dim("  ·  ") +
+      roundInfo +
       chalk.white(formatDuration(elapsed)),
   );
   log();
@@ -312,7 +387,7 @@ function renderProgress(state: SessionState): void {
   const phaseCompletion: Record<ReviewPhase, boolean> = {
     waiting: false,
     context: state.contextComplete,
-    requirements: state.requirementsComplete,
+    "change-context": state.changeContextComplete,
     analysis: state.analysisComplete,
     reviews: state.reviewsComplete,
     aggregation: state.aggregationComplete,
@@ -340,6 +415,10 @@ function renderProgress(state: SessionState): void {
 
     // Show reviewers inline under reviews phase
     if (phase.key === "reviews" && state.reviewers.length > 0) {
+      // Show current round label if multiple rounds
+      if (state.currentRound > 1) {
+        log(chalk.dim("    ") + chalk.cyan(`Round ${state.currentRound}`));
+      }
       const reviewerLine = state.reviewers
         .map((r) => {
           const icon =
@@ -351,6 +430,19 @@ function renderProgress(state: SessionState): void {
         })
         .join(chalk.dim("  │  "));
       log(chalk.dim("    ") + reviewerLine);
+
+      // Show previous rounds summary if any
+      if (state.rounds.length > 1) {
+        const prevRounds = state.rounds.slice(0, -1);
+        for (const round of prevRounds) {
+          const roundLabel = chalk.dim(`    Round ${round.round}`);
+          const reviewerCount = round.reviewers.length;
+          const status = round.isComplete ? chalk.green("✓") : chalk.dim("○");
+          log(
+            `${roundLabel} ${status} ${chalk.dim(`${reviewerCount} reviewers`)}`,
+          );
+        }
+      }
     }
   }
 
@@ -372,7 +464,9 @@ function renderProgress(state: SessionState): void {
     log(
       chalk.dim("    ") +
         chalk.dim("→ ") +
-        chalk.white(`.ocr/sessions/${state.session}/final.md`),
+        chalk.white(
+          `.ocr/sessions/${state.session}/rounds/round-${state.currentRound}/final.md`,
+        ),
     );
   } else {
     log(chalk.dim("  Ctrl+C to exit"));
@@ -384,6 +478,13 @@ function renderProgress(state: SessionState): void {
     logUpdate.clear();
   }
   lastRenderType = "progress";
+
+  // Pad with empty lines if current render has fewer lines than previous
+  // This prevents stale content from persisting in the terminal
+  while (lines.length < lastLineCount) {
+    lines.push("");
+  }
+  lastLineCount = lines.length;
 
   logUpdate(lines.join("\n"));
 }
@@ -416,6 +517,12 @@ function renderWaiting(): void {
     logUpdate.clear();
   }
   lastRenderType = "waiting";
+
+  // Pad with empty lines if current render has fewer lines than previous
+  while (lines.length < lastLineCount) {
+    lines.push("");
+  }
+  lastLineCount = lines.length;
 
   logUpdate(lines.join("\n"));
 }
@@ -467,10 +574,11 @@ export const progressCommand = new Command("progress")
         }
       }, 1000);
 
+      // Depth 3 needed to detect files at rounds/round-{n}/reviews/*.md
       const watcher = watch(sessionPath, {
         persistent: true,
         ignoreInitial: true,
-        depth: 2,
+        depth: 3,
       });
 
       watcher.on("all", () => {
@@ -525,10 +633,11 @@ export const progressCommand = new Command("progress")
       if (sessionWatcher) {
         sessionWatcher.close();
       }
+      // Depth 3 needed to detect files at rounds/round-{n}/reviews/*.md
       sessionWatcher = watch(sessionPath, {
         persistent: true,
         ignoreInitial: true,
-        depth: 2,
+        depth: 3,
       });
       sessionWatcher.on("all", updateDisplay);
     };

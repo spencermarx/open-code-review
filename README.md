@@ -126,26 +126,24 @@ ocr progress
 ```
 
 ```
-┌────────────────────────────────────┐
-│  Open Code Review - Live Progress  │
-└────────────────────────────────────┘
+  Open Code Review
 
-Session:  2026-01-26-main
-Elapsed:  01:23
+  2026-01-26-main  ·  Round 2  ·  1m 23s
 
-████████████░░░░░░░░ 60%
+  ━━━━━━━━━━━━━━━━────────  60%  ·  Parallel Reviews
 
-─── Workflow Phases ───
+  ✓ Context Discovery
+  ✓ Change Context
+  ✓ Tech Lead Analysis
+  ▸ Parallel Reviews
+    Round 2
+    ✓ Principal #1 2  │  ✓ Principal #2 1  │  ○ Quality #1 0  │  ○ Quality #2 0
+    Round 1 ✓ 4 reviewers
+  · Aggregate Findings
+  · Reviewer Discourse
+  · Final Synthesis
 
-✓ Context Discovery
-✓ Tech Lead Analysis
-● Parallel Reviews
-   └─ ✓ Principal #1 → 2 findings
-   └─ ○ Principal #2
-   └─ ○ Quality #1
-   └─ ○ Quality #2
-○ Reviewer Discourse
-○ Final Synthesis
+  Ctrl+C to exit
 ```
 
 **3. Review the output:**
@@ -395,19 +393,45 @@ Reviews are persisted to `.ocr/sessions/{date}-{branch}/`:
 ```
 .ocr/sessions/2026-01-26-feature-auth/
 ├── state.json              # Phase tracking (for progress CLI)
-├── discovered-standards.md # Merged project context
-├── context.md              # Change summary
-├── requirements.md         # User-provided requirements
-├── reviews/
-│   ├── principal-1.md
-│   ├── principal-2.md
-│   ├── quality-1.md
-│   └── quality-2.md
-├── discourse.md            # Cross-reviewer discussion
-└── final.md                # Synthesized final review
+├── discovered-standards.md # Merged project context (shared)
+├── context.md              # Change summary + Tech Lead guidance (shared)
+├── requirements.md         # User-provided requirements (shared, if any)
+└── rounds/
+    └── round-1/            # Review round (per-round artifacts)
+        ├── reviews/
+        │   ├── principal-1.md
+        │   ├── principal-2.md
+        │   ├── quality-1.md
+        │   └── quality-2.md
+        ├── discourse.md    # Cross-reviewer discussion
+        └── final.md        # Synthesized final review
 ```
 
 Sessions are gitignored by default.
+
+### Multi-Round Reviews
+
+OCR uses a **round-first architecture** that supports iterative review cycles:
+
+| Round | Trigger | Use Case |
+|-------|---------|----------|
+| `round-1/` | First `/ocr-review` | Initial code review |
+| `round-2/` | Second `/ocr-review` on same day/branch | Re-review after addressing feedback |
+| `round-3/` | Third `/ocr-review` | Further iteration |
+
+**How it works:**
+- Running `/ocr-review` on an existing session checks if the current round is complete (has `final.md`)
+- If complete → starts a new round (`round-2/`, `round-3/`, etc.)
+- If incomplete → resumes the current round
+- Previous rounds are **preserved**, not overwritten
+- Shared context (`discovered-standards.md`, `context.md`) is reused across rounds
+
+**When to use multiple rounds:**
+- Author addresses review feedback and wants verification
+- Scope changes mid-review require fresh analysis
+- Different reviewer team composition needed for a second pass
+
+This enables a natural "review → fix → re-review" workflow without losing history.
 
 ---
 

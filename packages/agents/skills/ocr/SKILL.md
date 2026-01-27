@@ -142,12 +142,12 @@ All review artifacts are stored in `.ocr/sessions/{YYYY-MM-DD}-{branch}/`:
 | File | Description |
 |------|-------------|
 | `state.json` | Session state for progress tracking |
-| `discovered-standards.md` | Merged project context |
-| `requirements.md` | User-provided requirements (if any) |
-| `context.md` | Change summary and Tech Lead guidance |
-| `reviews/{type}-{n}.md` | Individual reviewer outputs |
-| `discourse.md` | Cross-reviewer discussion |
-| `final.md` | Synthesized final review |
+| `discovered-standards.md` | Merged project context (shared) |
+| `requirements.md` | User-provided requirements (shared, if any) |
+| `context.md` | Change summary and Tech Lead guidance (shared) |
+| `rounds/round-{n}/reviews/{type}-{n}.md` | Individual reviewer outputs (per-round) |
+| `rounds/round-{n}/discourse.md` | Cross-reviewer discussion (per-round) |
+| `rounds/round-{n}/final.md` | Synthesized final review (per-round) |
 
 ## Commands
 

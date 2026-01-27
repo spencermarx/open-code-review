@@ -29,14 +29,14 @@ Reviewers use these fixed response types (not user-configurable):
 
 ### Step 1: Compile Individual Reviews
 
-Gather all individual review outputs (see `references/session-files.md` for naming convention):
+Gather all individual review outputs from the current round (see `references/session-files.md` for naming convention):
 ```
-reviews/principal-1.md
-reviews/principal-2.md
-reviews/quality-1.md
-reviews/quality-2.md
-reviews/security-1.md (if assigned)
-reviews/testing-1.md (if assigned)
+rounds/round-{n}/reviews/principal-1.md
+rounds/round-{n}/reviews/principal-2.md
+rounds/round-{n}/reviews/quality-1.md
+rounds/round-{n}/reviews/quality-2.md
+rounds/round-{n}/reviews/security-1.md (if assigned)
+rounds/round-{n}/reviews/testing-1.md (if assigned)
 ```
 
 ### Step 2: Present All Findings
@@ -110,7 +110,7 @@ SURFACE
 
 ### Step 5: Compile Discourse Results
 
-Save to `discourse.md`:
+Save to `rounds/round-{n}/discourse.md`:
 
 ```markdown
 # Discourse Results
