@@ -1,6 +1,6 @@
 {
-  "name": "open-code-review",
-  "description": "Multi-agent code review with specialized reviewer personas. Provides comprehensive code analysis through parallel reviews from Security, Performance, Maintainability, and other expert perspectives.",
+  "name": "ocr",
+  "description": "Shift code review quality gates left with customizable multi-agent review. Define your reviewer team composition, run parallel reviews with redundancy, and let reviewers debate findings before synthesis. Works with specs, proposals, and project standards.",
   "version": "1.0.0",
   "author": {
     "name": "Spencer Marx",
@@ -13,8 +13,8 @@
     "code-review",
     "multi-agent",
     "ai",
-    "security",
-    "performance",
-    "maintainability"
+    "spec-driven",
+    "quality",
+    "architecture"
   ]
 }

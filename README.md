@@ -5,7 +5,7 @@
 <h1 align="center">Open Code Review</h1>
 
 <p align="center">
-  <strong>Multi-agent code review for AI coding assistants</strong>
+  <strong>Customizable multi-agent code review for AI-Assisted Development</strong>
 </p>
 
 <p align="center">
@@ -17,15 +17,21 @@
 
 ## The Problem
 
-When you ask an AI assistant to "review my code," you get a single perspective. The assistant does its best, but it's one pass through the code—and that pass reflects whatever the model happens to focus on first.
+AI-assisted development is transforming how we write code. But there's a gap in the workflow: when you ask an AI to "review my code," you get a single perspective—one pass through the code, reflecting whatever the model happens to focus on first.
 
-Real code review doesn't work this way. In a healthy engineering culture, multiple reviewers examine code from different angles. A security-minded engineer catches authentication issues. A quality-focused engineer spots missing error handling. A principal engineer questions the architectural fit. And critically, these reviewers *talk to each other*—they challenge assumptions, connect related findings, and surface questions that no single reviewer would think to ask.
+**The last mile is still human-intensive.** Even with spec-driven development, code changes typically go through multiple rounds of human review and refinement before they're ready. Each iteration takes time. Each context switch costs focus.
 
-**Open Code Review brings this multi-perspective model to AI-assisted development.**
+Real code review doesn't work as a single pass. In a healthy engineering culture, multiple reviewers examine code from different angles. A security-minded engineer catches authentication issues. A quality-focused engineer spots missing error handling. A principal engineer questions the architectural fit. And critically, these reviewers *talk to each other*—they challenge assumptions, connect related findings, and surface questions that no single reviewer would think to ask.
 
-## The Mental Model
+**Open Code Review shifts this quality gate left.** By running multi-agent review *before* human review, code arrives at your team already refined—with architectural concerns, security issues, and quality gaps already surfaced and addressed. This doesn't replace human review; it makes human review faster and more focused on the things machines can't catch.
 
-OCR orchestrates a team of specialized reviewer personas, each examining your code through a distinct lens:
+## The Core Idea
+
+OCR gives you **full control over your review team composition**. You define:
+
+- **Which reviewer personas** examine your code (Principal, Quality, Security, Testing, or custom reviewers you create)
+- **How many of each** run in parallel (redundancy catches what single passes miss)
+- **What context they use** (your project standards, specs, requirements)
 
 ```
                     ┌─────────────┐
@@ -36,8 +42,8 @@ OCR orchestrates a team of specialized reviewer personas, each examining your co
          │                 │                 │
          ▼                 ▼                 ▼
 ┌─────────────────┐ ┌─────────────┐ ┌─────────────────┐
-│   Principal ×2  │ │  Quality ×2 │ │ Security/Testing│
-│   (Architecture)│ │ (Code Style)│ │   (Optional)    │
+│   Your Team     │ │  Your Team  │ │   Your Team     │
+│   Composition   │ │  Composition│ │   Composition   │
 └─────────────────┘ └─────────────┘ └─────────────────┘
          │                 │                 │
          └─────────────────┼─────────────────┘
@@ -53,13 +59,15 @@ OCR orchestrates a team of specialized reviewer personas, each examining your co
 
 **Key design decisions:**
 
-1. **Redundancy over single-pass**: Two Principal reviewers and two Quality reviewers run independently. Different prompts, different attention patterns, different catches. What one misses, the other often finds.
+1. **Customizable redundancy**: Run multiple instances of any reviewer type. Different prompts, different attention patterns, different catches. What one instance misses, another often finds.
 
-2. **Discourse before synthesis**: Before producing the final review, reviewers examine each other's findings. They AGREE with valid points, CHALLENGE questionable ones, CONNECT related issues, and SURFACE new concerns. This catches false positives and strengthens real findings.
+2. **Discourse before synthesis**: Before producing the final review, reviewers examine each other's findings. They AGREE with valid points, CHALLENGE questionable ones, CONNECT related issues, and SURFACE new concerns.
 
 3. **Requirements-aware**: Pass in a spec, proposal, or acceptance criteria—OCR evaluates the code against your stated requirements, not just general best practices.
 
 4. **Project context**: OCR discovers your project's standards from `CLAUDE.md`, `.cursorrules`, OpenSpec configs, and other common patterns. Reviewers apply *your* conventions, not generic ones.
+
+> **Note**: OCR does not replace human code review. Even the best LLMs make mistakes. The goal is to reduce the burden on human reviewers by catching issues earlier—not to eliminate human judgment from your process.
 
 ## Installation
 
@@ -82,17 +90,14 @@ The CLI detects your installed AI tools and configures each appropriately.
 
 ### Claude Code Plugin
 
-Native integration for **Claude Code** users. Automatic updates, no local installation required.
+For **Claude Code** users who prefer plugin-based installation with automatic updates:
 
 ```bash
-# Step 1: Add the marketplace
 /plugin marketplace add spencermarx/open-code-review
-
-# Step 2: Install the plugin
-/plugin install open-code-review@spencermarx-open-code-review
+/plugin install ocr@aclarify
 ```
 
-Commands are namespaced as `/open-code-review:review`, `/open-code-review:doctor`, etc.
+Plugin commands use the `/ocr:` prefix: `/ocr:review`, `/ocr:doctor`, etc.
 
 ---
 
@@ -171,46 +176,52 @@ No blocking issues.
 **1. Run a review:**
 
 ```
-/open-code-review:review
+/ocr:review
 ```
 
-**2. Check installation:**
+**2. Review against a spec file:**
 
 ```
-/open-code-review:doctor
+/ocr:review Review my staged changes against openspec/specs/cli/spec.md
 ```
 
-**3. View past reviews:**
+**3. Check installation:**
 
 ```
-/open-code-review:history
+/ocr:doctor
 ```
 
 ---
 
 ## Providing Requirements
 
-OCR is most effective when given context about what the code *should* do. Provide requirements naturally:
+OCR is most powerful when reviewing code against explicit requirements. This is where spec-driven development shines:
 
-**Reference a spec file:**
+**Review against a spec file:**
 ```
-Review my code against openspec/changes/add-auth/proposal.md
+/ocr-review Review my staged changes against openspec/specs/cli/spec.md
+```
+
+**Reference an active proposal:**
+```
+/ocr-review Check this implementation against openspec/changes/add-auth/proposal.md
 ```
 
 **Inline requirements:**
 ```
-Review this PR. Requirements:
+/ocr-review Requirements:
 - Max 100 requests per minute per user
 - Return 429 with Retry-After header when exceeded
+- Log all rate limit violations
 ```
 
 **From a ticket or bug report:**
 ```
-Review this fix for BUG-1234. The issue was that users could 
-bypass rate limiting by rotating API keys.
+/ocr-review This fixes BUG-1234 where users bypassed rate limiting by rotating API keys.
+Verify the fix prevents this attack vector.
 ```
 
-Requirements propagate to all reviewers—each evaluates the code against both their expertise *and* your stated requirements.
+Requirements propagate to all reviewers—each evaluates the code against both their expertise *and* your stated requirements. The final synthesis includes a **Requirements Verification** section showing which requirements are met, which have gaps, and any ambiguities that need clarification.
 
 ---
 
@@ -223,7 +234,7 @@ OCR follows an 8-phase workflow:
 | **1. Context Discovery** | Load `.ocr/config.yaml`, discover project standards, read OpenSpec context |
 | **2. Change Analysis** | Analyze `git diff`, understand what changed and why |
 | **3. Tech Lead Assessment** | Summarize changes, identify risk areas, select reviewer team |
-| **4. Parallel Reviews** | Each reviewer examines code independently (2× Principal, 2× Quality) |
+| **4. Parallel Reviews** | Each reviewer examines code independently (based on your team config) |
 | **5. Aggregation** | Merge findings from redundant reviewers |
 | **6. Discourse** | Reviewers challenge, validate, and connect findings |
 | **7. Synthesis** | Produce prioritized, deduplicated final review |
@@ -245,7 +256,7 @@ OCR follows an 8-phase workflow:
 | `/ocr-show [session]` | Display a specific past review |
 | `/ocr-post` | Post review as a GitHub PR comment |
 
-*For Claude Code plugin, use `/open-code-review:review`, etc.*
+*For Claude Code plugin, use `/ocr:review`, `/ocr:doctor`, etc.*
 
 ### CLI Commands
 
@@ -258,7 +269,7 @@ OCR follows an 8-phase workflow:
 
 ## Configuration
 
-After running `ocr init`, edit `.ocr/config.yaml`:
+After running `ocr init`, edit `.ocr/config.yaml` to customize your review team:
 
 ```yaml
 # Project context injected into all reviews
@@ -266,32 +277,27 @@ context: |
   Tech stack: TypeScript, React, Node.js
   Critical: All public APIs must be backwards compatible
 
-# Default reviewer team
+# Customize your reviewer team composition
 default_team:
-  principal: 2    # Architecture and design
-  quality: 2      # Code style and best practices
-  # security: 1   # Uncomment for auth/API/data changes
-  # testing: 1    # Uncomment for logic-heavy changes
+  principal: 2    # Run 2 Principal reviewers (architecture, design)
+  quality: 2      # Run 2 Quality reviewers (code style, best practices)
+  security: 1     # Run 1 Security reviewer (auth, data handling)
+  testing: 1      # Run 1 Testing reviewer (coverage, edge cases)
 
-# Context discovery settings
-context_discovery:
-  openspec:
-    enabled: true
-    config: "openspec/config.yaml"      # Or "openspec/project.md" for legacy
-    specs: "openspec/specs/**/*.md"
-    active_changes: "openspec/changes/**/*.md"
-  references:
-    - "AGENTS.md"
-    - "CLAUDE.md"
-    - ".cursorrules"
-    - "CONTRIBUTING.md"
+# Or request changes inline: "add 3 security reviewers", "skip quality"
 ```
+
+**Team composition is fully customizable:**
+- Increase redundancy for critical reviews: `principal: 4`
+- Add specialized reviewers: `security: 2`, `testing: 1`
+- Request changes via natural language: "use 3 principal reviewers and add security"
+- Create custom reviewer personas (see below)
 
 ---
 
 ## Creating Custom Reviewers
 
-Add domain-specific reviewers to `.ocr/skills/references/reviewers/`:
+Create domain-specific reviewers by adding files to `.ocr/skills/references/reviewers/`:
 
 ```markdown
 # .ocr/skills/references/reviewers/performance.md
@@ -313,7 +319,10 @@ You are a performance-focused code reviewer.
 - Synchronous operations that should be async
 ```
 
-Then reference in your config or request: "add a performance reviewer."
+Then use it:
+- In config: `default_team: { performance: 2, principal: 1 }`
+- Via natural language: "add 2 performance reviewers"
+- Mix with defaults: "use the default team plus a performance reviewer"
 
 ---
 

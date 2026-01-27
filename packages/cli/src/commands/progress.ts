@@ -7,6 +7,30 @@ import logUpdate from "log-update";
 import { requireOcrSetup, ensureSessionsDir } from "../lib/guards";
 
 /**
+ * Debounce function to prevent rapid successive calls
+ */
+function debounce<T extends (...args: unknown[]) => void>(
+  fn: T,
+  delay: number,
+): (...args: Parameters<T>) => void {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  return (...args: Parameters<T>) => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(() => {
+      fn(...args);
+      timeoutId = null;
+    }, delay);
+  };
+}
+
+/**
+ * Track last render state to detect context switches
+ */
+let lastRenderType: "progress" | "waiting" | null = null;
+
+/**
  * Total number of phases in the OCR review workflow
  */
 const TOTAL_PHASES = 8;
@@ -205,17 +229,24 @@ function parseFromStateJson(
 }
 
 function formatDuration(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
+  // Handle negative durations (future start times) gracefully
+  const absMs = Math.abs(ms);
+  const totalSeconds = Math.floor(absMs / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
+  let duration: string;
   if (hours > 0) {
-    return `${hours}h ${minutes}m ${seconds}s`;
+    duration = `${hours}h ${minutes}m ${seconds}s`;
   } else if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
+    duration = `${minutes}m ${seconds}s`;
+  } else {
+    duration = `${seconds}s`;
   }
-  return `${seconds}s`;
+
+  // Don't show negative sign - just show elapsed time
+  return duration;
 }
 
 const PHASE_INFO: Array<{ key: ReviewPhase; label: string }> = [
@@ -348,6 +379,12 @@ function renderProgress(state: SessionState): void {
   }
   log();
 
+  // Clear previous output if switching render types
+  if (lastRenderType !== "progress") {
+    logUpdate.clear();
+  }
+  lastRenderType = "progress";
+
   logUpdate(lines.join("\n"));
 }
 
@@ -373,6 +410,12 @@ function renderWaiting(): void {
   log();
   log(chalk.dim("  Ctrl+C to exit"));
   log();
+
+  // Clear previous output if switching render types
+  if (lastRenderType !== "waiting") {
+    logUpdate.clear();
+  }
+  lastRenderType = "waiting";
 
   logUpdate(lines.join("\n"));
 }
@@ -456,7 +499,7 @@ export const progressCommand = new Command("progress")
     let sessionWatcher: ReturnType<typeof watch> | null = null;
     let preservedStartTime: number | undefined;
 
-    const updateDisplay = () => {
+    const updateDisplayImpl = () => {
       if (currentSessionPath && existsSync(currentSessionPath)) {
         const state = parseSessionState(currentSessionPath, preservedStartTime);
         if (state) {
@@ -475,6 +518,9 @@ export const progressCommand = new Command("progress")
       }
     };
 
+    // Debounce updateDisplay to prevent rapid successive renders
+    const updateDisplay = debounce(updateDisplayImpl, 50);
+
     const watchSession = (sessionPath: string) => {
       if (sessionWatcher) {
         sessionWatcher.close();
@@ -487,8 +533,8 @@ export const progressCommand = new Command("progress")
       sessionWatcher.on("all", updateDisplay);
     };
 
-    // Initial display
-    updateDisplay();
+    // Initial display (call impl directly, not debounced)
+    updateDisplayImpl();
 
     if (currentSessionPath) {
       watchSession(currentSessionPath);

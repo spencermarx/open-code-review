@@ -73,10 +73,12 @@ At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
   "current_phase": "reviews",
   "phase_number": 4,
   "completed_phases": ["context", "requirements", "analysis"],
-  "started_at": "2026-01-26T17:00:00Z",
-  "updated_at": "2026-01-26T17:05:00Z"
+  "started_at": "{PRESERVE_ORIGINAL}",
+  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
 }
 ```
+
+**CRITICAL**: Generate timestamps dynamically (e.g., `date -u +"%Y-%m-%dT%H:%M:%SZ"` on macOS/Linux). Preserve `started_at` from session creation; always update `updated_at` with current time.
 
 **Status values**: `active` (in progress), `closed` (complete and dismissed)
 
