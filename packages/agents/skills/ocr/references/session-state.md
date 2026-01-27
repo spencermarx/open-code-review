@@ -22,10 +22,10 @@ This means:
 
 ```json
 {
-  "session_id": "2026-01-26-main",
-  "branch": "main",
+  "session_id": "{session-id}",
+  "branch": "{branch-name}",
   "status": "active",
-  "started_at": "2026-01-26T17:00:00Z",
+  "started_at": "{ISO-8601-TIMESTAMP}",
   "current_phase": "reviews",
   "phase_number": 4,
   "completed_phases": ["context", "requirements", "analysis"],
@@ -33,9 +33,11 @@ This means:
     "assigned": ["principal-1", "principal-2", "quality-1", "quality-2"],
     "complete": ["principal-1"]
   },
-  "updated_at": "2026-01-26T17:05:00Z"
+  "updated_at": "{ISO-8601-TIMESTAMP}"
 }
 ```
+
+**IMPORTANT**: Timestamps MUST be generated dynamically using the current time in ISO 8601 format (e.g., `new Date().toISOString()` → `"2026-01-27T09:45:00.000Z"`). Do NOT copy example timestamps.
 
 ## Session Status
 
@@ -69,13 +71,41 @@ The Tech Lead MUST update `state.json` at each phase boundary:
 
 ## Writing State
 
-When transitioning phases:
+**CRITICAL**: Always generate timestamps dynamically using the current UTC time in ISO 8601 format.
+
+### Generating Timestamps
 
 ```bash
-# Create or update state.json
-cat > .ocr/sessions/{id}/state.json << 'EOF'
+# macOS/Linux
+date -u +"%Y-%m-%dT%H:%M:%SZ"
+# Output: 2026-01-27T09:45:00Z
+
+# Windows (PowerShell)
+Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ" -AsUTC
+
+# Node.js / JavaScript
+new Date().toISOString()
+```
+
+When creating a new session (Phase 1 start):
+
+```json
 {
-  "session_id": "{id}",
+  "session_id": "{session-id}",
+  "status": "active",
+  "current_phase": "context",
+  "phase_number": 1,
+  "completed_phases": [],
+  "started_at": "{CURRENT_ISO_TIMESTAMP}",
+  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
+}
+```
+
+When transitioning phases (preserve `started_at`, update `updated_at`):
+
+```json
+{
+  "session_id": "{session-id}",
   "status": "active",
   "current_phase": "reviews",
   "phase_number": 4,
@@ -84,25 +114,23 @@ cat > .ocr/sessions/{id}/state.json << 'EOF'
     "assigned": ["principal-1", "principal-2", "quality-1", "quality-2"],
     "complete": []
   },
-  "updated_at": "2026-01-26T17:05:00Z"
+  "started_at": "{PRESERVE_ORIGINAL}",
+  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
 }
-EOF
 ```
 
 When closing a session (Phase 8 complete):
 
-```bash
-# Update state.json to close the session
-cat > .ocr/sessions/{id}/state.json << 'EOF'
+```json
 {
-  "session_id": "{id}",
+  "session_id": "{session-id}",
   "status": "closed",
   "current_phase": "complete",
   "phase_number": 8,
   "completed_phases": ["context", "requirements", "analysis", "reviews", "aggregation", "discourse", "synthesis"],
-  "updated_at": "2026-01-26T17:30:00Z"
+  "started_at": "{PRESERVE_ORIGINAL}",
+  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
 }
-EOF
 ```
 
 ## Benefits
