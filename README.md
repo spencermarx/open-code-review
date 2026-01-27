@@ -225,6 +225,68 @@ Requirements propagate to all reviewers—each evaluates the code against both t
 
 ---
 
+## Posting to GitHub PRs
+
+After completing a review, post it directly to your PR as a comment:
+
+```
+/ocr-post
+```
+
+<p align="center">
+  <img src="assets/github-code-review-example.png" alt="OCR review posted to GitHub PR" width="700" />
+</p>
+
+The posted review includes your summary, findings breakdown, and requirements assessment—giving human reviewers immediate context when they open the PR.
+
+**Prerequisites:**
+- GitHub CLI (`gh`) must be installed and authenticated
+- Your branch must have an open PR
+
+### Workflow Integration
+
+OCR fits naturally into your development workflow at multiple points:
+
+**Local pre-push hook:**
+```bash
+# .git/hooks/pre-push
+#!/bin/bash
+echo "Running OCR review..."
+# Trigger review in your AI assistant, or run via CLI
+# Post results to PR if one exists
+```
+
+**Manual quality gate:**
+```bash
+# Before requesting human review
+git push origin feature-branch
+# Open PR, then in your AI assistant:
+/ocr-review
+/ocr-post
+```
+
+**CI integration:**
+```yaml
+# .github/workflows/code-review.yml
+name: Code Review
+on: [pull_request]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run OCR
+        run: |
+          npx @open-code-review/cli init --tools claude
+          # Trigger review via API or CLI
+          # Post to PR via gh pr comment
+```
+
+> **Tip**: Running OCR before human review means reviewers see code that's already been refined—they can focus on architectural decisions and business logic rather than catching routine issues.
+
+---
+
 ## How It Works
 
 OCR follows an 8-phase workflow:
