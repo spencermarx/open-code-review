@@ -1,27 +1,17 @@
 {
-  "name": "open-code-review",
-  "description": "AI-powered multi-agent code review marketplace",
+  "name": "aclarify",
   "owner": {
     "name": "Spencer Marx",
     "url": "https://github.com/spencermarx"
   },
+  "metadata": {
+    "description": "Multi-agent code review tools for AI-assisted development"
+  },
   "plugins": [
     {
-      "name": "open-code-review",
-      "description": "Multi-agent code review that simulates a team of Principal Engineers reviewing your code from different perspectives. Includes 2× Principal Engineers + 2× Quality Engineers by default, with optional Security and Testing reviewers.",
-      "version": "1.0.0",
-      "author": {
-        "name": "Spencer Marx"
-      },
+      "name": "ocr",
       "source": "./packages/agents",
-      "category": "development",
-      "keywords": [
-        "code-review",
-        "multi-agent",
-        "ai",
-        "principal-engineer",
-        "quality"
-      ]
+      "category": "development"
     }
   ]
 }
