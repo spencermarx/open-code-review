@@ -33,12 +33,13 @@ Then proceed to Phase 1.
 
 ### Step 3: If session exists, verify state matches files
 
-Read `state.json` and verify actual files exist:
+Read `state.json` and verify actual files exist (see `references/session-files.md` for authoritative names):
 
 | Phase Complete? | state.json check | File check |
 |-----------------|------------------|------------|
-| context | `"context"` in `completed_phases` | `context.md` exists |
-| requirements | `"requirements"` in `completed_phases` | `discovered-standards.md` exists |
+| context | `"context"` in `completed_phases` | `discovered-standards.md` exists |
+| requirements | `"requirements"` in `completed_phases` | `context.md` exists |
+| analysis | `"analysis"` in `completed_phases` | `context.md` has Tech Lead guidance |
 | reviews | `"reviews"` in `completed_phases` | ≥2 files in `reviews/` |
 | discourse | `"discourse"` in `completed_phases` | `discourse.md` exists |
 | synthesis | `"synthesis"` in `completed_phases` | `final.md` exists |
@@ -86,14 +87,16 @@ At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
 
 ## Artifact Checklist
 
+> **See `references/session-files.md` for the authoritative file manifest.**
+
 Before proceeding to each phase, verify the required artifacts exist:
 
 | Phase | Required Before Starting | Artifact to Create |
 |-------|-------------------------|-------------------|
-| 1 | Session directory created | `discovered-standards.md`, `state.json` |
-| 2 | — | `context.md`, update `state.json` |
-| 3 | `context.md` exists | Tech Lead guidance (inline), update `state.json` |
-| 4 | `context.md` exists | `reviews/{reviewer}-{n}.md`, update `state.json` |
+| 1 | Session directory created | `state.json`, `discovered-standards.md`, `requirements.md` (if provided) |
+| 2 | `discovered-standards.md` exists | `context.md`, update `state.json` |
+| 3 | `context.md` exists | Update `context.md` with Tech Lead guidance, update `state.json` |
+| 4 | `context.md` exists | `reviews/{type}-{n}.md` for each reviewer, update `state.json` |
 | 5 | ≥2 files in `reviews/` | Aggregated findings (inline), update `state.json` |
 | 6 | Reviews complete | `discourse.md`, update `state.json` |
 | 7 | `discourse.md` exists | `final.md`, update `state.json` |

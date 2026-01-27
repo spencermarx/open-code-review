@@ -28,11 +28,11 @@ This synthesis process is designed to mirror how high-performing engineering tea
 
 ### Step 1: Gather All Feedback
 
-Collect without filtering:
-- All individual reviews (`reviews/*.md`)
+Collect without filtering (see `references/session-files.md` for file names):
+- All individual reviews (`reviews/{type}-{n}.md`)
 - Discourse results (`discourse.md`) if available
 - Requirements context (`requirements.md`) if provided
-- Tech Lead's original analysis
+- Tech Lead's original analysis from `context.md`
 
 **Critical**: Do not discard or "deduplicate away" any reviewer feedback at this stage.
 

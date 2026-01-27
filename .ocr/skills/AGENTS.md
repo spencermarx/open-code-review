@@ -36,6 +36,8 @@ When asked to perform a code review:
 
 - `SKILL.md` - Core skill definition and Tech Lead role
 - `references/workflow.md` - Complete 8-phase workflow
+- `references/session-files.md` - **Authoritative session file manifest**
+- `references/session-state.md` - State management and progress tracking
 - `references/synthesis.md` - How to synthesize findings
 - `references/discourse.md` - Multi-agent discourse rules
 - `references/reviewers/` - Reviewer persona definitions

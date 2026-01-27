@@ -57,17 +57,19 @@ The `ocr progress` command only auto-detects sessions with `status: "active"`. C
 
 ## Phase Transitions
 
+> **See `references/session-files.md` for the authoritative file manifest.**
+
 The Tech Lead MUST update `state.json` at each phase boundary:
 
-| Phase | When to Update |
-|-------|---------------|
-| context | After writing `discovered-standards.md` |
-| requirements | After writing `requirements.md` (if any) |
-| analysis | After writing `context.md` with guidance |
-| reviews | After spawning each reviewer (update `reviewers.complete`) |
-| discourse | After writing `discourse.md` |
-| synthesis | After writing `final.md` |
-| complete | After presenting to user, set `status: "closed"` |
+| Phase | When to Update | File Created |
+|-------|---------------|--------------|
+| context | After writing project standards | `discovered-standards.md` |
+| requirements | After writing change summary | `context.md`, `requirements.md` (if provided) |
+| analysis | After adding Tech Lead guidance | Update `context.md` |
+| reviews | After each reviewer completes | `reviews/{type}-{n}.md` |
+| discourse | After cross-reviewer discussion | `discourse.md` |
+| synthesis | After final review | `final.md` |
+| complete | After presenting to user | Set `status: "closed"` |
 
 ## Writing State
 

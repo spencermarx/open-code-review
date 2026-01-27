@@ -145,10 +145,10 @@ done
 
 ## Output Format
 
-Save discovered context to session directory:
+Save discovered context to session directory (see `references/session-files.md` for authoritative file names):
 
 ```
-.ocr/sessions/{id}/discovered-standards.md
+.ocr/sessions/{YYYY-MM-DD}-{branch}/discovered-standards.md
 ```
 
 ### Example Output

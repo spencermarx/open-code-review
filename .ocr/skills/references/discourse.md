@@ -29,14 +29,14 @@ Reviewers use these fixed response types (not user-configurable):
 
 ### Step 1: Compile Individual Reviews
 
-Gather all individual review outputs:
+Gather all individual review outputs (see `references/session-files.md` for naming convention):
 ```
 reviews/principal-1.md
 reviews/principal-2.md
 reviews/quality-1.md
 reviews/quality-2.md
-reviews/security-1.md (if included)
-reviews/testing-1.md (if included)
+reviews/security-1.md (if assigned)
+reviews/testing-1.md (if assigned)
 ```
 
 ### Step 2: Present All Findings

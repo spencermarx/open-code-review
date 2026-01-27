@@ -45,12 +45,13 @@ ls -la .ocr/sessions/$(date +%Y-%m-%d)-* 2>/dev/null
 
 ### Step 2: If session exists, verify state
 
-Read `state.json` AND verify actual files match:
+Read `state.json` AND verify actual files match (see `references/session-files.md` for authoritative names):
 
 | Phase | state.json says | Verify file exists |
 |-------|-----------------|-------------------|
-| context | `completed_phases` includes "context" | `.ocr/sessions/{id}/context.md` |
-| requirements | `completed_phases` includes "requirements" | `.ocr/sessions/{id}/discovered-standards.md` |
+| context | `completed_phases` includes "context" | `.ocr/sessions/{id}/discovered-standards.md` |
+| requirements | `completed_phases` includes "requirements" | `.ocr/sessions/{id}/context.md` |
+| analysis | `completed_phases` includes "analysis" | `.ocr/sessions/{id}/context.md` (with guidance) |
 | reviews | `completed_phases` includes "reviews" | At least 2 files in `.ocr/sessions/{id}/reviews/` |
 | discourse | `completed_phases` includes "discourse" | `.ocr/sessions/{id}/discourse.md` |
 | synthesis | `completed_phases` includes "synthesis" | `.ocr/sessions/{id}/final.md` |
@@ -67,27 +68,32 @@ Read `state.json` AND verify actual files match:
 
 ## ⚠️ CRITICAL: Required Artifacts (Must Create In Order)
 
+> **See `references/session-files.md` for the authoritative file manifest.**
+
 You MUST create these files sequentially. **Do NOT skip to `final.md`.**
 
 ```
-.ocr/sessions/{id}/
-├── context.md              # Phase 2: WRITE FIRST - change summary
+.ocr/sessions/{YYYY-MM-DD}-{branch}/
+├── state.json              # Phase 1: session state (REQUIRED)
 ├── discovered-standards.md # Phase 1: merged project standards  
+├── requirements.md         # Phase 1: user requirements (if provided)
+├── context.md              # Phase 2: change summary + Tech Lead guidance
 ├── reviews/
-│   ├── principal-1.md      # Phase 4: individual reviewer output
-│   ├── principal-2.md      # Phase 4: individual reviewer output
-│   ├── quality-1.md        # Phase 4: individual reviewer output
-│   └── {reviewer}-{n}.md    # Phase 4: individual reviewer output
+│   ├── principal-1.md      # Phase 4: reviewer output
+│   ├── principal-2.md      # Phase 4: reviewer output
+│   ├── quality-1.md        # Phase 4: reviewer output
+│   └── {reviewer}-{n}.md   # Phase 4: reviewer output
 ├── discourse.md            # Phase 6: reviewer cross-discussion
 └── final.md                # Phase 7: ONLY after all above exist
 ```
 
 ### Checkpoint Rules
 
-1. **Before Phase 4** (Spawn Reviewers): `context.md` MUST exist
-2. **Before Phase 6** (Discourse): At least 2 files in `reviews/` MUST exist
-3. **Before Phase 7** (Synthesis): `discourse.md` MUST exist
-4. **NEVER** write `final.md` without completing Phases 1-6
+1. **Before Phase 2** (Change Analysis): `discovered-standards.md` MUST exist
+2. **Before Phase 4** (Spawn Reviewers): `context.md` MUST exist
+3. **Before Phase 6** (Discourse): At least 2 files in `reviews/` MUST exist
+4. **Before Phase 7** (Synthesis): `discourse.md` MUST exist
+5. **NEVER** write `final.md` without completing Phases 1-6
 
 ### Why This Matters
 
