@@ -1,3 +1,13 @@
+## 1.1.1 (2026-01-27)
+
+### 🩹 Fixes
+
+- fix time tracking bug for sessions ([25cf05d](https://github.com/spencermarx/open-code-review/commit/25cf05d))
+
+### ❤️ Thank You
+
+- Spencer Marx
+
 ## 1.1.0 (2026-01-26)
 
 ### 🚀 Features
