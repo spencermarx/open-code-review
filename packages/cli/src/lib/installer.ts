@@ -250,12 +250,34 @@ sessions/
   };
 }
 
+/**
+ * Detect which AI tools are installed based on their config directories.
+ * Uses smarter detection for tools with ambiguous config directories.
+ */
 export function detectInstalledTools(
   targetDir: string,
   tools: AIToolConfig[],
 ): AIToolConfig[] {
   return tools.filter((tool) => {
     const configPath = join(targetDir, tool.configDir);
+
+    // Special case: GitHub Copilot uses .github/ which exists in all GitHub repos
+    // Check for copilot-instructions.md or .github/copilot/ as actual Copilot indicators
+    if (tool.id === "github-copilot") {
+      const copilotInstructions = join(
+        targetDir,
+        ".github",
+        "copilot-instructions.md",
+      );
+      const copilotDir = join(targetDir, ".github", "copilot");
+      const copilotCommands = join(targetDir, ".github", "commands");
+      return (
+        existsSync(copilotInstructions) ||
+        existsSync(copilotDir) ||
+        existsSync(copilotCommands)
+      );
+    }
+
     return existsSync(configPath);
   });
 }

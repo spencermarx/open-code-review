@@ -11,6 +11,7 @@ import {
 } from "../lib/installer.js";
 import { injectIntoProjectFiles } from "../lib/injector.js";
 import { requireOcrSetup } from "../lib/guards.js";
+import { getConfiguredToolIds } from "../lib/cli-config.js";
 
 type UpdateOptions = {
   commands?: boolean;
@@ -55,16 +56,27 @@ export const updateCommand = new Command("update")
     console.log(chalk.bold.cyan("  Open Code Review - Update"));
     console.log();
 
-    // Detect configured tools
+    // Priority order for determining tools to update:
+    // 1. CLI config (user's saved preferences from init)
+    // 2. Detect tools with existing OCR commands installed
+    // 3. Detect tools with config directories (fallback)
+    const savedToolIds = getConfiguredToolIds(targetDir);
     const configuredTools = detectConfiguredTools(targetDir);
     const installedTools = detectInstalledTools(targetDir, AI_TOOLS);
 
-    // Merge: tools with OCR commands OR tool config directories
-    const toolsToUpdate = AI_TOOLS.filter(
-      (tool) =>
-        configuredTools.some((t) => t.id === tool.id) ||
-        installedTools.some((t) => t.id === tool.id),
-    );
+    let toolsToUpdate: AIToolConfig[];
+
+    if (savedToolIds.length > 0) {
+      // Use saved preferences from CLI config
+      toolsToUpdate = AI_TOOLS.filter((tool) => savedToolIds.includes(tool.id));
+    } else {
+      // Fallback: merge tools with OCR commands OR tool config directories
+      toolsToUpdate = AI_TOOLS.filter(
+        (tool) =>
+          configuredTools.some((t) => t.id === tool.id) ||
+          installedTools.some((t) => t.id === tool.id),
+      );
+    }
 
     if (toolsToUpdate.length === 0) {
       console.log(chalk.yellow("  No configured AI tools found."));

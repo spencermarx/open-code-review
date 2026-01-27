@@ -15,6 +15,7 @@ import {
 } from "../lib/installer.js";
 import { injectIntoProjectFiles } from "../lib/injector.js";
 import { printBanner } from "../lib/banner.js";
+import { setConfiguredToolIds } from "../lib/cli-config.js";
 
 export const initCommand = new Command("init")
   .description("Set up OCR for AI coding environments")
@@ -101,6 +102,10 @@ export const initCommand = new Command("init")
       for (const result of successful) {
         console.log(`  ${chalk.green("✓")} ${result.tool.name}`);
       }
+
+      // Save configured tools to CLI config for future commands
+      const successfulToolIds = successful.map((r) => r.tool.id);
+      setConfiguredToolIds(targetDir, successfulToolIds);
     }
 
     if (failed.length > 0) {
