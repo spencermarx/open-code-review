@@ -14,9 +14,12 @@
   },
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "build": "nx build cli",
-    "test": "nx test cli",
-    "lint": "nx lint cli"
+    "build": "nx run-many -t build",
+    "build:cli": "nx build cli",
+    "test": "nx run-many -t test",
+    "test:cli": "nx test cli",
+    "lint": "nx run-many -t lint",
+    "lint:cli": "nx lint cli"
   },
   "devDependencies": {
     "@nx/esbuild": "^22.0.0",
