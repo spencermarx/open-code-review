@@ -461,6 +461,10 @@ All reviewers in `.ocr/skills/references/reviewers/` are preserved—both defaul
 
 No. Use `ocr update` instead — it remembers which tools you configured and updates them automatically. Only run `ocr init` if you want to add support for a new AI tool.
 
+**I deleted a default reviewer. How do I get it back?**
+
+Since updates preserve all existing reviewers, deleted reviewers won't be restored automatically. To restore a default reviewer, delete the entire `.ocr/` directory and run `ocr init` again, or manually copy the reviewer file from the [@open-code-review/agents](https://github.com/spencermarx/open-code-review/tree/main/packages/agents/skills/ocr/references/reviewers) package. We're planning to release a template library feature that will let you easily add reviewers on demand — stay tuned!
+
 ---
 
 ### Multi-Round Reviews
