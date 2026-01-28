@@ -1,3 +1,13 @@
+## 1.3.0 (2026-01-28)
+
+### 🚀 Features
+
+- add testing to cli package ([a1ad97a](https://github.com/spencermarx/open-code-review/commit/a1ad97a))
+
+### ❤️ Thank You
+
+- Spencer Marx
+
 ## 1.2.0 (2026-01-28)
 
 ### 🚀 Features
