@@ -9,10 +9,12 @@ agents/
 ├── skills/ocr/              # The OCR skill
 │   ├── SKILL.md             # Tech Lead orchestration logic
 │   ├── references/
-│   │   ├── workflow.md      # 8-phase review workflow
-│   │   ├── discourse.md     # Multi-agent debate rules
-│   │   ├── synthesis.md     # Finding aggregation guide
-│   │   └── reviewers/       # Persona definitions (customizable)
+│   │   ├── workflow.md        # 8-phase review workflow
+│   │   ├── session-files.md   # Authoritative file manifest
+│   │   ├── session-state.md   # State management
+│   │   ├── discourse.md       # Multi-agent debate rules
+│   │   ├── final-template.md  # Final review template
+│   │   └── reviewers/         # Persona definitions (customizable)
 │   │       ├── principal.md # Architecture, design patterns
 │   │       ├── quality.md   # Code style, best practices
 │   │       ├── security.md  # Auth, data handling, vulnerabilities
