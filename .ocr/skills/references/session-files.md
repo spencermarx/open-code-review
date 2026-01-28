@@ -192,7 +192,7 @@ Must include:
 - Clarifying Questions section
 - Individual Reviews table with file references
 
-See `references/synthesis.md` for complete template.
+See `references/final-template.md` for complete template.
 
 ## CLI Dependencies
 

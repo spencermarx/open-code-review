@@ -38,6 +38,6 @@ When asked to perform a code review:
 - `references/workflow.md` - Complete 8-phase workflow
 - `references/session-files.md` - **Authoritative session file manifest**
 - `references/session-state.md` - State management and progress tracking
-- `references/synthesis.md` - How to synthesize findings
+- `references/final-template.md` - Final review template and synthesis guide
 - `references/discourse.md` - Multi-agent discourse rules
 - `references/reviewers/` - Reviewer persona definitions

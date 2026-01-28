@@ -360,18 +360,36 @@ See `references/context-discovery.md` for detailed algorithm.
    - Verify rate limiting is implemented
    ```
 
-4. Select reviewers:
+4. **Read reviewer team from config** (REQUIRED):
+
+   ```bash
+   # MUST read default_team from .ocr/config.yaml - do NOT use hardcoded values
+   cat .ocr/config.yaml | grep -A10 'default_team:'
+   ```
    
-   **Default team** (always spawned):
-   - 2× Principal (holistic architecture review)
-   - 2× Quality (code quality review)
+   Parse the `default_team` section to determine reviewer counts:
+   ```yaml
+   # Example config - actual values come from .ocr/config.yaml
+   default_team:
+     principal: 2    # Spawn principal-1, principal-2
+     quality: 2      # Spawn quality-1, quality-2
+     # security: 1   # Commented = not spawned by default
+     testing: 1      # Spawn testing-1
+   ```
    
-   **Optional reviewers** (added based on change type or user request):
+   **Reviewer spawning rules**:
+   - For each uncommented entry in `default_team`, spawn N instances
+   - `principal: 2` → spawn `principal-1`, `principal-2`
+   - `quality: 2` → spawn `quality-1`, `quality-2`  
+   - `testing: 1` → spawn `testing-1`
+   - Commented entries (e.g., `# security: 1`) are NOT spawned unless auto-detected
+   
+   **Auto-detection** (adds reviewers beyond config):
    | Change Type | Additional Reviewers |
    |-------------|---------------------|
    | Auth/Security changes | + 1× Security |
    | API changes | + 1× Security |
-   | Logic changes | + 1× Testing |
+   | Logic changes | + 1× Testing (if not in config) |
    | User says "add security" | + 1× Security |
 
 ---
@@ -380,24 +398,40 @@ See `references/context-discovery.md` for detailed algorithm.
 
 **Goal**: Run each reviewer independently with configured redundancy.
 
+> **⚠️ CRITICAL**: Reviewer counts and types come from `.ocr/config.yaml` `default_team` section.
+> Do NOT use hardcoded defaults. Do NOT skip the `-{n}` suffix in filenames.
+> See `references/session-files.md` for authoritative file naming.
+
 ### Steps
 
 1. Load reviewer personas from `references/reviewers/`.
 
-2. Spawn tasks based on default team + detected needs:
-   ```
-   # Default team (always)
-   Spawn Task: principal-1
-   Spawn Task: principal-2
-   Spawn Task: quality-1
-   Spawn Task: quality-2
+2. **Parse `default_team` from config** (already read in Phase 3):
    
-   # Optional (if auth/API/data changes OR user requested)
-   Spawn Task: security-1
+   For each reviewer type in config, spawn the specified number of instances:
    
-   # Optional (if logic changes OR user requested)
-   Spawn Task: testing-1
+   ```bash
+   # Example: If config says principal: 2, quality: 2, testing: 1
+   # You MUST spawn exactly these reviewers with numbered suffixes:
+   
+   # From default_team.principal: 2
+   → Create: rounds/round-$CURRENT_ROUND/reviews/principal-1.md
+   → Create: rounds/round-$CURRENT_ROUND/reviews/principal-2.md
+   
+   # From default_team.quality: 2  
+   → Create: rounds/round-$CURRENT_ROUND/reviews/quality-1.md
+   → Create: rounds/round-$CURRENT_ROUND/reviews/quality-2.md
+   
+   # From default_team.testing: 1
+   → Create: rounds/round-$CURRENT_ROUND/reviews/testing-1.md
+   
+   # Auto-detected (if applicable)
+   → Create: rounds/round-$CURRENT_ROUND/reviews/security-1.md
    ```
+   
+   **File naming pattern**: `{type}-{n}.md` where n starts at 1.
+   
+   Examples: `principal-1.md`, `principal-2.md`, `quality-1.md`, `quality-2.md`, `testing-1.md`
 
 3. Each task receives:
    - Reviewer persona (from `references/reviewers/{name}.md`)
@@ -411,12 +445,38 @@ See `references/context-discovery.md` for detailed algorithm.
 
 See `references/reviewer-task.md` for the task template.
 
-### ✅ Phase 4 Checkpoint
+### ✅ Phase 4 Checkpoint — MANDATORY VALIDATION
+
+**Run this validation command before proceeding:**
+
+```bash
+# Set these based on your current session
+SESSION_DIR=".ocr/sessions/$(ls -1t .ocr/sessions/ | head -1)"
+CURRENT_ROUND=$(ls -1d "$SESSION_DIR/rounds/round-"* 2>/dev/null | wc -l | tr -d ' ')
+REVIEWS_DIR="$SESSION_DIR/rounds/round-$CURRENT_ROUND/reviews"
+
+echo "Validating: $REVIEWS_DIR"
+ls -la "$REVIEWS_DIR/"
+
+# Verify all files match {type}-{n}.md pattern (principal, quality, security, testing)
+for f in "$REVIEWS_DIR/"*.md; do
+  if [[ "$(basename "$f")" =~ ^(principal|quality|security|testing)-[0-9]+\.md$ ]]; then
+    echo "✓ $(basename "$f")"
+  else
+    echo "❌ $(basename "$f") does not match {type}-{n}.md pattern"
+    exit 1
+  fi
+done
+
+REVIEWER_COUNT=$(ls -1 "$REVIEWS_DIR/"*.md 2>/dev/null | wc -l | tr -d ' ')
+echo "✓ Found $REVIEWER_COUNT reviewer files"
+```
 
 **STOP and verify before proceeding:**
-- [ ] At least 4 review files exist in `rounds/round-{n}/reviews/` directory
-- [ ] Each review file contains findings (even if "no issues found")
-- [ ] File naming follows `{type}-{n}.md` pattern (e.g., `principal-1.md`, `quality-2.md`)
+- [ ] Review files exist for EACH entry in `default_team` config
+- [ ] File count matches sum of all `default_team` values
+- [ ] All files use `{type}-{n}.md` pattern
+- [ ] Each review file contains findings
 
 ---
 
@@ -477,7 +537,11 @@ See `references/discourse.md` for detailed instructions.
 
 ## Phase 7: Synthesis
 
-**Goal**: Produce final prioritized review.
+**Goal**: Produce final prioritized review and save to **`final.md`**.
+
+> **File**: `rounds/round-{n}/final.md`
+> **Template**: See `references/final-template.md` for format
+> **Manifest**: See `references/session-files.md` for authoritative file names
 
 ### Steps
 
@@ -511,14 +575,45 @@ See `references/discourse.md` for detailed instructions.
    
    These go in a prominent "Clarifying Questions" section for stakeholder response.
 
-7. Save to `.ocr/sessions/{id}/rounds/round-{current_round}/final.md`.
+7. **Write the final review file**:
+   ```bash
+   # OUTPUT FILE - must be exactly this path:
+   FINAL_FILE="$SESSION_DIR/rounds/round-$CURRENT_ROUND/final.md"
+   ```
+   
+   Save synthesized review to `$FINAL_FILE`.
 
-See `references/synthesis.md` for template.
+See `references/final-template.md` for the template format.
 
-### ✅ Phase 7 Checkpoint
+### ✅ Phase 7 Checkpoint — MANDATORY VALIDATION
+
+**Run this validation command before proceeding:**
+
+```bash
+# Set these based on your current session
+SESSION_DIR=".ocr/sessions/$(ls -1t .ocr/sessions/ | head -1)"
+CURRENT_ROUND=$(ls -1d "$SESSION_DIR/rounds/round-"* 2>/dev/null | wc -l | tr -d ' ')
+FINAL_FILE="$SESSION_DIR/rounds/round-$CURRENT_ROUND/final.md"
+
+# Check file exists
+if [ -f "$FINAL_FILE" ]; then
+  echo "✓ final.md exists at $FINAL_FILE"
+else
+  echo "❌ final.md not found at $FINAL_FILE"
+  exit 1
+fi
+
+# Check required content
+if grep -q '## Verdict' "$FINAL_FILE"; then
+  echo "✓ Contains Verdict section"
+else
+  echo "❌ Missing '## Verdict' section"
+  exit 1
+fi
+```
 
 **STOP and verify before proceeding:**
-- [ ] `rounds/round-{n}/final.md` written to round directory
+- [ ] `rounds/round-{n}/final.md` exists
 - [ ] Contains prioritized findings (Must Fix, Should Fix, Consider)
 - [ ] Contains Clarifying Questions section (if any)
 - [ ] If requirements provided: Contains Requirements Assessment

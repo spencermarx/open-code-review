@@ -1,6 +1,9 @@
-# Synthesis Phase
+# Final Review Template & Synthesis Guide
 
-After discourse (or individual reviews if `--quick`), synthesize all findings into a unified final review.
+> **Output file**: `rounds/round-{n}/final.md`
+> **Manifest**: See `references/session-files.md` for authoritative file names
+
+This guide describes how to synthesize all findings into a unified final review. Save output to `rounds/round-{n}/final.md`.
 
 ## Philosophy: Model Real Engineering Teams
 
