@@ -1,3 +1,18 @@
+## 1.2.0 (2026-01-28)
+
+### 🚀 Features
+
+- introduce multi-round review architecture ([c823f19](https://github.com/spencermarx/open-code-review/commit/c823f19))
+
+### 🩹 Fixes
+
+- update progress cli command to leverage correct phase states ([4b8f724](https://github.com/spencermarx/open-code-review/commit/4b8f724))
+- enhance accuracy of commands and polish progress command ([7b350ab](https://github.com/spencermarx/open-code-review/commit/7b350ab))
+
+### ❤️ Thank You
+
+- Spencer Marx
+
 ## 1.1.1 (2026-01-27)
 
 ### 🩹 Fixes
