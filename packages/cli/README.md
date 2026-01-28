@@ -63,11 +63,33 @@ Shows: current phase, elapsed time, reviewer status, finding counts, completion 
 
 ### `ocr update`
 
-Update OCR skills and commands to the latest version.
+Update OCR skills and commands to the latest version after upgrading the package.
 
 ```bash
+# Update everything
 ocr update
+
+# Preview changes first
+ocr update --dry-run
+
+# Update specific components
+ocr update --commands    # Commands only
+ocr update --skills      # Skills and references only
+ocr update --inject      # AGENTS.md/CLAUDE.md only
 ```
+
+**What it does:**
+
+1. Detects which AI tools you configured during `ocr init`
+2. Updates `.ocr/skills/` (SKILL.md, workflow, discourse rules)
+3. Updates tool-specific commands (`.windsurf/workflows/`, etc.)
+4. Updates managed blocks in `AGENTS.md` / `CLAUDE.md`
+
+**What is NOT modified:**
+
+- `.ocr/config.yaml` — Your team composition and context are preserved
+- `.ocr/skills/references/reviewers/` — All reviewers preserved (default and custom)
+- `.ocr/sessions/` — Review history remains untouched
 
 ## Session Storage
 
