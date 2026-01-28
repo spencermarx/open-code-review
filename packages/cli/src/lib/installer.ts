@@ -198,6 +198,23 @@ sessions/
     }
   }
 
+  // Preserve existing reviewers directory (users may have customized or added reviewers)
+  const reviewersDir = join(ocrSkillsDest, "references", "reviewers");
+  const existingReviewers: Map<string, Buffer> = new Map();
+  if (existsSync(reviewersDir)) {
+    try {
+      const reviewerFiles = readdirSync(reviewersDir).filter((f) =>
+        f.endsWith(".md"),
+      );
+      for (const file of reviewerFiles) {
+        const filePath = join(reviewersDir, file);
+        existingReviewers.set(file, readFileSync(filePath));
+      }
+    } catch {
+      // Ignore read errors - will use fresh templates
+    }
+  }
+
   // Install skills to .ocr/skills/
   const skillsOk = copyDirSafe(ocrSkillsSource, ocrSkillsDest);
 
@@ -230,6 +247,18 @@ sessions/
       unlinkSync(duplicateConfig);
     } catch {
       // Ignore deletion errors
+    }
+  }
+
+  // Restore preserved reviewers (all reviewers are preserved during updates)
+  if (existingReviewers.size > 0) {
+    ensureDir(reviewersDir);
+    for (const [file, content] of existingReviewers) {
+      try {
+        writeFileSync(join(reviewersDir, file), content);
+      } catch {
+        // Ignore write errors
+      }
     }
   }
 

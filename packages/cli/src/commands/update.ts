@@ -109,11 +109,13 @@ export const updateCommand = new Command("update")
         console.log(chalk.dim("  Would update:"));
         console.log(chalk.dim("    • .ocr/skills/SKILL.md (main skill)"));
         console.log(
-          chalk.dim("    • .ocr/skills/references/ (workflow, reviewers)"),
+          chalk.dim("    • .ocr/skills/references/ (workflow, discourse)"),
         );
         console.log(chalk.dim("    • .ocr/skills/assets/reviewer-template.md"));
+        console.log(chalk.dim("  Preserved (not modified):"));
+        console.log(chalk.dim("    • .ocr/config.yaml"));
         console.log(
-          chalk.dim("    • .ocr/config.yaml (preserved if customized)"),
+          chalk.dim("    • .ocr/skills/references/reviewers/ (all reviewers)"),
         );
         for (const tool of toolsToUpdate) {
           if (tool.commandStrategy === "subdirectory") {
