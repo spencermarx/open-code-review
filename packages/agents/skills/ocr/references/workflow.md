@@ -450,33 +450,26 @@ See `references/reviewer-task.md` for the task template.
 **Run this validation command before proceeding:**
 
 ```bash
-# Validate reviewer files match config
+# Set these based on your current session
+SESSION_DIR=".ocr/sessions/$(ls -1t .ocr/sessions/ | head -1)"
+CURRENT_ROUND=$(ls -1d "$SESSION_DIR/rounds/round-"* 2>/dev/null | wc -l | tr -d ' ')
 REVIEWS_DIR="$SESSION_DIR/rounds/round-$CURRENT_ROUND/reviews"
 
-# Count files and verify naming pattern
-echo "Reviewer files created:"
+echo "Validating: $REVIEWS_DIR"
 ls -la "$REVIEWS_DIR/"
 
-# Verify all files follow {type}-{n}.md pattern
+# Verify all files match {type}-{n}.md pattern (principal, quality, security, testing)
 for f in "$REVIEWS_DIR/"*.md; do
-  if [[ "$f" =~ -[0-9]+\.md$ ]]; then
-    echo "✓ $f"
+  if [[ "$(basename "$f")" =~ ^(principal|quality|security|testing)-[0-9]+\.md$ ]]; then
+    echo "✓ $(basename "$f")"
   else
-    echo "❌ $f does not match {type}-{n}.md pattern"
+    echo "❌ $(basename "$f") does not match {type}-{n}.md pattern"
     exit 1
   fi
 done
 
-# Count total reviewers
-REVIEWER_COUNT=$(ls -1 "$REVIEWS_DIR/"*.md 2>/dev/null | wc -l)
-echo "✓ Found $REVIEWER_COUNT reviewer files with correct naming"
-
-# Verify minimum count matches config
-# (Adjust expected count based on your default_team config)
-if [ "$REVIEWER_COUNT" -lt 4 ]; then
-  echo "⚠️  WARNING: Expected at least 4 reviewers based on typical config"
-  echo "   Verify this matches your .ocr/config.yaml default_team"
-fi
+REVIEWER_COUNT=$(ls -1 "$REVIEWS_DIR/"*.md 2>/dev/null | wc -l | tr -d ' ')
+echo "✓ Found $REVIEWER_COUNT reviewer files"
 ```
 
 **STOP and verify before proceeding:**
@@ -597,12 +590,24 @@ See `references/final-template.md` for the template format.
 **Run this validation command before proceeding:**
 
 ```bash
-# Validate final.md exists
+# Set these based on your current session
+SESSION_DIR=".ocr/sessions/$(ls -1t .ocr/sessions/ | head -1)"
+CURRENT_ROUND=$(ls -1d "$SESSION_DIR/rounds/round-"* 2>/dev/null | wc -l | tr -d ' ')
 FINAL_FILE="$SESSION_DIR/rounds/round-$CURRENT_ROUND/final.md"
+
+# Check file exists
 if [ -f "$FINAL_FILE" ]; then
   echo "✓ final.md exists at $FINAL_FILE"
 else
   echo "❌ final.md not found at $FINAL_FILE"
+  exit 1
+fi
+
+# Check required content
+if grep -q '## Verdict' "$FINAL_FILE"; then
+  echo "✓ Contains Verdict section"
+else
+  echo "❌ Missing '## Verdict' section"
   exit 1
 fi
 ```
