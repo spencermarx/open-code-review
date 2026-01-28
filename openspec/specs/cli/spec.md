@@ -292,10 +292,12 @@ The CLI SHALL provide an `update` command that refreshes OCR assets when the pac
 - **WHEN** the command executes
 - **THEN** .ocr/skills/ is updated including:
   - SKILL.md (main skill)
-  - references/ (workflow, reviewers)
+  - references/ (workflow, discourse)
   - assets/reviewer-template.md
   - assets/standards/README.md
-  - assets/config.yaml
+- **AND** the following are preserved (not modified):
+  - .ocr/config.yaml
+  - .ocr/skills/references/reviewers/ (all reviewer personas)
 - **AND** AGENTS.md injection is skipped
 
 #### Scenario: Update only AGENTS.md injection
@@ -323,7 +325,35 @@ The CLI SHALL provide an `update` command that refreshes OCR assets when the pac
 - **GIVEN** user runs `ocr update --dry-run`
 - **WHEN** the command executes
 - **THEN** list of files that would be updated is displayed
+- **AND** list of preserved files is displayed
 - **AND** no files are actually modified
+
+---
+
+### Requirement: Reviewer Preservation During Update
+
+The CLI SHALL preserve all reviewer persona files during updates to support future template-based reviewer management.
+
+#### Scenario: Default reviewers preserved
+
+- **GIVEN** user has existing reviewers in `.ocr/skills/references/reviewers/`
+- **WHEN** user runs `ocr update`
+- **THEN** all existing reviewer files are preserved unchanged
+- **AND** no reviewer files are overwritten with package defaults
+
+#### Scenario: Custom reviewers preserved
+
+- **GIVEN** user has created custom reviewers (e.g., `performance.md`)
+- **WHEN** user runs `ocr update`
+- **THEN** custom reviewer files are preserved
+- **AND** custom reviewers remain usable in reviews
+
+#### Scenario: Fresh install includes default reviewers
+
+- **GIVEN** user runs `ocr init` in a project without `.ocr/`
+- **WHEN** installation completes
+- **THEN** default reviewers are installed from the agents package
+- **AND** reviewers include: principal.md, quality.md, security.md, testing.md
 
 ---
 

@@ -109,11 +109,13 @@ export const updateCommand = new Command("update")
         console.log(chalk.dim("  Would update:"));
         console.log(chalk.dim("    • .ocr/skills/SKILL.md (main skill)"));
         console.log(
-          chalk.dim("    • .ocr/skills/references/ (workflow, reviewers)"),
+          chalk.dim("    • .ocr/skills/references/ (except reviewers/)"),
         );
         console.log(chalk.dim("    • .ocr/skills/assets/reviewer-template.md"));
+        console.log(chalk.dim("  Preserved (not modified):"));
+        console.log(chalk.dim("    • .ocr/config.yaml"));
         console.log(
-          chalk.dim("    • .ocr/config.yaml (preserved if customized)"),
+          chalk.dim("    • .ocr/skills/references/reviewers/ (all reviewers)"),
         );
         for (const tool of toolsToUpdate) {
           if (tool.commandStrategy === "subdirectory") {
@@ -157,6 +159,16 @@ export const updateCommand = new Command("update")
             console.log(
               `    ${chalk.red("✗")} ${result.tool.name}: ${result.error}`,
             );
+          }
+        }
+
+        // Display warnings from preservation failures
+        const allWarnings = results.flatMap((r) => r.warnings ?? []);
+        if (allWarnings.length > 0) {
+          console.log();
+          console.log(chalk.yellow("  ⚠ Warnings:"));
+          for (const warning of allWarnings) {
+            console.log(`    ${chalk.yellow("⚠")} ${warning}`);
           }
         }
 

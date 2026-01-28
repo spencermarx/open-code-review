@@ -116,6 +116,16 @@ export const initCommand = new Command("init")
       }
     }
 
+    // Display warnings from preservation failures (relevant for re-init scenarios)
+    const allWarnings = results.flatMap((r) => r.warnings ?? []);
+    if (allWarnings.length > 0) {
+      console.log();
+      console.log(chalk.yellow("⚠ Warnings:"));
+      for (const warning of allWarnings) {
+        console.log(`  ${chalk.yellow("⚠")} ${warning}`);
+      }
+    }
+
     if (options.inject && successful.length > 0) {
       console.log();
       const injectSpinner = ora(

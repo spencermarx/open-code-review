@@ -41,6 +41,14 @@ The CLI copies these assets to your project's `.ocr/` directory:
 npx @open-code-review/cli init
 ```
 
+To update after a package upgrade:
+
+```bash
+ocr update
+```
+
+This updates skills and workflow references while **preserving your `.ocr/config.yaml`** and **all reviewer personas** (both default and custom).
+
 ### Via Claude Code Plugin
 
 ```bash

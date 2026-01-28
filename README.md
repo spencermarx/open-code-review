@@ -323,6 +323,7 @@ OCR follows an 8-phase workflow:
 | Command | Description |
 |---------|-------------|
 | `ocr init` | Initialize OCR for your AI tools |
+| `ocr update` | Update skills and commands to latest version |
 | `ocr progress` | Watch review progress live |
 
 ---
@@ -408,6 +409,63 @@ Reviews are persisted to `.ocr/sessions/{date}-{branch}/`:
 ```
 
 Sessions are gitignored by default.
+
+---
+
+## Updating OCR
+
+After upgrading the `@open-code-review/cli` package, run:
+
+```bash
+ocr update
+```
+
+This updates skills, references, and commands to the latest version while **preserving your customizations**.
+
+### What Gets Updated
+
+| Asset | Updated | Notes |
+|-------|---------|-------|
+| `.ocr/skills/SKILL.md` | ✅ | Tech Lead orchestration |
+| `.ocr/skills/references/` | ✅ | Workflow, discourse rules |
+| `.ocr/skills/assets/reviewer-template.md` | ✅ | Template for custom reviewers |
+| `.ocr/skills/references/reviewers/` | ❌ | **Preserved** — all reviewer personas kept |
+| `.ocr/config.yaml` | ❌ | **Preserved** — your customizations are kept |
+| Tool commands (`.windsurf/`, etc.) | ✅ | Slash command definitions |
+| `AGENTS.md` / `CLAUDE.md` | ✅ | OCR managed blocks only |
+| `.ocr/sessions/` | ❌ | Review history untouched |
+
+### Update Options
+
+```bash
+# Preview changes without modifying files
+ocr update --dry-run
+
+# Update only specific components
+ocr update --commands    # Commands only
+ocr update --skills      # Skills and references only
+ocr update --inject      # AGENTS.md/CLAUDE.md only
+```
+
+### FAQ
+
+**Will my `.ocr/config.yaml` be overwritten?**
+
+No. Your configuration file is explicitly preserved during updates. Any customizations you've made to `context`, `default_team`, or other settings remain intact.
+
+**What about my reviewers?**
+
+All reviewers in `.ocr/skills/references/reviewers/` are preserved—both default and custom. Updates never overwrite reviewer files. This prepares for future template-based reviewer management where you'll be able to add reviewers from a curated library.
+
+**Do I need to re-run `ocr init`?**
+
+No. Use `ocr update` instead — it remembers which tools you configured and updates them automatically. Only run `ocr init` if you want to add support for a new AI tool.
+
+**I deleted a default reviewer. How do I get it back?**
+
+Since updates preserve all existing reviewers, deleted reviewers won't be restored automatically. To restore a default reviewer, delete the entire `.ocr/` directory and run `ocr init` again, or manually copy the reviewer file from the [@open-code-review/agents](https://github.com/spencermarx/open-code-review/tree/main/packages/agents/skills/ocr/references/reviewers) package. We're planning to release a template library feature that will let you easily add reviewers on demand — stay tuned!
+
+---
 
 ### Multi-Round Reviews
 

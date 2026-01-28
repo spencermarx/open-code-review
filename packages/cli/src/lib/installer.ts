@@ -17,6 +17,7 @@ export type InstallResult = {
   tool: AIToolConfig;
   success: boolean;
   error?: string;
+  warnings?: string[];
 };
 
 function ensureDir(dir: string): void {
@@ -198,6 +199,30 @@ sessions/
     }
   }
 
+  // Preserve existing reviewers directory (users may have customized or added reviewers)
+  const reviewersDir = join(ocrSkillsDest, "references", "reviewers");
+  const existingReviewers: Map<string, Buffer> = new Map();
+  const warnings: string[] = [];
+  if (existsSync(reviewersDir)) {
+    try {
+      const reviewerFiles = readdirSync(reviewersDir).filter((f) =>
+        f.endsWith(".md"),
+      );
+      for (const file of reviewerFiles) {
+        const filePath = join(reviewersDir, file);
+        try {
+          existingReviewers.set(file, readFileSync(filePath));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "unknown error";
+          warnings.push(`Could not read reviewer ${file}: ${msg}`);
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown error";
+      warnings.push(`Could not read reviewers directory: ${msg}`);
+    }
+  }
+
   // Install skills to .ocr/skills/
   const skillsOk = copyDirSafe(ocrSkillsSource, ocrSkillsDest);
 
@@ -233,6 +258,19 @@ sessions/
     }
   }
 
+  // Restore preserved reviewers (all reviewers are preserved during updates)
+  if (existingReviewers.size > 0) {
+    ensureDir(reviewersDir);
+    for (const [file, content] of existingReviewers) {
+      try {
+        writeFileSync(join(reviewersDir, file), content);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "unknown error";
+        warnings.push(`Could not restore reviewer ${file}: ${msg}`);
+      }
+    }
+  }
+
   // Install commands using tool-specific strategy
   const commandsOk = installCommandsForTool(tool, commandsSource, targetDir);
 
@@ -247,6 +285,7 @@ sessions/
   return {
     tool,
     success: true,
+    warnings: warnings.length > 0 ? warnings : undefined,
   };
 }
 
