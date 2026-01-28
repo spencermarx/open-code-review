@@ -17,6 +17,7 @@ export type InstallResult = {
   tool: AIToolConfig;
   success: boolean;
   error?: string;
+  warnings?: string[];
 };
 
 function ensureDir(dir: string): void {
@@ -201,6 +202,7 @@ sessions/
   // Preserve existing reviewers directory (users may have customized or added reviewers)
   const reviewersDir = join(ocrSkillsDest, "references", "reviewers");
   const existingReviewers: Map<string, Buffer> = new Map();
+  const warnings: string[] = [];
   if (existsSync(reviewersDir)) {
     try {
       const reviewerFiles = readdirSync(reviewersDir).filter((f) =>
@@ -208,10 +210,16 @@ sessions/
       );
       for (const file of reviewerFiles) {
         const filePath = join(reviewersDir, file);
-        existingReviewers.set(file, readFileSync(filePath));
+        try {
+          existingReviewers.set(file, readFileSync(filePath));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "unknown error";
+          warnings.push(`Could not read reviewer ${file}: ${msg}`);
+        }
       }
-    } catch {
-      // Ignore read errors - will use fresh templates
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown error";
+      warnings.push(`Could not read reviewers directory: ${msg}`);
     }
   }
 
@@ -256,8 +264,9 @@ sessions/
     for (const [file, content] of existingReviewers) {
       try {
         writeFileSync(join(reviewersDir, file), content);
-      } catch {
-        // Ignore write errors
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "unknown error";
+        warnings.push(`Could not restore reviewer ${file}: ${msg}`);
       }
     }
   }
@@ -276,6 +285,7 @@ sessions/
   return {
     tool,
     success: true,
+    warnings: warnings.length > 0 ? warnings : undefined,
   };
 }
 
