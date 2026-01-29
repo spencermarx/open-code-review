@@ -131,7 +131,7 @@ At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
   "session_id": "{id}",
   "workflow_type": "map",
   "status": "active",
-  "current_phase": "map-flow-tracing",
+  "current_phase": "flow-analysis",
   "phase_number": 3,
   "current_map_run": 1,
   "started_at": "{PRESERVE_ORIGINAL}",
@@ -403,7 +403,7 @@ See `references/map-personas/flow-analyst.md` for persona details.
 9. **Validate completeness**:
    ```bash
    EXPECTED=$(git diff --cached --name-only | wc -l)
-   MAPPED=$(grep -cE '\[ \] \|' map.md)
+   MAPPED=$(grep -oE '\| `[^`]+` \|' map.md | wc -l)
    [ "$EXPECTED" -ne "$MAPPED" ] && echo "ERROR: Missing files!"
    ```
 

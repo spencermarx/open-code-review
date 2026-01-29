@@ -48,11 +48,11 @@ The system SHALL track map generation state in `state.json` using dedicated phas
 - **WHEN** `state.json` is updated
 - **THEN** `current_phase` SHALL use map-specific values:
   - `map-context` — Context discovery for map
-  - `map-topology` — Topology analysis phase
-  - `map-flow` — Flow tracing phase
-  - `map-requirements` — Requirements mapping phase
-  - `map-synthesis` — Map synthesis phase
-  - `map-complete` — Map generation complete
+  - `topology` — Topology analysis phase
+  - `flow-analysis` — Flow tracing phase
+  - `requirements-mapping` — Requirements mapping phase
+  - `synthesis` — Map synthesis phase
+  - `complete` — Map generation complete
 
 #### Scenario: Map and review state independence
 - **GIVEN** a session has both map and review workflows
