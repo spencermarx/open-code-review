@@ -1,3 +1,14 @@
+## 1.4.0 (2026-01-29)
+
+### 🚀 Features
+
+- add openspec approve workflow for windsurf ([ef48ce8](https://github.com/spencermarx/open-code-review/commit/ef48ce8))
+- add code review maps capabilities ([6b16188](https://github.com/spencermarx/open-code-review/commit/6b16188))
+
+### ❤️ Thank You
+
+- Spencer Marx
+
 ## 1.3.1 (2026-01-28)
 
 This was a version bump only, there were no code changes.
