@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { createRequire } from "node:module";
-import type { AIToolConfig } from "./config.js";
+import type { AIToolConfig } from "./config";
 
 const require = createRequire(import.meta.url);
 

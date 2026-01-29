@@ -16,6 +16,7 @@ When asked to perform a code review:
 | Command | Description |
 |---------|-------------|
 | `/ocr-review` | Start a full code review session |
+| `/ocr-map` | Generate a Code Review Map for large changesets |
 | `/ocr-doctor` | Check OCR installation and dependencies |
 | `/ocr-reviewers` | List available reviewer personas |
 | `/ocr-history` | Show past review sessions |
@@ -35,9 +36,12 @@ When asked to perform a code review:
 ## Key Files
 
 - `SKILL.md` - Core skill definition and Tech Lead role
-- `references/workflow.md` - Complete 8-phase workflow
+- `references/workflow.md` - Complete 8-phase review workflow
+- `references/map-workflow.md` - 6-phase Code Review Map workflow
 - `references/session-files.md` - **Authoritative session file manifest**
 - `references/session-state.md` - State management and progress tracking
 - `references/final-template.md` - Final review template and synthesis guide
+- `references/map-template.md` - Code Review Map output template
 - `references/discourse.md` - Multi-agent discourse rules
 - `references/reviewers/` - Reviewer persona definitions
+- `references/map-personas/` - Map agent persona definitions

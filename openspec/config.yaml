@@ -67,6 +67,7 @@ context: |
   ### Technical Constraints
   - ESM only (no CommonJS)
   - TypeScript strict mode required
+  - Module resolution: `bundler`
   - Git 2.0+ required
   - Session data stored locally (.ocr/ directory, gitignored)
   - Cross-platform paths (use node:path APIs)

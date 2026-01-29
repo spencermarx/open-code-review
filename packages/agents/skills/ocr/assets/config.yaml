@@ -74,6 +74,18 @@ default_team:
   # testing: 1    # Auto-added for logic-heavy changes
 
 # ─────────────────────────────────────────────────────────────────────────────
+# CODE REVIEW MAP
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration for the /ocr:map command.
+# Increase agent redundancy for large codebases to improve accuracy.
+# Note: Map is a standalone tool for humans; review command works independently.
+
+# code-review-map:
+#   agents:
+#     flow_analysts: 2         # Number of Flow Analyst agents (1-10, default: 2)
+#     requirements_mappers: 2  # Number of Requirements Mapper agents (1-10, default: 2)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # OUTPUT & WORKFLOW
 # ─────────────────────────────────────────────────────────────────────────────
 

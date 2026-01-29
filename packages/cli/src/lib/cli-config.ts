@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AIToolId } from "./config.js";
+import type { AIToolId } from "./config";
 
 /**
  * CLI configuration stored in .ocr/cli-config.json
