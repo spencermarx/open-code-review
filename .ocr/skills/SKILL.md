@@ -156,6 +156,7 @@ Available slash commands (format varies by tool):
 | Action | Windsurf | Claude Code / Others |
 |--------|----------|---------------------|
 | Run code review | `/ocr-review` | `/ocr:review` |
+| Generate review map | `/ocr-map` | `/ocr:map` |
 | Check installation | `/ocr-doctor` | `/ocr:doctor` |
 | List reviewers | `/ocr-reviewers` | `/ocr:reviewers` |
 | List sessions | `/ocr-history` | `/ocr:history` |
@@ -167,3 +168,14 @@ Available slash commands (format varies by tool):
 - **Claude Code, Cursor, etc.** support subdirectories → `/ocr:command`
 
 Both invoke the same underlying functionality.
+
+### Map Command
+
+The `/ocr:map` command generates a **Code Review Map** for large, complex changesets:
+- Section-based grouping with checkboxes for tracking
+- Flow context (upstream/downstream dependencies)
+- Requirements coverage (if requirements provided)
+
+**When to use**: Extremely large changesets (multi-hour human review). For most cases, `/ocr:review` is sufficient.
+
+See `references/map-workflow.md` for complete workflow.

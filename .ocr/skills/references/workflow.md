@@ -13,8 +13,9 @@ Before starting ANY work, verify the current session state to avoid duplicating 
 ### Step 1: Check for existing session
 
 ```bash
-# Get current branch
-BRANCH=$(git branch --show-current)
+# Get current branch and sanitize for filesystem (replace / with -)
+BRANCH_RAW=$(git branch --show-current)
+BRANCH=$(echo "$BRANCH_RAW" | tr '/' '-')
 DATE=$(date +%Y-%m-%d)
 SESSION_DIR=".ocr/sessions/${DATE}-${BRANCH}"
 
@@ -113,7 +114,13 @@ At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
 
 **Minimal schema** — round metadata is derived from filesystem, not stored in state.json.
 
-**CRITICAL**: Generate timestamps dynamically (e.g., `date -u +"%Y-%m-%dT%H:%M:%SZ"` on macOS/Linux). Preserve `started_at` from session creation; set `round_started_at` when starting a new round (> 1); always update `updated_at` with current time.
+> ⚠️ **TIMESTAMP RULE**: Always use `run_command` tool to get timestamps. **Never construct them manually.**
+> ```bash
+> date -u +"%Y-%m-%dT%H:%M:%SZ"
+> ```
+> Use the **exact output** in state.json. Manual timestamps cause incorrect `ocr progress` display.
+
+**CRITICAL**: Preserve `started_at` from session creation; set `round_started_at` when starting a new round (> 1); always update `updated_at` with current time.
 
 **Status values**: `active` (in progress), `closed` (complete and dismissed)
 
@@ -315,18 +322,33 @@ See `references/context-discovery.md` for detailed algorithm.
 
 ### Steps
 
-1. Review requirements (if provided):
+1. **Check for existing map reference** (optional):
+   
+   If user explicitly references an existing map (e.g., "I've already generated a map", "use the map I created", "check the map in this session"):
+   
+   ```bash
+   # Check for existing map artifacts
+   ls .ocr/sessions/{id}/map/runs/*/map.md 2>/dev/null
+   ```
+   
+   - **If found AND user referenced it**: Read the latest `map.md` as supplementary context
+   - **If not found**: Inform user no map exists, proceed with standard review
+   - **If user did NOT reference a map**: Do NOT automatically use map artifacts
+   
+   > **Note**: Maps are orthogonal tools. Only use if explicitly referenced by user.
+
+2. Review requirements (if provided):
    - What is the code SUPPOSED to do?
    - What are the acceptance criteria?
    - What edge cases are implied?
 
-2. Analyze the diff to understand:
+3. Analyze the diff to understand:
    - What functionality is being added/changed/removed?
    - Does this align with requirements?
    - What is the likely intent?
    - What are the potential risk areas?
 
-3. Create dynamic guidance for reviewers:
+4. Create dynamic guidance for reviewers:
    ```markdown
    ## Tech Lead Guidance
    

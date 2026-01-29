@@ -23,28 +23,38 @@ This means:
 ```json
 {
   "session_id": "{session-id}",
+  "workflow_type": "review",
   "status": "active",
   "current_phase": "reviews",
   "phase_number": 4,
   "current_round": 1,
+  "current_map_run": 1,
   "started_at": "{ISO-8601-TIMESTAMP}",
   "round_started_at": "{ISO-8601-TIMESTAMP}",
+  "map_started_at": "{ISO-8601-TIMESTAMP}",
   "updated_at": "{ISO-8601-TIMESTAMP}"
 }
 ```
 
-**Minimal by design**: Round metadata is derived from the filesystem, not stored in state.json.
+**Minimal by design**: Round and map run metadata is derived from the filesystem, not stored in state.json.
 
 **Field descriptions**:
-- `started_at`: When the session was created (first `/ocr-review`)
-- `round_started_at`: When the current round began (updated when starting round > 1)
+- `workflow_type`: Current workflow type (`"review"` or `"map"`) — enables `ocr progress` to track correct workflow
+- `started_at`: When the session was created (first `/ocr-review` or `/ocr-map`)
+- `round_started_at`: When the current review round began (set when starting round ≥ 1)
+- `map_started_at`: When the current map run began (set when starting a map run)
+- `current_map_run`: Current map run number (only present during map workflow)
 - `updated_at`: Last modification time (updated at every phase transition)
+
+**CRITICAL for timing**: When starting a NEW workflow type in an existing session (e.g., starting `/ocr-map` after `/ocr-review`), you MUST set the workflow-specific start time (`map_started_at` or `round_started_at`) to the current timestamp. This ensures `ocr progress` shows accurate elapsed time for each workflow.
 
 **Derived from filesystem** (not stored):
 - Round count: enumerate `rounds/round-*/` directories
 - Round completion: check for `final.md` in round directory
 - Reviewers in round: list files in `rounds/round-{n}/reviews/`
 - Discourse complete: check for `discourse.md` in round directory
+- Map run count: enumerate `map/runs/run-*/` directories
+- Map run completion: check for `map.md` in run directory
 
 **IMPORTANT**: Timestamps MUST be generated dynamically using the current time in ISO 8601 format (e.g., `new Date().toISOString()` → `"2026-01-27T09:45:00.000Z"`). Do NOT copy example timestamps.
 
@@ -70,6 +80,8 @@ The `ocr progress` command only auto-detects sessions with `status: "active"`. C
 
 The Tech Lead MUST update `state.json` at each phase boundary:
 
+### Review Phases
+
 | Phase | When to Update | File Created |
 |-------|---------------|--------------|
 | context | After writing project standards | `discovered-standards.md` |
@@ -80,23 +92,41 @@ The Tech Lead MUST update `state.json` at each phase boundary:
 | synthesis | After final review | `rounds/round-{n}/final.md` |
 | complete | After presenting to user | Set `status: "closed"` |
 
+### Map Phases
+
+| Phase | When to Update | File Created |
+|-------|---------------|--------------|
+| map-context | After writing project standards | `discovered-standards.md` (shared) |
+| topology | After topology analysis | `map/runs/run-{n}/topology.md` |
+| flow-analysis | After flow analysis | `map/runs/run-{n}/flow-analysis.md` |
+| requirements-mapping | After requirements mapping | `map/runs/run-{n}/requirements-mapping.md` |
+| synthesis | After map generation | `map/runs/run-{n}/map.md` |
+| complete | After presenting map | Keep `status: "active"` (session continues) |
+
 ## Writing State
 
-**CRITICAL**: Always generate timestamps dynamically using the current UTC time in ISO 8601 format.
+**CRITICAL**: Always generate timestamps using a **tool call** — never construct them manually.
 
 ### Generating Timestamps
 
+> ⚠️ **NEVER** write timestamps manually (e.g., `"2026-01-29T22:00:00Z"`). Always use a tool call to get the current time. Manual timestamps risk timezone errors, typos, and incorrect elapsed time display.
+
+**Required approach**: Use `run_command` tool to execute:
+
 ```bash
-# macOS/Linux
+# macOS/Linux — USE THIS
 date -u +"%Y-%m-%dT%H:%M:%SZ"
 # Output: 2026-01-27T09:45:00Z
-
-# Windows (PowerShell)
-Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ" -AsUTC
-
-# Node.js / JavaScript
-new Date().toISOString()
 ```
+
+**Example tool call** (do this before writing state.json):
+```
+run_command: date -u +"%Y-%m-%dT%H:%M:%SZ"
+```
+
+Then use the **exact output** as the timestamp value in state.json.
+
+**Why this matters**: The `ocr progress` command calculates elapsed time from these timestamps. If a timestamp is incorrect (wrong timezone, future time, etc.), the progress display will show wrong/counting-down times.
 
 When creating a new session (Phase 1 start):
 
@@ -117,14 +147,34 @@ When transitioning phases (preserve `started_at`, update `updated_at`):
 ```json
 {
   "session_id": "{session-id}",
+  "workflow_type": "review",
   "status": "active",
   "current_phase": "reviews",
   "phase_number": 4,
   "current_round": 1,
   "started_at": "{PRESERVE_ORIGINAL}",
+  "round_started_at": "{PRESERVE_ORIGINAL}",
   "updated_at": "{CURRENT_ISO_TIMESTAMP}"
 }
 ```
+
+When starting a map workflow (new map run or first map in session):
+
+```json
+{
+  "session_id": "{session-id}",
+  "workflow_type": "map",
+  "status": "active",
+  "current_phase": "map-context",
+  "phase_number": 1,
+  "current_map_run": 1,
+  "started_at": "{PRESERVE_ORIGINAL_OR_SET_IF_NEW}",
+  "map_started_at": "{CURRENT_ISO_TIMESTAMP}",
+  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
+}
+```
+
+**CRITICAL**: Always set `map_started_at` to `{CURRENT_ISO_TIMESTAMP}` when starting a new map run. This ensures accurate elapsed time tracking even if the session had a prior review workflow.
 
 When closing a session (Phase 8 complete):
 

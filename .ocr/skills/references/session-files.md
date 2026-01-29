@@ -12,6 +12,15 @@ Every OCR session creates files in `.ocr/sessions/{session-id}/`:
 ├── discovered-standards.md # Merged project context (shared across rounds)
 ├── requirements.md         # User-provided requirements (if any, shared)
 ├── context.md              # Phase 2+3: Change summary + Tech Lead guidance (shared)
+├── map/                    # Code Review Map artifacts (optional)
+│   └── runs/
+│       ├── run-1/          # First map generation
+│       │   ├── topology.md         # File categorization and sections
+│       │   ├── flow-analysis.md    # Dependency tracing results
+│       │   ├── requirements-mapping.md  # Coverage matrix (if requirements)
+│       │   └── map.md              # Final map output
+│       └── run-2/          # Subsequent runs (created on re-map)
+│           └── ...         # Same structure as run-1
 └── rounds/                 # All round-specific artifacts
     ├── round-1/            # First review round
     │   ├── reviews/        # Individual reviewer outputs
@@ -42,18 +51,42 @@ OCR uses a **round-first architecture** where all round-specific artifacts live 
 - Each round has its own `discourse.md` and `final.md`
 - `state.json` tracks `current_round`; round metadata derived from filesystem
 
-**Shared vs per-round artifacts**:
-| Shared (session root) | Per-round (`rounds/round-{n}/`) |
-|----------------------|--------------------------------|
-| `state.json` | `reviews/*.md` |
-| `discovered-standards.md` | `discourse.md` |
-| `requirements.md` | `final.md` |
-| `context.md` | |
+**Shared vs per-round/run artifacts**:
+| Shared (session root) | Per-round (`rounds/round-{n}/`) | Per-run (`map/runs/run-{n}/`) |
+|----------------------|--------------------------------|-------------------------------|
+| `state.json` | `reviews/*.md` | `topology.md` |
+| `discovered-standards.md` | `discourse.md` | `flow-analysis.md` |
+| `requirements.md` | `final.md` | `requirements-mapping.md` |
+| `context.md` | | `map.md` |
 
 **When to use multiple rounds**:
 - Author addresses feedback and requests re-review
 - Scope changes mid-review
 - Different reviewer team composition needed
+
+## Map Runs
+
+OCR uses a **run-based architecture** for maps, parallel to review rounds.
+
+**Run behavior**:
+- First `/ocr-map` creates `map/runs/run-1/` with map artifacts
+- Subsequent `/ocr-map` on same day/branch creates `map/runs/run-{n+1}/`
+- Previous runs are preserved (never overwritten)
+- Each run produces a complete `map.md`
+- `state.json` tracks `current_map_run`; run metadata derived from filesystem
+
+**Map artifacts per run**:
+| File | Phase | Description |
+|------|-------|-------------|
+| `topology.md` | 2 | File categorization and section groupings |
+| `flow-analysis.md` | 3 | Upstream/downstream dependency tracing |
+| `requirements-mapping.md` | 4 | Requirements coverage matrix (if requirements provided) |
+| `map.md` | 5 | Final synthesized Code Review Map |
+
+**When to use multiple runs**:
+- Changeset has evolved since last map
+- Different requirements context needed
+- Fresh analysis desired after code updates
 
 ## File Specifications
 
