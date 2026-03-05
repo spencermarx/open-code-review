@@ -49,7 +49,7 @@ The map command is for **extremely large changesets** that would take multiple h
 
 ---
 
-## 🔍 Session State Check (Phase 0)
+## Session State Check (Phase 0)
 
 Before starting any map work, verify the current session state:
 
@@ -67,7 +67,13 @@ ls -la .ocr/sessions/$(date +%Y-%m-%d)-* 2>/dev/null
 ls -la .ocr/sessions/{id}/map/runs/ 2>/dev/null
 ```
 
-### Step 3: Determine action
+### Step 3: Check current state
+
+```bash
+ocr state show
+```
+
+### Step 4: Determine action
 
 - **If `--fresh` flag**: Delete the map directory and start from run-1
 - **If map exists and complete**: Start new run (run-{n+1})
@@ -76,7 +82,7 @@ ls -la .ocr/sessions/{id}/map/runs/ 2>/dev/null
 
 ---
 
-## ⚠️ CRITICAL: Required Artifacts (Must Create In Order)
+## CRITICAL: Required Artifacts (Must Create In Order)
 
 > **See `references/map-workflow.md` for the complete workflow.**
 
@@ -84,7 +90,6 @@ You MUST create these files sequentially:
 
 ```
 .ocr/sessions/{YYYY-MM-DD}-{branch}/
-├── state.json              # Session state (shared with review)
 ├── discovered-standards.md # Phase 1: merged project standards (shared)
 ├── requirements.md         # Phase 1: user requirements (if provided, shared)
 └── map/
@@ -95,6 +100,17 @@ You MUST create these files sequentially:
             ├── requirements-mapping.md  # Phase 4: coverage (if requirements)
             └── map.md              # Phase 5: final map output
 ```
+
+State is managed via `ocr state` CLI commands (stored in SQLite at `.ocr/data/ocr.db`).
+
+### State Management Commands
+
+| Command | When to Use |
+|---------|-------------|
+| `ocr state init --session-id <id> --branch <branch> --workflow-type map --session-dir <path>` | Create a new session |
+| `ocr state transition --phase <phase> --phase-number <N> --current-map-run <N>` | Each phase boundary |
+| `ocr state show` | Check current session state |
+| `ocr state close` | Close the session (if ending) |
 
 ### Checkpoint Rules
 

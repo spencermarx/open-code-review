@@ -21,7 +21,7 @@ tags: [ocr, github, pr]
 
 1. Verify `gh` is available and authenticated
 2. Find the PR for current branch
-3. Determine current round from `state.json` → `current_round` (or enumerate `rounds/` directory)
+3. Determine current round from `ocr state show` → `current_round` (or enumerate `rounds/` directory)
 4. Read the session's `rounds/round-{current_round}/final.md`
 5. Post as PR comment via `gh pr comment`
 

@@ -32,7 +32,7 @@ tags: [ocr, review, code-review]
 
 ---
 
-## 🔍 Session State Check (Phase 0)
+## Session State Check (Phase 0)
 
 Before starting any review work, you MUST verify the current session state:
 
@@ -45,7 +45,11 @@ ls -la .ocr/sessions/$(date +%Y-%m-%d)-* 2>/dev/null
 
 ### Step 2: If session exists, verify state
 
-Read `state.json` AND verify actual files match (see `references/session-files.md` for authoritative names):
+Use `ocr state show` to read current session state AND verify actual files match (see `references/session-files.md` for authoritative names):
+
+```bash
+ocr state show
+```
 
 | Phase | Verify file exists |
 |-------|-------------------|
@@ -56,19 +60,19 @@ Read `state.json` AND verify actual files match (see `references/session-files.m
 | discourse | `.ocr/sessions/{id}/rounds/round-{n}/discourse.md` |
 | synthesis | `.ocr/sessions/{id}/rounds/round-{n}/final.md` |
 
-> **Note**: Phase completion is derived from filesystem (file existence), not from `state.json`. The `current_phase` field indicates which phase is active.
+> **Note**: Phase completion is derived from filesystem (file existence), not from session state. The `current_phase` field indicates which phase is active.
 
 ### Step 3: Determine action
 
 - **If `--fresh` flag**: Delete the session directory and start from Phase 1
-- **If state.json missing but files exist**: Recreate state.json from file existence
-- **If state.json exists and files match**: Resume from `current_phase`
-- **If state.json and files mismatch**: Report discrepancy and ask user which to trust
+- **If no state in SQLite but files exist**: Use `ocr state init` to recreate the session, then set correct phase via `ocr state transition`
+- **If state exists and files match**: Resume from `current_phase`
+- **If state and files mismatch**: Report discrepancy and ask user which to trust
 - **If no session exists**: Start fresh from Phase 1
 
 ---
 
-## ⚠️ CRITICAL: Required Artifacts (Must Create In Order)
+## CRITICAL: Required Artifacts (Must Create In Order)
 
 > **See `references/session-files.md` for the authoritative file manifest.**
 
@@ -76,8 +80,7 @@ You MUST create these files sequentially. **Do NOT skip to `final.md`.**
 
 ```
 .ocr/sessions/{YYYY-MM-DD}-{branch}/
-├── state.json              # Phase 1: session state (REQUIRED)
-├── discovered-standards.md # Phase 1: merged project standards  
+├── discovered-standards.md # Phase 1: merged project standards
 ├── requirements.md         # Phase 1: user requirements (if provided)
 ├── context.md              # Phase 2+3: change summary + Tech Lead guidance
 └── rounds/
@@ -91,6 +94,17 @@ You MUST create these files sequentially. **Do NOT skip to `final.md`.**
         └── final.md            # Phase 7: ONLY after all above exist
 ```
 
+State is managed via `ocr state` CLI commands (stored in SQLite at `.ocr/data/ocr.db`).
+
+### State Management Commands
+
+| Command | When to Use |
+|---------|-------------|
+| `ocr state init --session-id <id> --branch <branch> --workflow-type review --session-dir <path>` | Phase 1: Create the session |
+| `ocr state transition --phase <phase> --phase-number <N> [--current-round <N>]` | Each phase boundary |
+| `ocr state show` | Check current session state |
+| `ocr state close` | Phase 8: Close the session |
+
 ### Checkpoint Rules
 
 1. **Before Phase 2** (Change Analysis): `discovered-standards.md` MUST exist
@@ -101,7 +115,7 @@ You MUST create these files sequentially. **Do NOT skip to `final.md`.**
 
 ### Why This Matters
 
-The `ocr progress` CLI watches these files to show real-time progress. If you skip files, the progress display breaks and users see incorrect state.
+The `ocr progress` CLI reads session state from SQLite for real-time progress display. If you skip phases or don't call `ocr state transition`, the progress display breaks and users see incorrect state.
 
 ---
 

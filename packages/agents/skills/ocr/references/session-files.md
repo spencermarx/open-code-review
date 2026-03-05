@@ -8,7 +8,6 @@ Every OCR session creates files in `.ocr/sessions/{session-id}/`:
 
 ```
 .ocr/sessions/{YYYY-MM-DD}-{branch}/
-├── state.json              # Session state (REQUIRED)
 ├── discovered-standards.md # Merged project context (shared across rounds)
 ├── requirements.md         # User-provided requirements (if any, shared)
 ├── context.md              # Phase 2+3: Change summary + Tech Lead guidance (shared)
@@ -49,15 +48,15 @@ OCR uses a **round-first architecture** where all round-specific artifacts live 
 - Subsequent `/ocr-review` on same day/branch creates `rounds/round-{n+1}/`
 - Previous rounds are preserved (never overwritten)
 - Each round has its own `discourse.md` and `final.md`
-- `state.json` tracks `current_round`; round metadata derived from filesystem
+- SQLite tracks `current_round` via `ocr state show`; round metadata derived from filesystem
 
 **Shared vs per-round/run artifacts**:
 | Shared (session root) | Per-round (`rounds/round-{n}/`) | Per-run (`map/runs/run-{n}/`) |
 |----------------------|--------------------------------|-------------------------------|
-| `state.json` | `reviews/*.md` | `topology.md` |
-| `discovered-standards.md` | `discourse.md` | `flow-analysis.md` |
-| `requirements.md` | `final.md` | `requirements-mapping.md` |
-| `context.md` | | `map.md` |
+| `discovered-standards.md` | `reviews/*.md` | `topology.md` |
+| `requirements.md` | `discourse.md` | `flow-analysis.md` |
+| `context.md` | `final.md` | `requirements-mapping.md` |
+| | | `map.md` |
 
 **When to use multiple rounds**:
 - Author addresses feedback and requests re-review
@@ -73,7 +72,7 @@ OCR uses a **run-based architecture** for maps, parallel to review rounds.
 - Subsequent `/ocr-map` on same day/branch creates `map/runs/run-{n+1}/`
 - Previous runs are preserved (never overwritten)
 - Each run produces a complete `map.md`
-- `state.json` tracks `current_map_run`; run metadata derived from filesystem
+- SQLite tracks `current_map_run` via `ocr state show`; run metadata derived from filesystem
 
 **Map artifacts per run**:
 | File | Phase | Description |
@@ -94,7 +93,6 @@ OCR uses a **run-based architecture** for maps, parallel to review rounds.
 
 | File | Phase | Description | Used By |
 |------|-------|-------------|---------|
-| `state.json` | 1 | Session state for progress tracking | CLI, resume logic |
 | `discovered-standards.md` | 1 | Merged project context from config + references | All reviewers |
 | `context.md` | 2 | Change summary, diff analysis, Tech Lead guidance | All reviewers |
 | `rounds/round-{n}/reviews/{type}-{n}.md` | 4 | Individual reviewer outputs | Discourse, Synthesis |
@@ -135,18 +133,18 @@ rounds/round-1/reviews/performance-1.md   # Custom reviewer
 
 | Phase | Phase Name | Files to Create/Update |
 |-------|------------|------------------------|
-| 1 | Context Discovery | `state.json`, `discovered-standards.md`, `requirements.md` (if provided) |
-| 2 | Change Analysis | `context.md`, update `state.json` |
-| 3 | Tech Lead Analysis | Update `context.md` with guidance, update `state.json` |
-| 4 | Parallel Reviews | `rounds/round-{n}/reviews/{type}-{n}.md` for each reviewer, update `state.json` |
-| 5 | Aggregation | (Inline analysis), update `state.json` |
-| 6 | Discourse | `rounds/round-{n}/discourse.md`, update `state.json` |
-| 7 | Synthesis | `rounds/round-{n}/final.md`, update `state.json` |
-| 8 | Presentation | Set `state.json` status to `"closed"` |
+| 1 | Context Discovery | `discovered-standards.md`, `requirements.md` (if provided) |
+| 2 | Change Analysis | `context.md`, call `ocr state transition` |
+| 3 | Tech Lead Analysis | Update `context.md` with guidance, call `ocr state transition` |
+| 4 | Parallel Reviews | `rounds/round-{n}/reviews/{type}-{n}.md` for each reviewer, call `ocr state transition` |
+| 5 | Aggregation | (Inline analysis), call `ocr state transition` |
+| 6 | Discourse | `rounds/round-{n}/discourse.md`, call `ocr state transition` |
+| 7 | Synthesis | `rounds/round-{n}/final.md`, call `ocr state transition` |
+| 8 | Presentation | Call `ocr state close` |
 
 ## State Transitions and File Validation
 
-When updating `state.json`, verify the corresponding file exists:
+When calling `ocr state transition`, verify the corresponding file exists:
 
 | Phase | Verify file exists |
 |---------------------------|-------------------|
@@ -180,30 +178,9 @@ SESSION_ID="$(date +%Y-%m-%d)-$(git branch --show-current | tr '/' '-')"
 
 ## File Content Requirements
 
-### state.json (Minimal Schema)
+### Session State
 
-```json
-{
-  "session_id": "{session-id}",
-  "status": "active",
-  "current_phase": "{phase-name}",
-  "phase_number": 4,
-  "current_round": 1,
-  "started_at": "{ISO-8601-timestamp}",
-  "round_started_at": "{ISO-8601-timestamp}",
-  "updated_at": "{ISO-8601-timestamp}"
-}
-```
-
-> **Note**: `round_started_at` is set when starting a new round (> 1) for accurate per-round timing display.
-
-**Derived from filesystem** (not stored in state.json):
-- Round count: enumerate `rounds/round-*/` directories
-- Round completion: check for `final.md` in round directory
-- Reviewers in round: list files in `rounds/round-{n}/reviews/`
-- Discourse complete: check for `discourse.md` in round directory
-
-See `references/session-state.md` for complete state management details.
+Session state is stored in SQLite at `.ocr/data/ocr.db`. Use `ocr state show` to inspect current state. See `session-state.md` for the full data model.
 
 ### Reviewer Files
 
@@ -233,14 +210,14 @@ The `ocr progress` CLI depends on these exact file names:
 
 | CLI Feature | Files Read |
 |-------------|-----------|
-| Session detection | `state.json` |
-| Phase tracking | `state.json` → `current_phase` |
-| Current round | `state.json` → `current_round` (reconciled with filesystem) |
+| Session detection | `ocr state show` / SQLite |
+| Phase tracking | SQLite → `current_phase` |
+| Current round | SQLite → `current_round` (reconciled with filesystem) |
 | Reviewer progress | `rounds/round-{n}/reviews/*.md` file existence |
 | Round completion | `rounds/round-{n}/final.md` existence |
-| Elapsed time | `state.json` → `started_at` |
+| Elapsed time | SQLite → `started_at` |
 
-**Filesystem as truth**: The CLI derives round metadata from the filesystem, using `state.json` as a hint. If state.json is missing or inconsistent, the CLI reconstructs state by:
+**Filesystem as truth**: The CLI derives round metadata from the filesystem, using SQLite as the primary state store. Round-level details are always reconciled against the filesystem by:
 1. Enumerating `rounds/round-*/` to count rounds
 2. Checking `final.md` presence to determine completion
 3. Listing `reviews/*.md` to identify reviewers

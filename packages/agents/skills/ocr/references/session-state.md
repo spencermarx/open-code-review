@@ -2,23 +2,25 @@
 
 ## Overview
 
-OCR uses a **state file** approach for reliable progress tracking. The orchestrating agent writes to `.ocr/sessions/{id}/state.json` at each phase transition.
+OCR uses **SQLite** as the primary state store for reliable progress tracking. The database is located at `.ocr/data/ocr.db` and is managed through the `ocr state` CLI commands. Agents use these CLI commands at each phase transition instead of writing state files directly.
 
 ## Cross-Mode Compatibility
 
-Sessions are **always** stored in the project's `.ocr/sessions/` directory, regardless of installation mode:
+Sessions are **always** stored in the project's `.ocr/data/ocr.db` database and mirrored to `.ocr/sessions/`, regardless of installation mode:
 
-| Mode | Skills Location | Sessions Location |
-|------|-----------------|-------------------|
-| **CLI** | `.ocr/skills/` | `.ocr/sessions/` |
-| **Plugin** | Plugin cache | `.ocr/sessions/` |
+| Mode | Skills Location | State Store | Sessions Mirror |
+|------|-----------------|-------------|-----------------|
+| **CLI** | `.ocr/skills/` | `.ocr/data/ocr.db` | `.ocr/sessions/` |
+| **Plugin** | Plugin cache | `.ocr/data/ocr.db` | `.ocr/sessions/` |
 
 This means:
 - The `ocr progress` CLI works identically in both modes
 - Running `npx @open-code-review/cli progress` from any project picks up the session state
-- No configuration needed — the CLI always looks in `.ocr/sessions/`
+- No configuration needed — the CLI always reads from `.ocr/data/ocr.db`
 
-## State File Format (Minimal Schema)
+## State Data Model
+
+The following fields are tracked per session in SQLite:
 
 ```json
 {
@@ -36,7 +38,7 @@ This means:
 }
 ```
 
-**Minimal by design**: Round and map run metadata is derived from the filesystem, not stored in state.json.
+**Minimal by design**: Round and map run metadata is derived from the filesystem, not stored in the database.
 
 **Field descriptions**:
 - `workflow_type`: Current workflow type (`"review"` or `"map"`) — enables `ocr progress` to track correct workflow
@@ -46,8 +48,6 @@ This means:
 - `current_map_run`: Current map run number (only present during map workflow)
 - `updated_at`: Last modification time (updated at every phase transition)
 
-**CRITICAL for timing**: When starting a NEW workflow type in an existing session (e.g., starting `/ocr-map` after `/ocr-review`), you MUST set the workflow-specific start time (`map_started_at` or `round_started_at`) to the current timestamp. This ensures `ocr progress` shows accurate elapsed time for each workflow.
-
 **Derived from filesystem** (not stored):
 - Round count: enumerate `rounds/round-*/` directories
 - Round completion: check for `final.md` in round directory
@@ -56,7 +56,14 @@ This means:
 - Map run count: enumerate `map/runs/run-*/` directories
 - Map run completion: check for `map.md` in run directory
 
-**IMPORTANT**: Timestamps MUST be generated dynamically using the current time in ISO 8601 format (e.g., `new Date().toISOString()` → `"2026-01-27T09:45:00.000Z"`). Do NOT copy example timestamps.
+## Orchestration Events Table
+
+In addition to the session state, SQLite tracks an **orchestration events timeline** in the `orchestration_events` table. Each `ocr state transition` call automatically logs an event, providing a complete history of phase transitions with timestamps. This enables:
+- Post-session analytics (time spent per phase)
+- Debugging stalled reviews
+- Progress timeline reconstruction
+
+Events are stored with the session ID, phase name, phase number, and timestamp.
 
 ## Session Status
 
@@ -68,34 +75,100 @@ The `status` field controls session visibility:
 | `closed` | Complete and dismissed | Skipped | Cannot resume |
 
 **Lifecycle:**
-1. Session created → `status: "active"`
-2. Review in progress → `status: "active"`, `current_phase` updates
-3. Phase 8 complete → `status: "closed"`, `current_phase: "complete"`
+1. Session created via `ocr state init` → `status: "active"`
+2. Review in progress → `status: "active"`, `current_phase` updates via `ocr state transition`
+3. Phase 8 complete → `ocr state close` sets `status: "closed"`, `current_phase: "complete"`
 
 The `ocr progress` command only auto-detects sessions with `status: "active"`. Closed sessions are accessible via `/ocr-history` and `/ocr-show`.
+
+## CLI Commands for State Management
+
+Agents MUST use these CLI commands to manage session state. **Do NOT write state files directly.**
+
+### `ocr state init` — Create a new session
+
+```bash
+ocr state init \
+  --session-id "{session-id}" \
+  --branch "{branch}" \
+  --workflow-type review \
+  --session-dir ".ocr/sessions/{session-id}"
+```
+
+Creates the session record in SQLite.
+
+### `ocr state transition` — Update phase at each boundary
+
+```bash
+ocr state transition \
+  --phase "{phase-name}" \
+  --phase-number {N}
+```
+
+For review workflows with multiple rounds:
+```bash
+ocr state transition \
+  --phase "{phase-name}" \
+  --phase-number {N} \
+  --current-round {round-number}
+```
+
+For map workflows:
+```bash
+ocr state transition \
+  --phase "{phase-name}" \
+  --phase-number {N} \
+  --current-map-run {run-number}
+```
+
+Updates the session in SQLite and logs an orchestration event.
+
+### `ocr state close` — Close the session
+
+```bash
+ocr state close
+```
+
+Sets `status: "closed"` and `current_phase: "complete"` in SQLite.
+
+### `ocr state show` — Read current session state
+
+```bash
+ocr state show
+```
+
+Outputs the current session state from SQLite. Use this to inspect current session state.
+
+### `ocr state sync` — Rebuild from filesystem
+
+```bash
+ocr state sync
+```
+
+Scans filesystem session directories and backfills any missing sessions into SQLite.
 
 ## Phase Transitions
 
 > **See `references/session-files.md` for the authoritative file manifest.**
 
-The Tech Lead MUST update `state.json` at each phase boundary:
+The Tech Lead MUST call `ocr state transition` at each phase boundary:
 
 ### Review Phases
 
-| Phase | When to Update | File Created |
-|-------|---------------|--------------|
+| Phase | When to Transition | File Created |
+|-------|-------------------|--------------|
 | context | After writing project standards | `discovered-standards.md` |
 | change-context | After writing change summary | `context.md`, `requirements.md` (if provided) |
 | analysis | After adding Tech Lead guidance | Update `context.md` |
 | reviews | After each reviewer completes | `rounds/round-{n}/reviews/{type}-{n}.md` |
 | discourse | After cross-reviewer discussion | `rounds/round-{n}/discourse.md` |
 | synthesis | After final review | `rounds/round-{n}/final.md` |
-| complete | After presenting to user | Set `status: "closed"` |
+| complete | After presenting to user | Call `ocr state close` |
 
 ### Map Phases
 
-| Phase | When to Update | File Created |
-|-------|---------------|--------------|
+| Phase | When to Transition | File Created |
+|-------|-------------------|--------------|
 | map-context | After writing project standards | `discovered-standards.md` (shared) |
 | topology | After topology analysis | `map/runs/run-{n}/topology.md` |
 | flow-analysis | After flow analysis | `map/runs/run-{n}/flow-analysis.md` |
@@ -103,110 +176,55 @@ The Tech Lead MUST update `state.json` at each phase boundary:
 | synthesis | After map generation | `map/runs/run-{n}/map.md` |
 | complete | After presenting map | Keep `status: "active"` (session continues) |
 
-## Writing State
-
-**CRITICAL**: Always generate timestamps using a **tool call** — never construct them manually.
-
-### Generating Timestamps
-
-> ⚠️ **NEVER** write timestamps manually (e.g., `"2026-01-29T22:00:00Z"`). Always use a tool call to get the current time. Manual timestamps risk timezone errors, typos, and incorrect elapsed time display.
-
-**Required approach**: Use `run_command` tool to execute:
-
-```bash
-# macOS/Linux — USE THIS
-date -u +"%Y-%m-%dT%H:%M:%SZ"
-# Output: 2026-01-27T09:45:00Z
-```
-
-**Example tool call** (do this before writing state.json):
-```
-run_command: date -u +"%Y-%m-%dT%H:%M:%SZ"
-```
-
-Then use the **exact output** as the timestamp value in state.json.
-
-**Why this matters**: The `ocr progress` command calculates elapsed time from these timestamps. If a timestamp is incorrect (wrong timezone, future time, etc.), the progress display will show wrong/counting-down times.
+## State Transition Examples
 
 When creating a new session (Phase 1 start):
 
-```json
-{
-  "session_id": "{session-id}",
-  "status": "active",
-  "current_phase": "context",
-  "phase_number": 1,
-  "current_round": 1,
-  "started_at": "{CURRENT_ISO_TIMESTAMP}",
-  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
-}
+```bash
+ocr state init \
+  --session-id "{session-id}" \
+  --branch "{branch}" \
+  --workflow-type review \
+  --session-dir ".ocr/sessions/{session-id}"
 ```
 
-When transitioning phases (preserve `started_at`, update `updated_at`):
+When transitioning phases:
 
-```json
-{
-  "session_id": "{session-id}",
-  "workflow_type": "review",
-  "status": "active",
-  "current_phase": "reviews",
-  "phase_number": 4,
-  "current_round": 1,
-  "started_at": "{PRESERVE_ORIGINAL}",
-  "round_started_at": "{PRESERVE_ORIGINAL}",
-  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
-}
+```bash
+ocr state transition --phase "reviews" --phase-number 4 --current-round 1
 ```
 
-When starting a map workflow (new map run or first map in session):
+When starting a map workflow:
 
-```json
-{
-  "session_id": "{session-id}",
-  "workflow_type": "map",
-  "status": "active",
-  "current_phase": "map-context",
-  "phase_number": 1,
-  "current_map_run": 1,
-  "started_at": "{PRESERVE_ORIGINAL_OR_SET_IF_NEW}",
-  "map_started_at": "{CURRENT_ISO_TIMESTAMP}",
-  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
-}
+```bash
+ocr state init \
+  --session-id "{session-id}" \
+  --branch "{branch}" \
+  --workflow-type map \
+  --session-dir ".ocr/sessions/{session-id}"
+
+ocr state transition --phase "map-context" --phase-number 1 --current-map-run 1
 ```
-
-**CRITICAL**: Always set `map_started_at` to `{CURRENT_ISO_TIMESTAMP}` when starting a new map run. This ensures accurate elapsed time tracking even if the session had a prior review workflow.
 
 When closing a session (Phase 8 complete):
 
-```json
-{
-  "session_id": "{session-id}",
-  "status": "closed",
-  "current_phase": "complete",
-  "phase_number": 8,
-  "current_round": 1,
-  "started_at": "{PRESERVE_ORIGINAL}",
-  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
-}
+```bash
+ocr state close
 ```
 
 ## Benefits
 
 1. **Explicit state** — No inference required
-2. **Atomic updates** — Single file write
-3. **Rich metadata** — Reviewer assignments, timestamps
-4. **Debuggable** — Human-readable JSON
-5. **CLI-friendly** — Easy to parse programmatically
+2. **Atomic updates** — SQLite transactions ensure consistency
+3. **Rich metadata** — Reviewer assignments, timestamps, orchestration events
+4. **Debuggable** — `ocr state show` for human-readable output
+5. **CLI-friendly** — All state operations via `ocr state` commands
+6. **Timeline tracking** — Orchestration events table records full phase history
 
 ## Important
 
-The `state.json` file is the **primary** source for workflow progress. However, with the round-first architecture:
+SQLite (`.ocr/data/ocr.db`) is the **sole** source for workflow progress. With the round-first architecture:
 
+- **SQLite is truth for workflow state**: `current_phase`, `phase_number`, `status`, timestamps
 - **Filesystem is truth for round data**: Round count, completion, and reviewers are derived from `rounds/` directory structure
-- **state.json is truth for workflow state**: `current_phase`, `phase_number`, `status`, timestamps
-- **Reconciliation**: If state.json and filesystem disagree, the CLI reconciles by trusting the filesystem for round data
-
-If `state.json` is missing entirely, the CLI will show "Waiting for session..." until the orchestrating agent creates `state.json`. Future versions may implement filesystem reconstruction to derive:
-1. Round count from `rounds/round-*/` directories
-2. Round completion from `final.md` presence
-3. Approximate phase from file existence
+- **Reconciliation**: If SQLite and filesystem disagree, the CLI reconciles by trusting the filesystem for round data

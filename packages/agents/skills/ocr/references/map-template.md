@@ -143,6 +143,17 @@ Template for the final map output (`map.md`). Optimized for reviewer workflow: u
 
 ---
 
+## Section Dependencies
+
+> How sections connect. Used by the dashboard dependency graph.
+
+| From | To | Relationship |
+|------|-----|-------------|
+| 1: {Section Title} | 2: {Section Title} | {3-8 word description of dependency} |
+| 2: {Section Title} | 3: {Section Title} | {3-8 word description of dependency} |
+
+---
+
 ## File Index
 
 | File | Section |
@@ -199,6 +210,16 @@ Map suggestions to requirements or concerns. Do NOT perform code review — just
 
 **Good**: "Complex pricing conditionals — verify tier logic matches REQ-4"
 **Bad**: "This function has a bug on line 42" (that's code review)
+
+### Section Dependencies
+
+Populate from cross-file flows identified during flow analysis:
+
+- Use `{number}: {Title}` format matching section headings (e.g., `1: Authentication Flow`)
+- Direction follows call/data flow: caller section → callee section
+- Relationship is a 3-8 word description (e.g., "Auth middleware protects routes")
+- Only include meaningful cross-section dependencies — not every possible connection
+- If sections are independent, leave the table body empty (keep headers)
 
 ### Requirements Coverage Indicators
 

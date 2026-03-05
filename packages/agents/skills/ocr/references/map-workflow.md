@@ -2,7 +2,7 @@
 
 Complete 6-phase process for generating a Code Review Map.
 
-> ⚠️ **CRITICAL**: You MUST update `state.json` **BEFORE starting work** on each phase. Update the `current_phase` and `phase_number` immediately when transitioning.
+> **CRITICAL**: You MUST call `ocr state transition` **BEFORE starting work** on each phase. Transition the `current_phase` and `phase_number` immediately when entering a new phase.
 
 ---
 
@@ -57,7 +57,7 @@ if [ ! -d "$MAP_DIR" ]; then
 else
   HIGHEST=$(ls -1 "$MAP_DIR" | grep -E '^run-[0-9]+$' | sed 's/run-//' | sort -n | tail -1)
   HIGHEST=${HIGHEST:-0}
-  
+
   if [ -f "$MAP_DIR/run-$HIGHEST/map.md" ]; then
     CURRENT_RUN=$((HIGHEST + 1))
     mkdir -p "$MAP_DIR/run-$CURRENT_RUN"
@@ -67,82 +67,60 @@ else
 fi
 ```
 
-### Step 4: Initialize state.json for map workflow
+### Step 4: Initialize session state for map workflow
 
-**CRITICAL**: Before proceeding, you MUST update state.json to indicate a map workflow is starting.
+**CRITICAL**: Before proceeding, you MUST initialize the session in SQLite using `ocr state` commands.
 
-> ⚠️ **TIMESTAMP RULE**: Always use `run_command` tool to get the current timestamp. **Never construct timestamps manually** — this causes incorrect elapsed time display in `ocr progress`.
-
-**First, get the current timestamp** (run this command):
+If this is a **new session** (no prior review or map in this session):
 ```bash
-date -u +"%Y-%m-%dT%H:%M:%SZ"
+ocr state init \
+  --session-id "$SESSION_ID" \
+  --branch "$BRANCH" \
+  --workflow-type map \
+  --session-dir "$SESSION_DIR"
 ```
 
-Use the **exact output** (e.g., `2026-01-29T13:45:22Z`) in the state.json below.
-
+Then transition to the first map phase:
 ```bash
-STATE_FILE="$SESSION_DIR/state.json"
-CURRENT_TIME="{OUTPUT_FROM_DATE_COMMAND}"  # Use actual output, not a placeholder
-
-# Read existing state if present, or create new
-if [ -f "$STATE_FILE" ]; then
-  # Preserve started_at from existing session
-  STARTED_AT=$(jq -r '.started_at // empty' "$STATE_FILE")
-  STARTED_AT=${STARTED_AT:-$CURRENT_TIME}
-else
-  STARTED_AT=$CURRENT_TIME
-fi
-
-# Write updated state with map workflow fields
-cat > "$STATE_FILE" << EOF
-{
-  "session_id": "{session_id}",
-  "workflow_type": "map",
-  "status": "active",
-  "current_phase": "map-context",
-  "phase_number": 1,
-  "current_map_run": $CURRENT_RUN,
-  "started_at": "$STARTED_AT",
-  "map_started_at": "$CURRENT_TIME",
-  "updated_at": "$CURRENT_TIME"
-}
-EOF
+ocr state transition \
+  --phase "map-context" \
+  --phase-number 1 \
+  --current-map-run $CURRENT_RUN
 ```
 
-**Why `map_started_at` is required**: If this session previously had a review workflow, `started_at` will reflect when the review started, not the map. Setting `map_started_at` ensures `ocr progress` shows accurate elapsed time for the map workflow.
+If this is an **existing session** (e.g., a map after a prior review), the session already exists in SQLite — just call `ocr state transition` to switch to the map workflow:
+```bash
+ocr state transition \
+  --phase "map-context" \
+  --phase-number 1 \
+  --current-map-run $CURRENT_RUN
+```
+
+The CLI commands handle timestamp management automatically — `map_started_at` is set when transitioning to a map phase, ensuring `ocr progress` shows accurate elapsed time even if the session had a prior review workflow.
 
 ### Step 5: Report to user
 
 ```
-📍 Session: {session_id}
-🗺️ Map run: {current_run}
-📊 Current phase: {current_phase}
-🔄 Action: [Starting fresh | Resuming from Phase X]
+Session: {session_id}
+Map run: {current_run}
+Current phase: {current_phase}
+Action: [Starting fresh | Resuming from Phase X]
 ```
 
 ---
 
 ## State Tracking
 
-At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
+At **every phase transition**, call `ocr state transition` with the `--current-map-run` flag:
 
-```json
-{
-  "session_id": "{id}",
-  "workflow_type": "map",
-  "status": "active",
-  "current_phase": "flow-analysis",
-  "phase_number": 3,
-  "current_map_run": 1,
-  "started_at": "{PRESERVE_ORIGINAL}",
-  "map_started_at": "{SET_ONCE_ON_MAP_START}",
-  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
-}
+```bash
+ocr state transition \
+  --phase "flow-analysis" \
+  --phase-number 3 \
+  --current-map-run $CURRENT_RUN
 ```
 
-**CRITICAL**:
-- Always include `"workflow_type": "map"` — this enables `ocr progress` to track map workflows.
-- Set `"map_started_at"` ONCE when starting a new map run — this ensures accurate elapsed time tracking even if the session had a prior review workflow.
+This updates the session in SQLite and logs an orchestration event.
 
 **Map phase values**: `map-context`, `topology`, `flow-analysis`, `requirements-mapping`, `synthesis`, `complete`
 
@@ -151,6 +129,8 @@ At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
 ## Phase 1: Context Discovery (Shared with Review)
 
 **Goal**: Build context from config + discovered files + user requirements.
+
+**State**: Call `ocr state transition --phase "map-context" --phase-number 1 --current-map-run $CURRENT_RUN`
 
 This phase is **identical** to the review workflow's context discovery. See `references/context-discovery.md` for the complete algorithm.
 
@@ -182,18 +162,20 @@ code-review-map:
 
 **Use these values** when spawning agents in Phase 3 and Phase 4.
 
-### ✅ Phase 1 Checkpoint
+### Phase 1 Checkpoint
 
 - [ ] `discovered-standards.md` written (or reused from existing session)
 - [ ] If requirements provided: `requirements.md` written
 - [ ] Agent redundancy config loaded
-- [ ] `state.json` updated: `current_phase: "map-context"`
+- [ ] `ocr state transition` called with `--phase "map-context"`
 
 ---
 
 ## Phase 2: Topology Analysis (Map Architect)
 
 **Goal**: Enumerate changed files and identify logical structure.
+
+**State**: Call `ocr state transition --phase "topology" --phase-number 2 --current-map-run $CURRENT_RUN`
 
 ### Steps
 
@@ -211,11 +193,11 @@ code-review-map:
    ```bash
    # Default: staged changes
    git diff --cached --name-only
-   
+
    # Store canonical file list for completeness validation
    git diff --cached --name-only > /tmp/ocr-canonical-files.txt
    ```
-   
+
    **CRITICAL**: Store this canonical file list. It's used for completeness validation in Phase 5.
 
 2. **Categorize each file**:
@@ -242,19 +224,21 @@ code-review-map:
    .ocr/sessions/{id}/map/runs/run-{n}/topology.md
    ```
 
-### ✅ Phase 2 Checkpoint
+### Phase 2 Checkpoint
 
 - [ ] All changed files enumerated
 - [ ] Files categorized by type
 - [ ] Logical sections identified
 - [ ] `topology.md` written
-- [ ] `state.json` updated: `current_phase: "topology"`
+- [ ] `ocr state transition` called with `--phase "topology"`
 
 ---
 
 ## Phase 3: Flow Tracing (Flow Analysts)
 
 **Goal**: Trace upstream/downstream dependencies for each changed file.
+
+**State**: Call `ocr state transition --phase "flow-analysis" --phase-number 3 --current-map-run $CURRENT_RUN`
 
 ### Steps
 
@@ -288,19 +272,21 @@ For each analyst, provide:
 
 See `references/map-personas/flow-analyst.md` for persona details.
 
-### ✅ Phase 3 Checkpoint
+### Phase 3 Checkpoint
 
 - [ ] Flow Analysts spawned (`FLOW_ANALYST_COUNT` from config)
 - [ ] All changed files have flow context
 - [ ] Findings aggregated
 - [ ] `flow-analysis.md` written
-- [ ] `state.json` updated: `current_phase: "flow-analysis"`
+- [ ] `ocr state transition` called with `--phase "flow-analysis"`
 
 ---
 
 ## Phase 4: Requirements Mapping (If Provided)
 
 **Goal**: Map changes to requirements and identify coverage.
+
+**State**: Call `ocr state transition --phase "requirements-mapping" --phase-number 4 --current-map-run $CURRENT_RUN`
 
 **Skip this phase** if no requirements were provided.
 
@@ -328,19 +314,21 @@ See `references/map-personas/flow-analyst.md` for persona details.
    .ocr/sessions/{id}/map/runs/run-{n}/requirements-mapping.md
    ```
 
-### ✅ Phase 4 Checkpoint
+### Phase 4 Checkpoint
 
 - [ ] Requirements Mappers spawned (if requirements exist)
 - [ ] Coverage matrix created
 - [ ] Gaps identified
 - [ ] `requirements-mapping.md` written
-- [ ] `state.json` updated: `current_phase: "requirements-mapping"`
+- [ ] `ocr state transition` called with `--phase "requirements-mapping"`
 
 ---
 
 ## Phase 5: Map Synthesis (Map Architect)
 
 **Goal**: Combine all findings into the final Code Review Map optimized for reviewer workflow.
+
+**State**: Call `ocr state transition --phase "synthesis" --phase-number 5 --current-map-run $CURRENT_RUN`
 
 ### Template Structure (in order)
 
@@ -350,8 +338,9 @@ See `references/map-personas/flow-analyst.md` for persona details.
 4. **Critical Review Focus** — High-value areas for human judgment
 5. **Manual Verification** — Tests to run before/during review
 6. **File Review** — Per-section file tracking (main tracking area)
-7. **File Index** — Alphabetical reference
-8. **Map Metadata** — Run info
+7. **Section Dependencies** — Cross-section dependency graph data
+8. **File Index** — Alphabetical reference
+9. **Map Metadata** — Run info
 
 ### Steps
 
@@ -396,18 +385,25 @@ See `references/map-personas/flow-analyst.md` for persona details.
      - Specific areas mapped to requirements/concerns
      - Do NOT do code review — just flag for reviewer attention
 
-8. **Create File Index**:
+8. **Generate Section Dependencies**:
+   - Review flow analysis cross-file flows to identify section-to-section call chains
+   - For each pair of sections with meaningful dependencies, add a table row
+   - Direction: caller section → callee section
+   - Relationship should be a 3-8 word description (e.g., "Auth middleware protects routes")
+   - If sections are independent, leave the table body empty (headers only)
+
+9. **Create File Index**:
    - Alphabetical list of ALL changed files
    - Section reference for each
 
-9. **Validate completeness**:
+10. **Validate completeness**:
    ```bash
    EXPECTED=$(git diff --cached --name-only | wc -l)
    MAPPED=$(grep -oE '\| `[^`]+` \|' map.md | wc -l)
    [ "$EXPECTED" -ne "$MAPPED" ] && echo "ERROR: Missing files!"
    ```
 
-10. **Save final map**:
+11. **Save final map**:
     ```
     .ocr/sessions/{id}/map/runs/run-{n}/map.md
     ```
@@ -416,7 +412,7 @@ See `references/map-personas/flow-analyst.md` for persona details.
 
 See `references/map-template.md` for the complete template.
 
-### ✅ Phase 5 Checkpoint
+### Phase 5 Checkpoint
 
 - [ ] Executive Summary with hypothesis
 - [ ] Questions & Clarifications populated
@@ -425,16 +421,19 @@ See `references/map-template.md` for the complete template.
 - [ ] Manual Verification tests generated (or omitted if docs-only)
 - [ ] All File Review sections with file tables
 - [ ] Review Suggestions per section (only where key things to flag)
+- [ ] Section Dependencies table generated
 - [ ] File Index complete
 - [ ] Completeness validated (all files appear in tables)
 - [ ] `map.md` written
-- [ ] `state.json` updated: `current_phase: "synthesis"`
+- [ ] `ocr state transition` called with `--phase "synthesis"`
 
 ---
 
 ## Phase 6: Present
 
 **Goal**: Display the map to the user.
+
+**State**: Call `ocr state transition --phase "complete" --phase-number 6 --current-map-run $CURRENT_RUN` after presenting.
 
 ### Steps
 
@@ -445,29 +444,31 @@ See `references/map-template.md` for the complete template.
 
 2. **Present to user** with summary:
    ```
-   🗺️ Code Review Map Generated
-   
-   📍 Session: {session_id}
-   📁 Files mapped: {count}
-   📑 Sections: {section_count}
-   
+   Code Review Map Generated
+
+   Session: {session_id}
+   Files mapped: {count}
+   Sections: {section_count}
+
    The map is saved at: .ocr/sessions/{id}/map/runs/run-{n}/map.md
-   
+
    [Display map content]
    ```
 
 3. **Update state**:
-   ```json
-   {
-     "current_phase": "map-complete",
-     "phase_number": 6
-   }
+   ```bash
+   ocr state transition \
+     --phase "complete" \
+     --phase-number 6 \
+     --current-map-run $CURRENT_RUN
    ```
 
-### ✅ Phase 6 Checkpoint
+   > **Note**: Map completion does NOT close the session — the session stays `active` so further reviews or maps can be run.
+
+### Phase 6 Checkpoint
 
 - [ ] Map presented to user
-- [ ] `state.json` updated: `current_phase: "complete"`
+- [ ] `ocr state transition` called with `--phase "complete"`
 
 ---
 
@@ -534,7 +535,7 @@ See `references/map-template.md` for the complete template.
 - **Purpose**: {what this section covers}
 - **Files**: `file1.ts`, `file2.ts`, `file3.ts`
 - **Entry Point**: `file1.ts`
-- **Review Order**: file1 → file2 → file3
+- **Review Order**: file1 -> file2 -> file3
 
 ### Section 2: {Name}
 ...
@@ -586,7 +587,7 @@ Files that don't fit into logical sections:
 
 ### Flow 1: Authentication Request
 ```
-api/auth.ts → services/auth.service.ts → utils/token.ts → db/users.ts
+api/auth.ts -> services/auth.service.ts -> utils/token.ts -> db/users.ts
 ```
 
 ### Flow 2: ...
@@ -595,7 +596,7 @@ api/auth.ts → services/auth.service.ts → utils/token.ts → db/users.ts
 
 | File | Analyst 1 Section | Analyst 2 Section | Final |
 |------|-------------------|-------------------|-------|
-| `file1.ts` | Auth Flow | Auth Flow | Auth Flow ✓ |
+| `file1.ts` | Auth Flow | Auth Flow | Auth Flow |
 | `file2.ts` | Auth Flow | API Layer | Auth Flow (majority) |
 ```
 
@@ -619,18 +620,18 @@ api/auth.ts → services/auth.service.ts → utils/token.ts → db/users.ts
 
 | Requirement | Status | Files | Confidence |
 |-------------|--------|-------|------------|
-| REQ-1 | ✅ Full | `auth.ts`, `oauth.ts` | High (2/2) |
-| REQ-2 | ⚠️ Partial | `session.ts` | Medium (1/2) |
-| REQ-3 | ❌ None | — | High (2/2) |
+| REQ-1 | Full | `auth.ts`, `oauth.ts` | High (2/2) |
+| REQ-2 | Partial | `session.ts` | Medium (1/2) |
+| REQ-3 | None | — | High (2/2) |
 
 ## Per-Section Coverage
 
 ### Section 1: Authentication Flow
-- REQ-1: ✅ Full
-- REQ-2: ⚠️ Partial (missing cleanup)
+- REQ-1: Full
+- REQ-2: Partial (missing cleanup)
 
 ### Section 2: API Endpoints
-- REQ-3: ❌ Not addressed
+- REQ-3: Not addressed
 
 ## Gaps
 
@@ -644,7 +645,7 @@ api/auth.ts → services/auth.service.ts → utils/token.ts → db/users.ts
 
 | Requirement | Mapper 1 | Mapper 2 | Final |
 |-------------|----------|----------|-------|
-| REQ-1 | Full | Full | Full ✓ |
+| REQ-1 | Full | Full | Full |
 | REQ-2 | Partial | None | Partial (conservative) |
 ```
 
@@ -693,21 +694,21 @@ When multiple agents produce findings, aggregate as follows:
 
 If `git diff` returns empty:
 ```
-⚠️ No changes detected. Please stage changes or specify a target.
+WARNING: No changes detected. Please stage changes or specify a target.
 ```
 
 ### Missing Config
 
 If `.ocr/config.yaml` doesn't exist:
 ```
-⚠️ OCR not configured. Run `ocr doctor` to check setup.
+WARNING: OCR not configured. Run `ocr doctor` to check setup.
 ```
 
 ### Completeness Failure
 
 If map doesn't include all files:
 ```
-❌ Map incomplete: {missing_count} files not mapped.
+ERROR: Map incomplete: {missing_count} files not mapped.
 Missing: [list files]
 
 Re-running synthesis to include missing files...

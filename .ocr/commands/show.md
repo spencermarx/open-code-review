@@ -16,7 +16,7 @@ tags: [ocr, history, sessions]
 **Steps**
 
 1. If no session specified, find most recent in `.ocr/sessions/`
-2. Determine current round from `state.json` → `current_round` (or enumerate `rounds/` directory)
+2. Determine current round from `ocr state show` → `current_round` (or enumerate `rounds/` directory)
 3. Read and display `rounds/round-{current_round}/final.md` (synthesized review)
 4. Optionally show individual reviewer files from `rounds/round-{n}/reviews/` if requested
 

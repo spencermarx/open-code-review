@@ -2,7 +2,7 @@
 
 Complete 8-phase process for multi-agent code review.
 
-> ⚠️ **CRITICAL**: You MUST update `state.json` **BEFORE starting work** on each phase. The `ocr progress` CLI reads this file for real-time tracking. Update the `current_phase` and `phase_number` immediately when transitioning—do not wait until the phase is complete.
+> **CRITICAL**: You MUST call `ocr state transition` **BEFORE starting work** on each phase. The `ocr progress` CLI reads session state for real-time tracking. Transition the `current_phase` and `phase_number` immediately when entering a new phase—do not wait until the phase is complete.
 
 ---
 
@@ -34,7 +34,11 @@ Then proceed to Phase 1.
 
 ### Step 3: If session exists, verify state matches files
 
-Read `state.json` and verify actual files exist (see `references/session-files.md` for authoritative names):
+Use `ocr state show` to read current state and verify actual files exist (see `references/session-files.md` for authoritative names):
+
+```bash
+ocr state show
+```
 
 | Phase Complete? | File check |
 |-----------------|------------|
@@ -45,7 +49,7 @@ Read `state.json` and verify actual files exist (see `references/session-files.m
 | discourse | `rounds/round-{current_round}/discourse.md` exists |
 | synthesis | `rounds/round-{current_round}/final.md` exists |
 
-> **Note**: Phase completion is derived from filesystem (file existence). The `current_phase` field in `state.json` indicates which phase is active, not what's complete.
+> **Note**: Phase completion is derived from filesystem (file existence). The `current_phase` field in the session state indicates which phase is active, not what's complete.
 
 ### Step 3b: Round Resolution Algorithm
 
@@ -62,7 +66,7 @@ else
   # Find highest round number
   HIGHEST=$(ls -1 "$ROUNDS_DIR" | grep -E '^round-[0-9]+$' | sed 's/round-//' | sort -n | tail -1)
   HIGHEST=${HIGHEST:-0}
-  
+
   # Check if highest round is complete (has final.md)
   if [ -f "$ROUNDS_DIR/round-$HIGHEST/final.md" ]; then
     # Start new round
@@ -75,56 +79,39 @@ else
 fi
 ```
 
-Update `state.json` with `current_round` value. **When starting a new round (CURRENT_ROUND > 1), also set `round_started_at` to the current timestamp** so the CLI progress timer shows elapsed time for the current round, not the entire session.
+When starting a new round (CURRENT_ROUND > 1), pass the `--current-round` flag to `ocr state transition` so the CLI progress timer shows elapsed time for the current round, not the entire session.
 
 ### Step 4: Determine resume point
 
-- **state.json missing, files exist**: Recreate `state.json` based on file existence
-- **state.json exists, files match**: Resume from `current_phase`
-- **state.json and files mismatch**: Ask user which to trust
+- **No state in SQLite, files exist**: Use `ocr state init` to recreate the session, then `ocr state transition` to set the correct phase based on file existence
+- **State exists, files match**: Resume from `current_phase` shown by `ocr state show`
+- **State and files mismatch**: Ask user which to trust
 - **No session exists**: Create session directory and start Phase 1
 
 ### Step 5: Report to user
 
 Before proceeding, tell the user:
 ```
-📍 Session: {session_id}
-📊 Current phase: {current_phase} (Phase {phase_number}/8)
-🔄 Action: [Starting fresh | Resuming from Phase X]
+Session: {session_id}
+Current phase: {current_phase} (Phase {phase_number}/8)
+Action: [Starting fresh | Resuming from Phase X]
 ```
 
 ---
 
 ## State Tracking
 
-At **every phase transition**, update `.ocr/sessions/{id}/state.json`:
+At **every phase transition**, call `ocr state transition`:
 
-```json
-{
-  "session_id": "{id}",
-  "status": "active",
-  "current_phase": "reviews",
-  "phase_number": 4,
-  "current_round": 1,
-  "started_at": "{PRESERVE_ORIGINAL}",
-  "round_started_at": "{CURRENT_ISO_TIMESTAMP}",
-  "updated_at": "{CURRENT_ISO_TIMESTAMP}"
-}
+```bash
+ocr state transition --phase "reviews" --phase-number 4 --current-round 1
 ```
 
-**Minimal schema** — round metadata is derived from filesystem, not stored in state.json.
-
-> ⚠️ **TIMESTAMP RULE**: Always use `run_command` tool to get timestamps. **Never construct them manually.**
-> ```bash
-> date -u +"%Y-%m-%dT%H:%M:%SZ"
-> ```
-> Use the **exact output** in state.json. Manual timestamps cause incorrect `ocr progress` display.
-
-**CRITICAL**: Preserve `started_at` from session creation; set `round_started_at` when starting a new round (> 1); always update `updated_at` with current time.
-
-**Status values**: `active` (in progress), `closed` (complete and dismissed)
+This updates the session in SQLite and logs an orchestration event.
 
 **Phase values**: `context`, `change-context`, `analysis`, `reviews`, `aggregation`, `discourse`, `synthesis`, `complete`
+
+**Status values**: `active` (in progress), `closed` (complete — set via `ocr state close`)
 
 ## Artifact Checklist
 
@@ -134,14 +121,14 @@ Before proceeding to each phase, verify the required artifacts exist:
 
 | Phase | Required Before Starting | Artifact to Create |
 |-------|-------------------------|-------------------|
-| 1 | Session directory created | `state.json`, `discovered-standards.md`, `requirements.md` (if provided) |
-| 2 | `discovered-standards.md` exists | `context.md`, `rounds/round-1/reviews/` directory, update `state.json` |
-| 3 | `context.md` exists | Update `context.md` with Tech Lead guidance, update `state.json` |
-| 4 | `context.md` exists | `rounds/round-{n}/reviews/{type}-{n}.md` for each reviewer, update `state.json` |
-| 5 | ≥2 files in `rounds/round-{n}/reviews/` | Aggregated findings (inline), update `state.json` |
-| 6 | Reviews complete | `rounds/round-{n}/discourse.md`, update `state.json` |
-| 7 | `rounds/round-{n}/discourse.md` exists | `rounds/round-{n}/final.md`, update `state.json` |
-| 8 | `rounds/round-{n}/final.md` exists | Present to user, set `status: "closed"` and `current_phase: "complete"` |
+| 1 | Session directory created | `discovered-standards.md`, `requirements.md` (if provided); call `ocr state init` |
+| 2 | `discovered-standards.md` exists | `context.md`, `rounds/round-1/reviews/` directory; call `ocr state transition` |
+| 3 | `context.md` exists | Update `context.md` with Tech Lead guidance; call `ocr state transition` |
+| 4 | `context.md` exists | `rounds/round-{n}/reviews/{type}-{n}.md` for each reviewer; call `ocr state transition` |
+| 5 | ≥2 files in `rounds/round-{n}/reviews/` | Aggregated findings (inline); call `ocr state transition` |
+| 6 | Reviews complete | `rounds/round-{n}/discourse.md`; call `ocr state transition` |
+| 7 | `rounds/round-{n}/discourse.md` exists | `rounds/round-{n}/final.md`; call `ocr state transition` |
+| 8 | `rounds/round-{n}/final.md` exists | Present to user; call `ocr state close` |
 
 **NEVER skip directly to `final.md`** — this breaks progress tracking.
 
@@ -161,6 +148,20 @@ This location is consistent regardless of how OCR is installed (CLI or plugin), 
 ## Phase 1: Context Discovery (Including Requirements)
 
 **Goal**: Build review context from config + discovered files + user requirements.
+
+**State**: Call `ocr state init` to create the session, then `ocr state transition --phase "context" --phase-number 1`:
+
+```bash
+# Initialize the session in SQLite
+ocr state init \
+  --session-id "$SESSION_ID" \
+  --branch "$BRANCH" \
+  --workflow-type review \
+  --session-dir "$SESSION_DIR"
+
+# Transition to context phase
+ocr state transition --phase "context" --phase-number 1
+```
 
 ### Steps
 
@@ -234,7 +235,7 @@ If requirements provided, save to `requirements.md` in session directory.
 ## OCR Config Context
 [content from .ocr/config.yaml context field]
 
-## OpenSpec Context  
+## OpenSpec Context
 [content from openspec/config.yaml]
 
 ## From: AGENTS.md
@@ -249,7 +250,7 @@ If requirements provided, save to `requirements.md` in session directory.
 
 See `references/context-discovery.md` for detailed algorithm.
 
-### ✅ Phase 1 Checkpoint
+### Phase 1 Checkpoint
 
 **STOP and verify before proceeding:**
 - [ ] `discovered-standards.md` written to session directory
@@ -260,6 +261,8 @@ See `references/context-discovery.md` for detailed algorithm.
 ## Phase 2: Gather Change Context
 
 **Goal**: Understand what changed and why.
+
+**State**: Call `ocr state transition --phase "change-context" --phase-number 2`
 
 ### Steps
 
@@ -273,13 +276,13 @@ See `references/context-discovery.md` for detailed algorithm.
    ```bash
    # Get the diff
    git diff --cached > /tmp/ocr-diff.txt
-   
+
    # Get recent commit messages for intent
    git log --oneline -10
-   
+
    # Get branch name
    git branch --show-current
-   
+
    # List affected files
    git diff --cached --name-only
    ```
@@ -293,21 +296,21 @@ See `references/context-discovery.md` for detailed algorithm.
 4. Save context to `context.md`:
    ```markdown
    # Review Context
-   
+
    **Session**: {SESSION_ID}
    **Target**: staged changes
    **Branch**: {branch}
    **Files**: {count} files changed
-   
+
    ## Change Summary
    [Brief description of what changed]
-   
+
    ## Affected Files
    - path/to/file1.ts
    - path/to/file2.ts
    ```
 
-### ✅ Phase 2 Checkpoint
+### Phase 2 Checkpoint
 
 **STOP and verify before proceeding:**
 - [ ] Session directory created: `.ocr/sessions/{id}/`
@@ -320,21 +323,23 @@ See `references/context-discovery.md` for detailed algorithm.
 
 **Goal**: Summarize changes, analyze against requirements, identify risks, select reviewers.
 
+**State**: Call `ocr state transition --phase "analysis" --phase-number 3`
+
 ### Steps
 
 1. **Check for existing map reference** (optional):
-   
+
    If user explicitly references an existing map (e.g., "I've already generated a map", "use the map I created", "check the map in this session"):
-   
+
    ```bash
    # Check for existing map artifacts
    ls .ocr/sessions/{id}/map/runs/*/map.md 2>/dev/null
    ```
-   
+
    - **If found AND user referenced it**: Read the latest `map.md` as supplementary context
    - **If not found**: Inform user no map exists, proceed with standard review
    - **If user did NOT reference a map**: Do NOT automatically use map artifacts
-   
+
    > **Note**: Maps are orthogonal tools. Only use if explicitly referenced by user.
 
 2. Review requirements (if provided):
@@ -351,30 +356,30 @@ See `references/context-discovery.md` for detailed algorithm.
 4. Create dynamic guidance for reviewers:
    ```markdown
    ## Tech Lead Guidance
-   
+
    ### Requirements Summary (if provided)
    The changes should implement OAuth2 authentication per spec...
    Key acceptance criteria:
    - Users can log in via Google OAuth
    - Session tokens expire after 24 hours
    - Failed logins are rate-limited
-   
+
    ### Change Summary
    This PR adds user authentication via OAuth2...
-   
+
    ### Requirements Assessment
-   - OAuth login: Implemented ✓
+   - OAuth login: Implemented
    - Token expiry: Not visible in diff - verify implementation
    - Rate limiting: Not found - may be missing
-   
+
    ### Clarifying Questions (Tech Lead)
    - The spec says "fast response" - what's the target latency?
    - Should this include account lockout after N failures?
-   
+
    ### Risk Areas
    - **Security**: New auth flow needs careful review
    - **Architecture**: New service layer pattern
-   
+
    ### Focus Points
    - Validate token handling
    - Check for proper error handling
@@ -388,7 +393,7 @@ See `references/context-discovery.md` for detailed algorithm.
    # MUST read default_team from .ocr/config.yaml - do NOT use hardcoded values
    cat .ocr/config.yaml | grep -A10 'default_team:'
    ```
-   
+
    Parse the `default_team` section to determine reviewer counts:
    ```yaml
    # Example config - actual values come from .ocr/config.yaml
@@ -398,21 +403,21 @@ See `references/context-discovery.md` for detailed algorithm.
      # security: 1   # Commented = not spawned by default
      testing: 1      # Spawn testing-1
    ```
-   
+
    **Reviewer spawning rules**:
    - For each uncommented entry in `default_team`, spawn N instances
    - `principal: 2` → spawn `principal-1`, `principal-2`
-   - `quality: 2` → spawn `quality-1`, `quality-2`  
+   - `quality: 2` → spawn `quality-1`, `quality-2`
    - `testing: 1` → spawn `testing-1`
    - Commented entries (e.g., `# security: 1`) are NOT spawned unless auto-detected
-   
+
    **Auto-detection** (adds reviewers beyond config):
    | Change Type | Additional Reviewers |
    |-------------|---------------------|
-   | Auth/Security changes | + 1× Security |
-   | API changes | + 1× Security |
-   | Logic changes | + 1× Testing (if not in config) |
-   | User says "add security" | + 1× Security |
+   | Auth/Security changes | + 1x Security |
+   | API changes | + 1x Security |
+   | Logic changes | + 1x Testing (if not in config) |
+   | User says "add security" | + 1x Security |
 
 ---
 
@@ -420,7 +425,9 @@ See `references/context-discovery.md` for detailed algorithm.
 
 **Goal**: Run each reviewer independently with configured redundancy.
 
-> **⚠️ CRITICAL**: Reviewer counts and types come from `.ocr/config.yaml` `default_team` section.
+**State**: Call `ocr state transition --phase "reviews" --phase-number 4 --current-round $CURRENT_ROUND`
+
+> **CRITICAL**: Reviewer counts and types come from `.ocr/config.yaml` `default_team` section.
 > Do NOT use hardcoded defaults. Do NOT skip the `-{n}` suffix in filenames.
 > See `references/session-files.md` for authoritative file naming.
 
@@ -429,30 +436,30 @@ See `references/context-discovery.md` for detailed algorithm.
 1. Load reviewer personas from `references/reviewers/`.
 
 2. **Parse `default_team` from config** (already read in Phase 3):
-   
+
    For each reviewer type in config, spawn the specified number of instances:
-   
+
    ```bash
    # Example: If config says principal: 2, quality: 2, testing: 1
    # You MUST spawn exactly these reviewers with numbered suffixes:
-   
+
    # From default_team.principal: 2
-   → Create: rounds/round-$CURRENT_ROUND/reviews/principal-1.md
-   → Create: rounds/round-$CURRENT_ROUND/reviews/principal-2.md
-   
-   # From default_team.quality: 2  
-   → Create: rounds/round-$CURRENT_ROUND/reviews/quality-1.md
-   → Create: rounds/round-$CURRENT_ROUND/reviews/quality-2.md
-   
+   -> Create: rounds/round-$CURRENT_ROUND/reviews/principal-1.md
+   -> Create: rounds/round-$CURRENT_ROUND/reviews/principal-2.md
+
+   # From default_team.quality: 2
+   -> Create: rounds/round-$CURRENT_ROUND/reviews/quality-1.md
+   -> Create: rounds/round-$CURRENT_ROUND/reviews/quality-2.md
+
    # From default_team.testing: 1
-   → Create: rounds/round-$CURRENT_ROUND/reviews/testing-1.md
-   
+   -> Create: rounds/round-$CURRENT_ROUND/reviews/testing-1.md
+
    # Auto-detected (if applicable)
-   → Create: rounds/round-$CURRENT_ROUND/reviews/security-1.md
+   -> Create: rounds/round-$CURRENT_ROUND/reviews/security-1.md
    ```
-   
+
    **File naming pattern**: `{type}-{n}.md` where n starts at 1.
-   
+
    Examples: `principal-1.md`, `principal-2.md`, `quality-1.md`, `quality-2.md`, `testing-1.md`
 
 3. Each task receives:
@@ -467,7 +474,7 @@ See `references/context-discovery.md` for detailed algorithm.
 
 See `references/reviewer-task.md` for the task template.
 
-### ✅ Phase 4 Checkpoint — MANDATORY VALIDATION
+### Phase 4 Checkpoint — MANDATORY VALIDATION
 
 **Run this validation command before proceeding:**
 
@@ -483,15 +490,15 @@ ls -la "$REVIEWS_DIR/"
 # Verify all files match {type}-{n}.md pattern (principal, quality, security, testing)
 for f in "$REVIEWS_DIR/"*.md; do
   if [[ "$(basename "$f")" =~ ^(principal|quality|security|testing)-[0-9]+\.md$ ]]; then
-    echo "✓ $(basename "$f")"
+    echo "OK $(basename "$f")"
   else
-    echo "❌ $(basename "$f") does not match {type}-{n}.md pattern"
+    echo "FAIL $(basename "$f") does not match {type}-{n}.md pattern"
     exit 1
   fi
 done
 
 REVIEWER_COUNT=$(ls -1 "$REVIEWS_DIR/"*.md 2>/dev/null | wc -l | tr -d ' ')
-echo "✓ Found $REVIEWER_COUNT reviewer files"
+echo "OK Found $REVIEWER_COUNT reviewer files"
 ```
 
 **STOP and verify before proceeding:**
@@ -506,6 +513,8 @@ echo "✓ Found $REVIEWER_COUNT reviewer files"
 
 **Goal**: Merge redundant reviewer runs and mark confidence.
 
+**State**: Call `ocr state transition --phase "aggregation" --phase-number 5 --current-round $CURRENT_ROUND`
+
 ### Steps
 
 1. For reviewers with redundancy > 1, compare findings:
@@ -518,10 +527,10 @@ echo "✓ Found $REVIEWER_COUNT reviewer files"
 3. Create aggregated findings per reviewer:
    ```markdown
    ## Security Reviewer (2 runs)
-   
+
    ### Confirmed Findings (2/2 runs)
    - SQL injection risk in query builder [VERY HIGH]
-   
+
    ### Partial Findings (1/2 runs)
    - Potential timing attack in comparison [MEDIUM]
    ```
@@ -531,6 +540,8 @@ echo "✓ Found $REVIEWER_COUNT reviewer files"
 ## Phase 6: Discourse
 
 **Goal**: Let reviewers challenge and build on each other's findings.
+
+**State**: Call `ocr state transition --phase "discourse" --phase-number 6 --current-round $CURRENT_ROUND`
 
 > Skip this phase if `--quick` flag is used.
 
@@ -548,7 +559,7 @@ echo "✓ Found $REVIEWER_COUNT reviewer files"
 
 See `references/discourse.md` for detailed instructions.
 
-### ✅ Phase 6 Checkpoint
+### Phase 6 Checkpoint
 
 **STOP and verify before proceeding:**
 - [ ] `rounds/round-{n}/discourse.md` written to round directory
@@ -560,6 +571,8 @@ See `references/discourse.md` for detailed instructions.
 ## Phase 7: Synthesis
 
 **Goal**: Produce final prioritized review and save to **`final.md`**.
+
+**State**: Call `ocr state transition --phase "synthesis" --phase-number 7 --current-round $CURRENT_ROUND`
 
 > **File**: `rounds/round-{n}/final.md`
 > **Template**: See `references/final-template.md` for format
@@ -594,7 +607,7 @@ See `references/discourse.md` for detailed instructions.
    - Questions about scope boundaries
    - Questions about edge cases
    - Questions about intentional exclusions
-   
+
    These go in a prominent "Clarifying Questions" section for stakeholder response.
 
 7. **Write the final review file**:
@@ -602,12 +615,12 @@ See `references/discourse.md` for detailed instructions.
    # OUTPUT FILE - must be exactly this path:
    FINAL_FILE="$SESSION_DIR/rounds/round-$CURRENT_ROUND/final.md"
    ```
-   
+
    Save synthesized review to `$FINAL_FILE`.
 
 See `references/final-template.md` for the template format.
 
-### ✅ Phase 7 Checkpoint — MANDATORY VALIDATION
+### Phase 7 Checkpoint — MANDATORY VALIDATION
 
 **Run this validation command before proceeding:**
 
@@ -619,17 +632,17 @@ FINAL_FILE="$SESSION_DIR/rounds/round-$CURRENT_ROUND/final.md"
 
 # Check file exists
 if [ -f "$FINAL_FILE" ]; then
-  echo "✓ final.md exists at $FINAL_FILE"
+  echo "OK final.md exists at $FINAL_FILE"
 else
-  echo "❌ final.md not found at $FINAL_FILE"
+  echo "FAIL final.md not found at $FINAL_FILE"
   exit 1
 fi
 
 # Check required content
 if grep -q '## Verdict' "$FINAL_FILE"; then
-  echo "✓ Contains Verdict section"
+  echo "OK Contains Verdict section"
 else
-  echo "❌ Missing '## Verdict' section"
+  echo "FAIL Missing '## Verdict' section"
   exit 1
 fi
 ```
@@ -646,18 +659,20 @@ fi
 
 **Goal**: Display results, optionally post to GitHub, and close the session.
 
+**State**: Call `ocr state close` after presenting results.
+
 ### Steps
 
 1. Display the final review in a clear format:
    ```markdown
    # Code Review: {branch}
-   
+
    ## Summary
    {X} must-fix, {Y} should-fix, {Z} suggestions
-   
+
    ## Must Fix
    ...
-   
+
    ## Should Fix
    ...
    ```
@@ -666,27 +681,22 @@ fi
    - Check for `gh` CLI: `which gh`
    - Post as PR comment: `gh pr comment {number} --body-file final.md`
 
-3. **Close the session** by updating `state.json`:
-   ```json
-   {
-     "session_id": "{id}",
-     "status": "closed",
-     "current_phase": "complete",
-     "phase_number": 8,
-     "current_round": 1,
-     "updated_at": "{now}"
-   }
+3. **Close the session**:
+   ```bash
+   ocr state close
    ```
-   
-   > **IMPORTANT**: Setting `status: "closed"` ensures:
+
+   This sets `status: "closed"` and `current_phase: "complete"` in SQLite.
+
+   > **IMPORTANT**: Closing the session ensures:
    > - The `ocr progress` CLI stops showing this session
    > - The session won't be picked up for resume
    > - The session remains accessible via `/ocr-history` and `/ocr-show`
 
 4. Confirm session saved:
    ```
-   ✓ Review complete
-   → .ocr/sessions/{id}/rounds/round-{n}/final.md
+   Review complete
+   -> .ocr/sessions/{id}/rounds/round-{n}/final.md
    ```
 
 ---
@@ -695,11 +705,11 @@ fi
 
 | Phase | Command/Action | Output |
 |-------|---------------|--------|
-| 1 | Search for context files | `discovered-standards.md` |
-| 2 | git diff, create session | `context.md`, `rounds/round-1/reviews/` |
-| 3 | Analyze, select reviewers | guidance in `context.md` |
-| 4 | Spawn reviewer tasks | `rounds/round-{n}/reviews/*.md` |
-| 5 | Compare redundant runs | aggregated findings |
-| 6 | Reviewer discourse | `rounds/round-{n}/discourse.md` |
-| 7 | Synthesize and prioritize | `rounds/round-{n}/final.md` |
-| 8 | Display/post | Terminal output, GitHub |
+| 1 | `ocr state init` + search for context files | `discovered-standards.md` |
+| 2 | git diff, create session, `ocr state transition` | `context.md`, `rounds/round-1/reviews/` |
+| 3 | Analyze, select reviewers, `ocr state transition` | guidance in `context.md` |
+| 4 | Spawn reviewer tasks, `ocr state transition` | `rounds/round-{n}/reviews/*.md` |
+| 5 | Compare redundant runs, `ocr state transition` | aggregated findings |
+| 6 | Reviewer discourse, `ocr state transition` | `rounds/round-{n}/discourse.md` |
+| 7 | Synthesize and prioritize, `ocr state transition` | `rounds/round-{n}/final.md` |
+| 8 | Display/post, `ocr state close` | Terminal output, GitHub |

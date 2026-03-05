@@ -141,7 +141,6 @@ All review artifacts are stored in `.ocr/sessions/{YYYY-MM-DD}-{branch}/`:
 
 | File | Description |
 |------|-------------|
-| `state.json` | Session state for progress tracking |
 | `discovered-standards.md` | Merged project context (shared) |
 | `requirements.md` | User-provided requirements (shared, if any) |
 | `context.md` | Change summary and Tech Lead guidance (shared) |
