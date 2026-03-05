@@ -69,6 +69,10 @@ OCR gives you **full control over your review team composition**. You define:
 
 > **Note**: OCR does not replace human code review. Even the best LLMs make mistakes. The goal is to reduce the burden on human reviewers by catching issues earlier—not to eliminate human judgment from your process.
 
+<p align="center">
+  <img src="assets/ocr-tool-focused-review.png" alt="OCR review output" width="700" />
+</p>
+
 ## Installation
 
 OCR supports two distribution methods. Choose based on your environment:
@@ -285,6 +289,54 @@ jobs:
 
 ---
 
+## Code Review Maps
+
+For large changesets that span dozens or hundreds of files, a full multi-agent review may not be the right starting point. **Code Review Maps** give you a structured navigation document first—grouping related changes into sections, identifying key files, and surfacing dependencies.
+
+```
+/ocr-map                           # Map staged changes
+/ocr-map HEAD~10                   # Map last 10 commits
+/ocr-map feature/big-refactor      # Map branch vs main
+/ocr-map --requirements spec.md    # Map with requirements context
+/ocr-map --fresh                   # Regenerate from scratch
+```
+
+Maps produce a section-based breakdown of your changeset with file groupings, risk annotations, and suggested review order—ideal for orienting yourself (or a teammate) before diving into the code.
+
+<p align="center">
+  <img src="assets/ocr-tool-focused-code-review-map.png" alt="OCR Code Review Map" width="700" />
+</p>
+
+---
+
+## Dashboard
+
+The OCR Dashboard is a local web interface for browsing sessions, reviews, and maps across your project.
+
+```bash
+ocr dashboard                  # Start on default port (4173)
+ocr dashboard --port 8080      # Custom port
+ocr dashboard --no-open        # Don't auto-open browser
+```
+
+<p align="center">
+  <img src="assets/ocr-tool-command-center.png" alt="OCR Dashboard" width="700" />
+</p>
+
+**What you can do:**
+
+- **Browse sessions** — See all review and map sessions with status, branch, and timestamps
+- **Explore reviews** — Read individual reviewer findings, discourse, and final synthesis
+- **Triage reviews** — Set status on each review round (needs review, in progress, changes made, acknowledged, dismissed) with filtering and sorting
+- **View maps** — Navigate Code Review Maps with rendered Mermaid dependency graphs
+- **Track progress** — Watch active reviews in real-time via WebSocket
+- **Run commands** — Execute OCR commands directly from the dashboard with live terminal output
+- **Take notes** — Attach notes to sessions for tracking follow-up items
+
+The dashboard reads from the same `.ocr/` directory and SQLite database used by the CLI and review workflow. No separate configuration is needed.
+
+---
+
 ## How It Works
 
 OCR follows an 8-phase workflow:
@@ -310,6 +362,7 @@ OCR follows an 8-phase workflow:
 |---------|-------------|
 | `/ocr-review [target]` | Review staged changes, commits, or branches |
 | `/ocr-review --fresh` | Clear session and start fresh |
+| `/ocr-map [target]` | Generate a Code Review Map for large changesets |
 | `/ocr-doctor` | Verify installation and dependencies |
 | `/ocr-reviewers` | List available reviewer personas |
 | `/ocr-history` | List past review sessions |
@@ -323,8 +376,11 @@ OCR follows an 8-phase workflow:
 | Command | Description |
 |---------|-------------|
 | `ocr init` | Initialize OCR for your AI tools |
-| `ocr update` | Update skills and commands to latest version |
+| `ocr doctor` | Check installation and verify dependencies |
 | `ocr progress` | Watch review progress live |
+| `ocr dashboard` | Start the web dashboard interface |
+| `ocr update` | Update skills and commands to latest version |
+| `ocr state` | Manage session state (internal) |
 
 ---
 
@@ -495,11 +551,12 @@ This enables a natural "review → fix → re-review" workflow without losing hi
 
 ## Requirements
 
-- **Node.js** ≥ 20.0.0 (for CLI)
+- **Node.js** ≥ 20.0.0
 - **Git** — For diff analysis
+- **An AI coding assistant** — Claude Code, Cursor, Windsurf, or [any supported tool](#installation)
 - **GitHub CLI** (`gh`) — Optional, for `/ocr-post`
 
-Run `/ocr-doctor` to verify your setup.
+Run `ocr doctor` to verify your setup.
 
 ---
 

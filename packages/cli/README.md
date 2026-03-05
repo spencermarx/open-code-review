@@ -1,12 +1,16 @@
 # @open-code-review/cli
 
-The command-line interface for Open Code Review. Handles multi-tool setup and provides real-time progress tracking.
+The command-line interface for Open Code Review. Handles multi-tool setup, real-time progress tracking, environment health checks, and a web dashboard for browsing review sessions.
 
 ## Why Use the CLI?
 
-1. **Multi-tool configuration**: If you use multiple AI assistants (Claude Code, Cursor, Windsurf), the CLI configures all of them with a single command.
+1. **Multi-tool configuration**: If you use multiple AI assistants (Claude Code, Cursor, Windsurf, and 11 more), the CLI configures all of them with a single command.
 
 2. **Progress visibility**: AI-powered reviews take time. The `ocr progress` command shows what's happening in real-time.
+
+3. **Environment health**: The `ocr doctor` command verifies your dependencies and OCR installation before you run a review.
+
+4. **Dashboard**: The `ocr dashboard` command starts a local web interface for browsing sessions, reviews, and maps.
 
 ## Installation
 
@@ -91,6 +95,50 @@ ocr update --inject      # AGENTS.md/CLAUDE.md only
 - `.ocr/skills/references/reviewers/` — All reviewers preserved (default and custom)
 - `.ocr/sessions/` — Review history remains untouched
 
+### `ocr doctor`
+
+Check your OCR installation and verify all dependencies.
+
+```bash
+ocr doctor
+```
+
+**What it checks:**
+
+- **Environment**: `git`, `claude` (Claude Code), and `gh` (GitHub CLI) are in PATH, with version detection
+- **OCR installation**: `.ocr/skills/`, `.ocr/sessions/`, `.ocr/config.yaml`, `.ocr/data/ocr.db`
+
+Exits with code `0` when healthy, `1` when required dependencies are missing or OCR is not initialized.
+
+### `ocr dashboard`
+
+Start the OCR dashboard web interface for browsing sessions, reviews, and maps.
+
+```bash
+# Start on default port
+ocr dashboard
+
+# Custom port
+ocr dashboard --port 8080
+
+# Don't auto-open browser
+ocr dashboard --no-open
+```
+
+Requires OCR to be initialized (`.ocr/` must exist). The dashboard reads from the same SQLite database and session files used by the review workflow.
+
+### `ocr state`
+
+Manage OCR session state. This is an internal command used by the review workflow to track phase transitions.
+
+```bash
+ocr state show                    # Show current session state
+ocr state show --json             # Output as JSON
+ocr state sync                    # Rebuild state from filesystem
+```
+
+Subcommands: `init`, `transition`, `close`, `show`, `sync`.
+
 ## Session Storage
 
 The CLI reads session state from `.ocr/sessions/{date}-{branch}/`:
@@ -115,12 +163,20 @@ The CLI derives round information from the filesystem:
 
 | Tool | Config Directory |
 |------|------------------|
+| Amazon Q Developer | `.aws/amazonq/` |
+| Augment (Auggie) | `.augment/` |
 | Claude Code | `.claude/` |
-| Windsurf | `.windsurf/` |
-| Cursor | `.cursor/` |
-| GitHub Copilot | `.github/` |
 | Cline | `.cline/` |
+| Codex | `.codex/` |
 | Continue | `.continue/` |
+| Cursor | `.cursor/` |
+| Gemini CLI | `.gemini/` |
+| GitHub Copilot | `.github/` |
+| Kilo Code | `.kilocode/` |
+| OpenCode | `.opencode/` |
+| Qoder | `.qoder/` |
+| RooCode | `.roo/` |
+| Windsurf | `.windsurf/` |
 
 ## After Installation
 
@@ -129,10 +185,11 @@ Use OCR through your AI assistant:
 ```
 /ocr-review                     # Start a code review
 /ocr-review against spec.md     # Review against a spec file
+/ocr-map                        # Generate a Code Review Map for large changesets
 /ocr-doctor                     # Verify setup
 ```
 
-For Claude Code / Cursor, use `/ocr:review`, `/ocr:doctor`, etc.
+For Claude Code / Cursor, use `/ocr:review`, `/ocr:map`, `/ocr:doctor`, etc.
 
 See the [main README](https://github.com/spencermarx/open-code-review) for full documentation.
 

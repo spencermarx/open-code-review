@@ -24,6 +24,7 @@ agents/
 │       └── reviewer-template.md
 ├── commands/                # Slash command definitions
 │   ├── review.md
+│   ├── map.md
 │   ├── doctor.md
 │   ├── history.md
 │   ├── show.md
@@ -76,7 +77,6 @@ OCR uses a **round-first architecture** for session storage:
 
 ```
 .ocr/sessions/{YYYY-MM-DD}-{branch}/
-├── state.json              # Workflow state (current_round, phase)
 ├── discovered-standards.md # Project context (shared across rounds)
 ├── context.md              # Change analysis (shared)
 └── rounds/
@@ -97,6 +97,7 @@ See `references/session-files.md` for the complete file manifest.
 | File | Windsurf | Claude Code / Cursor |
 |------|----------|----------------------|
 | `review.md` | `/ocr-review` | `/ocr:review` |
+| `map.md` | `/ocr-map` | `/ocr:map` |
 | `doctor.md` | `/ocr-doctor` | `/ocr:doctor` |
 | `reviewers.md` | `/ocr-reviewers` | `/ocr:reviewers` |
 | `history.md` | `/ocr-history` | `/ocr:history` |
