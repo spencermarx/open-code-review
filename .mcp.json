@@ -4,7 +4,25 @@
       "command": "npx",
       "args": [
         "-y",
-        "@claude-flow/cli@latest",
+        "ruflo@latest",
+        "mcp",
+        "start"
+      ],
+      "env": {
+        "npm_config_update_notifier": "false",
+        "CLAUDE_FLOW_MODE": "v3",
+        "CLAUDE_FLOW_HOOKS_ENABLED": "true",
+        "CLAUDE_FLOW_TOPOLOGY": "hierarchical-mesh",
+        "CLAUDE_FLOW_MAX_AGENTS": "15",
+        "CLAUDE_FLOW_MEMORY_BACKEND": "hybrid"
+      },
+      "autoStart": false
+    },
+    "ruflo": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "ruflo@latest",
         "mcp",
         "start"
       ],
