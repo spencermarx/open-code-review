@@ -1,0 +1,41 @@
+@import "tailwindcss";
+@import "./hljs.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  --radius: 0.5rem;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: theme(--color-zinc-200);
+  }
+
+  .dark *,
+  .dark *::before,
+  .dark *::after {
+    border-color: theme(--color-zinc-800);
+  }
+
+  body {
+    font-family: theme(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :focus-visible {
+    outline: 2px solid theme(--color-blue-500);
+    outline-offset: 2px;
+  }
+
+  .dark :focus-visible {
+    outline-color: theme(--color-blue-400);
+  }
+}
