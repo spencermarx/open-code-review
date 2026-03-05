@@ -24,16 +24,17 @@ export interface WorkflowProgressStrategy {
   readonly totalPhases: number;
 
   /**
-   * Parse session state from filesystem artifacts.
-   * This should be deterministic based on what files exist.
+   * Parse session state from SQLite.
    *
    * @param sessionPath - Path to the session directory
    * @param preservedStartTime - Optional start time to preserve across re-parses
+   * @param ocrDir - Optional .ocr directory path for SQLite reads
    * @returns Workflow state or null if session is invalid/not started
    */
   parseState(
     sessionPath: string,
     preservedStartTime?: number,
+    ocrDir?: string,
   ): WorkflowState | null;
 
   /**

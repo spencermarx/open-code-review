@@ -9,6 +9,8 @@ export * from "./strategy";
 export * from "./detector";
 export * from "./render-utils";
 export { detectActiveWorkflows, hasBothWorkflowsActive } from "./detector";
+export { setProgressDb, getProgressDb, readSessionState } from "./session-reader";
+export type { SessionStateData } from "./types";
 
 import { registerStrategy } from "./strategy";
 import { reviewStrategy } from "./review-strategy";

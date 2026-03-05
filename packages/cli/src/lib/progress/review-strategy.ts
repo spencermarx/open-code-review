@@ -15,7 +15,7 @@ import type {
   ReviewWorkflowState,
   RoundInfo,
   ReviewerStatus,
-  StateJson,
+  SessionStateData,
 } from "./types";
 import {
   formatDuration,
@@ -24,6 +24,7 @@ import {
   clearForRenderType,
   padLines,
 } from "./render-utils";
+import { readSessionState } from "./session-reader";
 
 type ReviewPhase =
   | "waiting"
@@ -107,18 +108,17 @@ export class ReviewProgressStrategy implements WorkflowProgressStrategy {
   parseState(
     sessionPath: string,
     preservedStartTime?: number,
+    ocrDir?: string,
   ): ReviewWorkflowState | null {
     const session = basename(sessionPath);
-    const statePath = join(sessionPath, "state.json");
 
-    if (!existsSync(statePath)) {
+    const state = readSessionState(sessionPath, ocrDir);
+    if (!state) {
       return null;
     }
 
     try {
-      const stateContent = readFileSync(statePath, "utf-8");
-      const state: StateJson = JSON.parse(stateContent);
-      return this.parseFromStateJson(
+      return this.parseFromState(
         session,
         state,
         sessionPath,
@@ -129,9 +129,9 @@ export class ReviewProgressStrategy implements WorkflowProgressStrategy {
     }
   }
 
-  private parseFromStateJson(
+  private parseFromState(
     session: string,
-    state: StateJson,
+    state: SessionStateData,
     sessionPath: string,
     preservedStartTime?: number,
   ): ReviewWorkflowState {
@@ -208,7 +208,7 @@ export class ReviewProgressStrategy implements WorkflowProgressStrategy {
     log(chalk.bold.white("  Open Code Review"));
     log();
 
-    // Clamp elapsed to 0 if startTime is in the future (defensive: bad timestamp in state.json)
+    // Clamp elapsed to 0 if startTime is in the future (defensive: bad timestamp)
     const elapsed = Math.max(0, Date.now() - state.startTime);
     const roundInfo =
       state.currentRound > 1

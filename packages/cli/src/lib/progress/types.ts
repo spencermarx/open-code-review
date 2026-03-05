@@ -98,9 +98,9 @@ export type AgentStatus = {
 export type WorkflowState = ReviewWorkflowState | MapWorkflowState;
 
 /**
- * State.json structure (workflow-agnostic parts)
+ * Session state data shape (read from SQLite)
  */
-export type StateJson = {
+export type SessionStateData = {
   session_id: string;
   status?: SessionStatus;
   workflow_type?: WorkflowType;

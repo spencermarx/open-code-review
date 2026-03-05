@@ -15,7 +15,7 @@ import type {
   MapWorkflowState,
   MapRunInfo,
   AgentStatus,
-  StateJson,
+  SessionStateData,
 } from "./types";
 import {
   formatDuration,
@@ -24,6 +24,7 @@ import {
   clearForRenderType,
   padLines,
 } from "./render-utils";
+import { readSessionState } from "./session-reader";
 
 type MapPhase =
   | "waiting"
@@ -92,24 +93,22 @@ export class MapProgressStrategy implements WorkflowProgressStrategy {
   parseState(
     sessionPath: string,
     preservedStartTime?: number,
+    ocrDir?: string,
   ): MapWorkflowState | null {
     const session = basename(sessionPath);
-    const statePath = join(sessionPath, "state.json");
 
-    if (!existsSync(statePath)) {
+    const state = readSessionState(sessionPath, ocrDir);
+    if (!state) {
+      return null;
+    }
+
+    // Only parse if this is a map workflow
+    if (state.workflow_type !== "map") {
       return null;
     }
 
     try {
-      const stateContent = readFileSync(statePath, "utf-8");
-      const state: StateJson = JSON.parse(stateContent);
-
-      // Only parse if this is a map workflow
-      if (state.workflow_type !== "map") {
-        return null;
-      }
-
-      return this.parseFromStateJson(
+      return this.parseFromState(
         session,
         state,
         sessionPath,
@@ -120,9 +119,9 @@ export class MapProgressStrategy implements WorkflowProgressStrategy {
     }
   }
 
-  private parseFromStateJson(
+  private parseFromState(
     session: string,
-    state: StateJson,
+    state: SessionStateData,
     sessionPath: string,
     preservedStartTime?: number,
   ): MapWorkflowState {
@@ -209,7 +208,7 @@ export class MapProgressStrategy implements WorkflowProgressStrategy {
     log(chalk.bold.white("  Open Code Review") + chalk.cyan(" · Map"));
     log();
 
-    // Clamp elapsed to 0 if startTime is in the future (defensive: bad timestamp in state.json)
+    // Clamp elapsed to 0 if startTime is in the future (defensive: bad timestamp)
     const elapsed = Math.max(0, Date.now() - state.startTime);
     const runInfo =
       state.currentRun > 1

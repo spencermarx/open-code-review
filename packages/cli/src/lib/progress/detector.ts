@@ -4,13 +4,14 @@
  * Deterministically detects which workflow type is active in a session.
  * Priority order:
  * 1. CLI flag (explicit user override)
- * 2. state.json workflow_type field
+ * 2. SQLite session data
  * 3. Filesystem artifact detection (map/ vs rounds/)
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import type { WorkflowType, StateJson } from "./types";
+import { existsSync, readdirSync } from "node:fs";
+import { join, basename } from "node:path";
+import type { WorkflowType } from "./types";
+import { getProgressDb } from "./session-reader";
 
 /**
  * Detect workflow type from a session directory
@@ -28,17 +29,22 @@ export function detectWorkflowType(
     return explicitType;
   }
 
-  // Priority 2: Check state.json workflow_type
-  const statePath = join(sessionPath, "state.json");
-  if (existsSync(statePath)) {
+  // Priority 2: Check SQLite for workflow type
+  const db = getProgressDb();
+  if (db) {
     try {
-      const content = readFileSync(statePath, "utf-8");
-      const state: StateJson = JSON.parse(content);
-      if (state.workflow_type) {
-        return state.workflow_type;
+      const sessionId = basename(sessionPath);
+      const result = db.exec(
+        "SELECT workflow_type FROM sessions WHERE id = ?",
+        [sessionId],
+      );
+      const row0 = result[0];
+      if (row0 && row0.values.length > 0) {
+        const wt = row0.values[0]?.[0] as string;
+        if (wt === "review" || wt === "map") return wt;
       }
     } catch {
-      // Continue to filesystem detection
+      // SQLite read failed, continue to filesystem detection
     }
   }
 
@@ -56,34 +62,35 @@ export function detectWorkflowType(
     return "review";
   }
 
-  // Both exist - check which has more recent activity
+  // Both exist - check SQLite for current_phase to disambiguate
   if (hasMapDir && hasRoundsDir) {
-    // This is unusual but could happen if user runs both workflows
-    // Default to the one with state.json current_phase
-    if (existsSync(statePath)) {
+    if (db) {
       try {
-        const content = readFileSync(statePath, "utf-8");
-        const state: StateJson = JSON.parse(content);
-        // Map phases start with "map-" or are "topology", "flow-analysis", etc.
-        const phase = state.current_phase;
-        if (
-          phase.startsWith("map-") ||
-          phase === "topology" ||
-          phase === "flow-analysis" ||
-          phase === "requirements-mapping"
-        ) {
-          return "map";
+        const sessionId = basename(sessionPath);
+        const result = db.exec(
+          "SELECT current_phase FROM sessions WHERE id = ?",
+          [sessionId],
+        );
+        const phaseRow0 = result[0];
+        if (phaseRow0 && phaseRow0.values.length > 0) {
+          const phase = phaseRow0.values[0]?.[0] as string;
+          if (
+            phase.startsWith("map-") ||
+            phase === "topology" ||
+            phase === "flow-analysis" ||
+            phase === "requirements-mapping"
+          ) {
+            return "map";
+          }
+          return "review";
         }
-        return "review";
       } catch {
-        // Default to review
         return "review";
       }
     }
   }
 
-  // No artifacts yet - cannot determine, default to review
-  // (Most common workflow, will auto-correct when artifacts appear)
+  // No artifacts yet - default to review
   return "review";
 }
 
@@ -91,21 +98,30 @@ export function detectWorkflowType(
  * Check if a session is active (not closed or complete)
  */
 export function isSessionActive(sessionPath: string): boolean {
-  const statePath = join(sessionPath, "state.json");
-  if (!existsSync(statePath)) {
-    return true; // No state.json = potentially new session
-  }
-
-  try {
-    const content = readFileSync(statePath, "utf-8");
-    const state: StateJson = JSON.parse(content);
-    if (state.status === "closed" || state.current_phase === "complete") {
-      return false;
+  const db = getProgressDb();
+  if (db) {
+    try {
+      const sessionId = basename(sessionPath);
+      const result = db.exec(
+        "SELECT status, current_phase FROM sessions WHERE id = ?",
+        [sessionId],
+      );
+      const statusRow0 = result[0];
+      if (statusRow0 && statusRow0.values.length > 0) {
+        const row = statusRow0.values[0];
+        const status = row?.[0] as string;
+        const phase = row?.[1] as string;
+        if (status === "closed" || phase === "complete") {
+          return false;
+        }
+        return true;
+      }
+    } catch {
+      // Fall through
     }
-    return true;
-  } catch {
-    return true;
   }
+  // No SQLite data — assume active (new session)
+  return true;
 }
 
 /**
@@ -177,18 +193,27 @@ export function detectActiveWorkflows(sessionPath: string): WorkflowType[] {
     }
   }
 
-  // If no artifacts detected, check state.json for workflow_type
+  // If no artifacts detected, check SQLite for workflow_type
   if (activeWorkflows.length === 0) {
-    const statePath = join(sessionPath, "state.json");
-    if (existsSync(statePath)) {
+    const db = getProgressDb();
+    if (db) {
       try {
-        const content = readFileSync(statePath, "utf-8");
-        const state: StateJson = JSON.parse(content);
-        if (state.workflow_type && state.current_phase !== "complete") {
-          activeWorkflows.push(state.workflow_type);
+        const sessionId = basename(sessionPath);
+        const result = db.exec(
+          "SELECT workflow_type, current_phase FROM sessions WHERE id = ?",
+          [sessionId],
+        );
+        const wtRow0 = result[0];
+        if (wtRow0 && wtRow0.values.length > 0) {
+          const row = wtRow0.values[0];
+          const wt = row?.[0] as string;
+          const phase = row?.[1] as string;
+          if ((wt === "review" || wt === "map") && phase !== "complete") {
+            activeWorkflows.push(wt as WorkflowType);
+          }
         }
       } catch {
-        // Ignore parse errors
+        // Ignore
       }
     }
   }

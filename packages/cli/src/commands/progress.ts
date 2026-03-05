@@ -3,6 +3,7 @@
  *
  * Watch real-time progress of OCR workflows (review or map).
  * Uses strategy pattern for workflow-specific progress tracking.
+ * Reads session state from SQLite.
  */
 
 import { Command } from "commander";
@@ -17,6 +18,7 @@ import {
   detectWorkflowType,
   detectActiveWorkflows,
   isSessionActive,
+  setProgressDb,
   type WorkflowType,
   type WorkflowState,
   type WorkflowProgressStrategy,
@@ -81,6 +83,25 @@ function getStrategyForSession(
   return getStrategy(workflowType) ?? null;
 }
 
+/**
+ * Try to initialize the SQLite DB for progress reads.
+ * Non-fatal: if DB doesn't exist yet, progress tracking won't be available.
+ */
+async function initProgressDb(ocrDir: string): Promise<void> {
+  const dbPath = join(ocrDir, "data", "ocr.db");
+  if (!existsSync(dbPath)) {
+    return;
+  }
+
+  try {
+    const { openDatabase } = await import("../lib/db/index.js");
+    const db = await openDatabase(dbPath);
+    setProgressDb(db);
+  } catch {
+    // DB init failed; progress tracking unavailable
+  }
+}
+
 type ProgressOptions = {
   session?: string;
   workflow?: WorkflowType;
@@ -111,6 +132,9 @@ export const progressCommand = new Command("progress")
     const sessionsDir = ensureSessionsDir(targetDir);
     const ocrDir = join(targetDir, ".ocr");
 
+    // Initialize SQLite DB for progress reads (non-fatal)
+    await initProgressDb(ocrDir);
+
     // If specific session requested, error if not found
     if (options.session) {
       const sessionPath = join(sessionsDir, options.session);
@@ -132,16 +156,16 @@ export const progressCommand = new Command("progress")
         process.exit(1);
       }
 
-      let state = strategy.parseState(sessionPath);
+      let state = strategy.parseState(sessionPath, undefined, ocrDir);
       if (!state) {
         console.log(
           chalk.red(
-            `Session ${options.session} has no state.json - cannot track progress`,
+            `Session ${options.session} has no state data - cannot track progress`,
           ),
         );
         console.log(
           chalk.dim(
-            `The orchestrating agent must create state.json for progress tracking.`,
+            `The orchestrating agent must create state via 'ocr state init' for progress tracking.`,
           ),
         );
         process.exit(1);
@@ -152,7 +176,7 @@ export const progressCommand = new Command("progress")
 
       // Periodic timer update
       const timerInterval = setInterval(() => {
-        const newState = strategy.parseState(sessionPath, preservedStartTime);
+        const newState = strategy.parseState(sessionPath, preservedStartTime, ocrDir);
         if (newState) {
           state = newState;
           strategy.render(state);
@@ -167,7 +191,7 @@ export const progressCommand = new Command("progress")
       });
 
       watcher.on("all", () => {
-        const newState = strategy.parseState(sessionPath, preservedStartTime);
+        const newState = strategy.parseState(sessionPath, preservedStartTime, ocrDir);
         if (newState) {
           state = newState;
           strategy.render(state);
@@ -228,7 +252,7 @@ export const progressCommand = new Command("progress")
 
           if (activeWorkflows.length > 1) {
             // Both workflows active - render combined view
-            renderCombinedProgress(currentSessionPath, preservedStartTimes);
+            renderCombinedProgress(currentSessionPath, preservedStartTimes, ocrDir);
             return;
           }
         }
@@ -246,6 +270,7 @@ export const progressCommand = new Command("progress")
           const state = currentStrategy.parseState(
             currentSessionPath,
             preservedStartTimes[workflowType],
+            ocrDir,
           );
           if (state) {
             if (!preservedStartTimes[workflowType]) {
@@ -359,6 +384,7 @@ function renderGenericWaiting(): void {
 function renderCombinedProgress(
   sessionPath: string,
   preservedStartTimes: Record<WorkflowType, number | undefined>,
+  ocrDir: string,
 ): void {
   const lines: string[] = [];
   const session = basename(sessionPath);
@@ -381,6 +407,7 @@ function renderCombinedProgress(
     const reviewState = reviewStrategy.parseState(
       sessionPath,
       preservedStartTimes.review,
+      ocrDir,
     );
     if (reviewState) {
       const reviewPercent = Math.round(
@@ -411,6 +438,7 @@ function renderCombinedProgress(
     const mapState = mapStrategy.parseState(
       sessionPath,
       preservedStartTimes.map,
+      ocrDir,
     );
     if (mapState) {
       const mapPercent = Math.round(
