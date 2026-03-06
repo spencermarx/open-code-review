@@ -21,10 +21,10 @@ interface CommandDef {
 
 const COMMANDS: CommandDef[] = [
   {
-    id: 'map',
-    command: 'ocr map',
-    label: 'Map',
-    description: 'Generate a Code Review Map for large changesets',
+    id: 'review',
+    command: 'ocr review',
+    label: 'Review',
+    description: 'Run multi-agent AI code review',
     params: [
       { name: 'target', type: 'text', label: 'Target', placeholder: 'staged (default)' },
       { name: 'requirements', type: 'text', label: 'Requirements', placeholder: 'spec.md or describe what to focus on...' },
@@ -32,10 +32,10 @@ const COMMANDS: CommandDef[] = [
     ],
   },
   {
-    id: 'review',
-    command: 'ocr review',
-    label: 'Review',
-    description: 'Run multi-agent AI code review',
+    id: 'map',
+    command: 'ocr map',
+    label: 'Map',
+    description: 'Generate a Code Review Map for large changesets',
     params: [
       { name: 'target', type: 'text', label: 'Target', placeholder: 'staged (default)' },
       { name: 'requirements', type: 'text', label: 'Requirements', placeholder: 'spec.md or describe what to focus on...' },

@@ -12,6 +12,7 @@ import {
 import { MarkdownRenderer } from '../../components/markdown/markdown-renderer'
 import { ChatPanel } from '../chat/components/chat-panel'
 import { PostReviewDialog } from './components/post-review-dialog'
+import { AddressFeedbackPopover } from './components/address-feedback-popover'
 
 export function RoundPage() {
   const { id: sessionId, round: roundStr } = useParams<{
@@ -78,6 +79,12 @@ export function RoundPage() {
               roundNumber={roundNumber}
               finalContent={finalArtifact.content}
               savedHumanReview={finalHumanArtifact?.content}
+            />
+          )}
+          {finalArtifact && (
+            <AddressFeedbackPopover
+              sessionId={sessionId ?? ''}
+              roundNumber={roundNumber}
             />
           )}
           <button
