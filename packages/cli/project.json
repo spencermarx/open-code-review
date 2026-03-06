@@ -7,24 +7,12 @@
   "implicitDependencies": ["dashboard"],
   "targets": {
     "build:bundle": {
-      "executor": "@nx/esbuild:esbuild",
-      "outputs": ["{options.outputPath}"],
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/dist/index.js"],
       "dependsOn": ["^build"],
       "options": {
-        "main": "packages/cli/src/index.ts",
-        "outputPath": "packages/cli/dist",
-        "outputFileName": "index.js",
-        "tsConfig": "packages/cli/tsconfig.json",
-        "format": ["esm"],
-        "platform": "node",
-        "target": "node20",
-        "bundle": true,
-        "minify": false,
-        "esbuildOptions": {
-          "banner": {
-            "js": "#!/usr/bin/env node"
-          }
-        }
+        "command": "node build.mjs",
+        "cwd": "{projectRoot}"
       }
     },
     "build:copy-dashboard": {

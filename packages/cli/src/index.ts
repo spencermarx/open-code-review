@@ -7,8 +7,13 @@ import { updateCommand } from "./commands/update";
 import { dashboardCommand } from "./commands/dashboard";
 import { doctorCommand } from "./commands/doctor";
 
-const require = createRequire(import.meta.url);
-const { version: cliVersion } = require("../package.json") as { version: string };
+// Injected at build time by esbuild `define`. Falls back to package.json
+// for dev (tsx) where the define is not applied.
+declare const __CLI_VERSION__: string;
+const cliVersion =
+  typeof __CLI_VERSION__ !== "undefined"
+    ? __CLI_VERSION__
+    : (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
 const program = new Command();
 
