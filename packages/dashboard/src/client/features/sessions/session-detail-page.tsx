@@ -49,23 +49,29 @@ function buildPhases(
   const phaseNames = workflowType === 'map' ? MAP_PHASES : REVIEW_PHASES
   const totalPhases = phaseNames.length
 
-  // A session is "fully complete" only if it reached the final phase.
-  // If closed early (interrupted), show phases beyond progress as 'skipped'.
-  const fullyComplete = status === 'closed' && phaseNumber >= totalPhases
+  // Workflow reached its final phase — all complete, regardless of session status.
+  // (The session may still be active because another workflow is in progress.)
+  if (phaseNumber >= totalPhases) {
+    return phaseNames.map((name) => ({ name: phaseLabel(name), status: 'complete' as const }))
+  }
 
-  return phaseNames.map((name, i) => {
-    const label = phaseLabel(name)
-    if (fullyComplete) return { name: label, status: 'complete' }
-    if (status === 'closed') {
-      // Closed early — show actual progress, mark unreached phases as skipped
-      if (i + 1 <= phaseNumber) return { name: label, status: 'complete' }
-      return { name: label, status: 'skipped' }
-    }
-    // Active session
-    if (i + 1 < phaseNumber) return { name: label, status: 'complete' }
-    if (i + 1 === phaseNumber) return { name: label, status: 'active' }
-    return { name: label, status: 'pending' }
-  })
+  // Session closed before this workflow finished — show progress + skipped
+  if (status === 'closed') {
+    return phaseNames.map((name, i) => ({
+      name: phaseLabel(name),
+      status: i + 1 <= phaseNumber ? 'complete' as const : 'skipped' as const,
+    }))
+  }
+
+  // Active session, workflow in progress
+  return phaseNames.map((name, i) => ({
+    name: phaseLabel(name),
+    status: i + 1 < phaseNumber
+      ? 'complete' as const
+      : i + 1 === phaseNumber
+        ? 'active' as const
+        : 'pending' as const,
+  }))
 }
 
 export function SessionDetailPage() {
