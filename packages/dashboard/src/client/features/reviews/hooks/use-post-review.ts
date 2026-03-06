@@ -1,6 +1,12 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSocket, useSocketEvent } from '../../../providers/socket-provider'
 import type { PostReviewStep, PostCheckResult, ChatToolStatus } from '../../../lib/api-types'
+
+export interface ActivityLogEntry {
+  tool: string
+  detail: string
+  timestamp: number
+}
 
 interface UsePostReviewReturn {
   step: PostReviewStep
@@ -8,6 +14,8 @@ interface UsePostReviewReturn {
   streamingContent: string
   generatedContent: string
   toolStatus: ChatToolStatus | null
+  activityLog: ActivityLogEntry[]
+  elapsedSeconds: number
   postResult: { success: boolean; commentUrl?: string | null; error?: string } | null
   error: string | null
   checkGitHub: (sessionId: string) => void
@@ -27,10 +35,27 @@ export function usePostReview(): UsePostReviewReturn {
   const [streamingContent, setStreamingContent] = useState('')
   const [generatedContent, setGeneratedContent] = useState('')
   const [toolStatus, setToolStatus] = useState<ChatToolStatus | null>(null)
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
   const [postResult, setPostResult] = useState<{ success: boolean; commentUrl?: string | null; error?: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const streamingRef = useRef('')
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Elapsed timer — ticks every second while generating
+  useEffect(() => {
+    if (step === 'generating') {
+      setElapsedSeconds(0)
+      timerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000)
+    } else if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [step])
 
   // ── GitHub check result ──
   useSocketEvent<PostCheckResult>(
@@ -55,15 +80,26 @@ export function usePostReview(): UsePostReviewReturn {
     }, []),
   )
 
+  // ── Clear stream (reasoning text discarded when a tool fires) ──
+  useSocketEvent(
+    'post:clear-stream',
+    useCallback(() => {
+      streamingRef.current = ''
+      setStreamingContent('')
+    }, []),
+  )
+
   // ── Tool status ──
   useSocketEvent<{ tool: string; detail: string }>(
     'post:status',
     useCallback((data) => {
-      setToolStatus({
+      const entry: ActivityLogEntry = {
         tool: data.tool,
         detail: data.detail,
         timestamp: Date.now(),
-      })
+      }
+      setToolStatus(entry)
+      setActivityLog((prev) => [...prev, entry])
     }, []),
   )
 
@@ -147,6 +183,7 @@ export function usePostReview(): UsePostReviewReturn {
       setStreamingContent('')
       setGeneratedContent('')
       setToolStatus(null)
+      setActivityLog([])
       streamingRef.current = ''
       socket.emit('post:generate', { sessionId, roundNumber })
     },
@@ -185,6 +222,7 @@ export function usePostReview(): UsePostReviewReturn {
     setStreamingContent('')
     setGeneratedContent('')
     setToolStatus(null)
+    setActivityLog([])
     setPostResult(null)
     setError(null)
     streamingRef.current = ''
@@ -196,6 +234,8 @@ export function usePostReview(): UsePostReviewReturn {
     streamingContent,
     generatedContent,
     toolStatus,
+    activityLog,
+    elapsedSeconds,
     postResult,
     error,
     checkGitHub,
