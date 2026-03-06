@@ -428,13 +428,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     cleanupAllPostGenerations()
 
     // Flush all pending changes before stopping watchers
-    saveDb(db, ocrDir)
+    try { saveDb(db, ocrDir) } catch { /* DB may not be writable during shutdown */ }
 
     dbSyncWatcher.stopWatching()
     fsSync.stopWatching()
     io.close()
     httpServer.close(() => {
-      saveDb(db, ocrDir)
+      try { saveDb(db, ocrDir) } catch { /* ignore */ }
       closeDb()
       console.log('Server stopped.')
       process.exit(0)
