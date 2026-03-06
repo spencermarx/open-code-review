@@ -158,17 +158,20 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   writeFileSync(pidFilePath, String(process.pid), { mode: 0o600 })
 
-  // Mark any command_executions left in "running" state as cancelled
-  // (happens when the server restarts while a command is active)
+  // Mark any command_executions left in a broken state as cancelled.
+  // Covers two cases:
+  //   1. finished_at IS NULL — process was running when server stopped
+  //   2. exit_code IS NULL — old bug where SIGTERM-killed processes stored null exit code
   const staleResult = db.exec(
-    "SELECT COUNT(*) as c FROM command_executions WHERE finished_at IS NULL"
+    "SELECT COUNT(*) as c FROM command_executions WHERE finished_at IS NULL OR exit_code IS NULL"
   )
   const staleCount = (staleResult[0]?.values[0]?.[0] as number) ?? 0
   if (staleCount > 0) {
     db.run(
       `UPDATE command_executions
-       SET exit_code = -2, finished_at = datetime('now'), output = COALESCE(output, '') || '\n[Cancelled: server restarted]'
-       WHERE finished_at IS NULL`
+       SET exit_code = -2, finished_at = COALESCE(finished_at, datetime('now')),
+           output = COALESCE(output, '') || '\n[Cancelled]'
+       WHERE finished_at IS NULL OR exit_code IS NULL`
     )
     saveDb(db, ocrDir)
     console.log(`Cleaned up ${staleCount} stale command execution(s)`)
