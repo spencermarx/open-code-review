@@ -97,7 +97,13 @@ io.use((socket, next) => {
 // allows the Vite-served client to fetch the token on startup.
 // In production, the token is injected into index.html as a <script> tag.
 if (process.env.NODE_ENV !== 'production') {
-  app.get('/auth/token', (_req, res) => {
+  app.get('/auth/token', (req, res) => {
+    const origin = req.headers.origin
+    const allowed = ['http://localhost:5173', 'http://localhost:4173']
+    if (origin && !allowed.includes(origin)) {
+      res.status(403).json({ error: 'Forbidden: invalid origin' })
+      return
+    }
     res.json({ token: AUTH_TOKEN })
   })
 }
@@ -110,7 +116,7 @@ app.get('/api/health', (_req, res) => {
 
 // ── Server startup ──
 
-export interface StartServerOptions {
+export type StartServerOptions = {
   port?: number
   open?: boolean
 }
@@ -355,7 +361,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       console.log('')
       console.log('='.repeat(60))
       console.log('  AUTH TOKEN (bearer token for API / Socket.IO):')
-      console.log(`  ${AUTH_TOKEN}`)
+      console.log(`  ${AUTH_TOKEN.slice(0, 8)}...[redacted]`)
       console.log('='.repeat(60))
       console.log('')
       resolve()
@@ -420,6 +426,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
     cleanupAllChats()
     cleanupAllPostGenerations()
+
+    // Flush all pending changes before stopping watchers
+    saveDb(db, ocrDir)
+
     dbSyncWatcher.stopWatching()
     fsSync.stopWatching()
     io.close()

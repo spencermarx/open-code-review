@@ -11,7 +11,7 @@ import type { Server as SocketIOServer } from 'socket.io'
 import type { Database } from 'sql.js'
 import { saveDb } from '../db.js'
 
-export interface TrackedExecution {
+export type TrackedExecution = {
   executionId: number
   /** Append text to the output buffer and emit `command:output`. */
   appendOutput: (content: string) => void

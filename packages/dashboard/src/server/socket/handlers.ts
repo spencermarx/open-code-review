@@ -14,6 +14,11 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
         socket.emit('error', { message: 'Invalid payload: sessionId must be a string' })
         return
       }
+      const SESSION_ID_PATTERN = /^\d{4}-\d{2}-\d{2}-.+$/
+      if (!SESSION_ID_PATTERN.test(sessionId)) {
+        socket.emit('error', { message: 'Invalid sessionId format' })
+        return
+      }
       const room = `session:${sessionId}`
       void socket.join(room)
     } catch (err) {
@@ -26,6 +31,11 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
     try {
       if (typeof sessionId !== 'string') {
         socket.emit('error', { message: 'Invalid payload: sessionId must be a string' })
+        return
+      }
+      const SESSION_ID_PATTERN = /^\d{4}-\d{2}-\d{2}-.+$/
+      if (!SESSION_ID_PATTERN.test(sessionId)) {
+        socket.emit('error', { message: 'Invalid sessionId format' })
         return
       }
       const room = `session:${sessionId}`

@@ -21,12 +21,12 @@ import {
   type ChatConversationRow,
 } from '../db.js'
 import { buildChatContext, type ChatTarget } from '../services/chat-context.js'
-import { AiCliService, formatToolDetail, cleanupTempFile } from '../services/ai-cli/index.js'
+import { AiCliService, formatToolDetail } from '../services/ai-cli/index.js'
 import { startTrackedExecution, type TrackedExecution } from './execution-tracker.js'
 
 // ── Types ──
 
-interface ChatSendPayload {
+type ChatSendPayload = {
   conversationId: string
   sessionId: string
   targetType: ChatConversationRow['target_type']
@@ -34,7 +34,7 @@ interface ChatSendPayload {
   message: string
 }
 
-interface ChatHistoryPayload {
+type ChatHistoryPayload = {
   conversationId: string
 }
 
@@ -45,7 +45,7 @@ const IDLE_TIMEOUT_MS = 48 * 60 * 60 * 1000
 
 // ── Active processes ──
 
-interface ActiveChat {
+type ActiveChat = {
   process: ChildProcess | null
   conversationId: string
   timer: ReturnType<typeof setTimeout>
@@ -146,7 +146,25 @@ export function registerChatHandlers(
         prompt = `${context}\n\nUser: ${message}`
       }
 
-      const adapter = aiCliService.getAdapter()!
+      const adapter = aiCliService.getAdapter()
+      if (!adapter) {
+        socket.emit('chat:error', {
+          conversationId,
+          error: 'No AI CLI adapter available',
+        })
+        return
+      }
+
+      // Validate resumeSessionId format before passing to adapter
+      const resumeId = claudeSessionId ?? undefined
+      if (resumeId && !/^[a-zA-Z0-9_-]+$/.test(resumeId)) {
+        socket.emit('chat:error', {
+          conversationId,
+          error: 'Invalid resume session ID format',
+        })
+        return
+      }
+
       const repoRoot = dirname(ocrDir)
       const spawnResult = adapter.spawn({
         prompt,
@@ -154,7 +172,7 @@ export function registerChatHandlers(
         mode: 'query',
         maxTurns: 1,
         allowedTools: ['Read', 'Grep', 'Glob'],
-        resumeSessionId: claudeSessionId ?? undefined,
+        resumeSessionId: resumeId,
       })
       const proc = spawnResult.process
 
@@ -236,10 +254,6 @@ export function registerChatHandlers(
       })
 
       proc.on('close', (code) => {
-        // Clean up temp file
-        const tmpFile = (proc as any)._tmpFile
-        if (tmpFile) cleanupTempFile(tmpFile)
-
         // Process any remaining buffered data
         if (lineBuffer.trim()) {
           for (const evt of adapter.parseLine(lineBuffer)) {

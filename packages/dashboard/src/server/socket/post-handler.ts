@@ -16,7 +16,7 @@ import type { Database } from 'sql.js'
 import { getSession, saveDb } from '../db.js'
 import { cleanEnv } from './env.js'
 import { buildHumanReviewPrompt } from '../prompts/human-review.js'
-import { AiCliService, formatToolDetail, cleanupTempFile, type NormalizedEvent } from '../services/ai-cli/index.js'
+import { AiCliService, formatToolDetail, type NormalizedEvent } from '../services/ai-cli/index.js'
 import { startTrackedExecution, type TrackedExecution } from './execution-tracker.js'
 
 const execFileAsync = promisify(execFile)
@@ -353,10 +353,6 @@ export function registerPostHandlers(
       })
 
       proc.on('close', (code) => {
-        // Clean up temp file stored on process by the adapter
-        const tmpFile = (proc as unknown as { _tmpFile?: string })._tmpFile
-        if (tmpFile) cleanupTempFile(tmpFile)
-
         activeGenerations.delete(generationKey)
 
         // Process remaining buffer

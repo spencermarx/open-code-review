@@ -15,17 +15,18 @@ import { dirname, join } from 'node:path'
 import type { Server as SocketIOServer, Socket } from 'socket.io'
 import type { Database } from 'sql.js'
 import { saveDb } from '../db.js'
-import { AiCliService, formatToolDetail, cleanupTempFile, type NormalizedEvent } from '../services/ai-cli/index.js'
+import { AiCliService, formatToolDetail, type NormalizedEvent } from '../services/ai-cli/index.js'
 import { resolveLocalCli } from './cli-resolver.js'
+import { cleanEnv } from './env.js'
 
 // ── Types ──
 
-interface CommandRunPayload {
+type CommandRunPayload = {
   command: string
   args?: string[]
 }
 
-interface CommandStartedEvent {
+type CommandStartedEvent = {
   execution_id: number
   command: string
   args: string[]
@@ -49,7 +50,7 @@ const AI_COMMANDS = new Set(['map', 'review', 'translate-review-to-single-human'
 
 const MAX_CONCURRENT = 3
 
-interface ProcessEntry {
+type ProcessEntry = {
   process: ChildProcess | null
   executionId: number
   outputBuffer: string
@@ -78,7 +79,7 @@ export function getRunningCount(): number {
   return activeCommands.size
 }
 
-export interface ActiveCommandInfo {
+export type ActiveCommandInfo = {
   execution_id: number
   command: string
   started_at: string
@@ -262,11 +263,11 @@ function spawnCliCommand(
   const proc = localCli
     ? spawn('node', [localCli, baseCommand, ...subArgs], {
         cwd: repoRoot,
-        env: { ...process.env },
+        env: cleanEnv(),
       })
     : spawn('ocr', [baseCommand, ...subArgs], {
         cwd: repoRoot,
-        env: { ...process.env },
+        env: cleanEnv(),
       })
   entry.process = proc
 
@@ -314,7 +315,13 @@ function spawnAiCommand(
   entry: ProcessEntry,
   aiCliService: AiCliService
 ): void {
-  const adapter = aiCliService.getAdapter()!
+  const adapter = aiCliService.getAdapter()
+  if (!adapter) {
+    const content = 'Error: No AI CLI adapter available\n'
+    io.emit('command:output', { execution_id: executionId, content })
+    finishExecution(io, db, ocrDir, executionId, 1, content)
+    return
+  }
 
   // 1. Read the command .md file
   const commandMdPath = join(ocrDir, 'commands', `${baseCommand}.md`)
@@ -414,7 +421,7 @@ function spawnAiCommand(
   // 5. Parse structured output via adapter
   let lineBuffer = ''
 
-  interface PendingTool { name: string; inputJson: string }
+  type PendingTool = { name: string; inputJson: string }
   const pendingTools = new Map<number, PendingTool>()
   let currentBlockIndex = -1
 
@@ -479,9 +486,6 @@ function spawnAiCommand(
   })
 
   proc.on('close', (code) => {
-    const tmpFile = (proc as any)._tmpFile
-    if (tmpFile) cleanupTempFile(tmpFile)
-
     // Process remaining buffered data
     if (lineBuffer.trim()) {
       const events = adapter.parseLine(lineBuffer)
@@ -512,9 +516,6 @@ function spawnAiCommand(
   })
 
   proc.on('error', (err) => {
-    const tmpFile = (proc as any)._tmpFile
-    if (tmpFile) cleanupTempFile(tmpFile)
-
     const errContent = `Failed to spawn AI CLI: ${err.message}\n`
     entry.outputBuffer += errContent
     io.emit('command:output', { execution_id: executionId, content: errContent })

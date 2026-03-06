@@ -29,17 +29,10 @@ export class OpenCodeAdapter implements AiCliAdapter {
   readonly binary = 'opencode'
 
   detect(): DetectionResult {
-    try {
-      const output = execFileSync('opencode', ['--version'], {
-        encoding: 'utf-8',
-        timeout: 5000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-      const match = output.match(/\d+\.\d+[\.\d]*/)
-      return { found: true, version: match?.[0] }
-    } catch {
-      return { found: false }
-    }
+    // OpenCode adapter is a stub — spawn() and parseLine() are not yet
+    // implemented. Return found: false so AiCliService never selects this
+    // adapter as the active one. Re-enable once spawn is implemented.
+    return { found: false }
   }
 
   spawn(_opts: SpawnOptions): SpawnResult {
