@@ -9,7 +9,7 @@
     "dev:server": "tsx watch src/server/index.ts",
     "build": "pnpm build:client && pnpm build:server",
     "build:client": "vite build",
-    "build:server": "esbuild src/server/index.ts --bundle --platform=node --format=esm --outfile=dist/server.js --external:sql.js --external:chokidar --external:socket.io",
+    "build:server": "esbuild src/server/index.ts --bundle --platform=node --format=esm --outfile=dist/server.js --external:sql.js --external:chokidar --external:socket.io --banner:js=\"import { createRequire as _cjsReq } from 'module'; const require = _cjsReq(import.meta.url);\"",
     "preview": "node dist/server.js",
     "test": "vitest run"
   },
