@@ -139,18 +139,18 @@ export const progressCommand = new Command("progress")
     if (options.session) {
       const sessionPath = join(sessionsDir, options.session);
       if (!existsSync(sessionPath)) {
-        console.log(chalk.red(`Session not found: ${options.session}`));
+        console.error(chalk.red(`Session not found: ${options.session}`));
         process.exit(1);
       }
 
       const strategy = getStrategyForSession(sessionPath, options.workflow);
       if (!strategy) {
-        console.log(
+        console.error(
           chalk.red(
             `Cannot determine workflow type for session ${options.session}`,
           ),
         );
-        console.log(
+        console.error(
           chalk.dim(`Try specifying --workflow review or --workflow map`),
         );
         process.exit(1);
@@ -158,12 +158,12 @@ export const progressCommand = new Command("progress")
 
       let state = strategy.parseState(sessionPath, undefined, ocrDir);
       if (!state) {
-        console.log(
+        console.error(
           chalk.red(
             `Session ${options.session} has no state data - cannot track progress`,
           ),
         );
-        console.log(
+        console.error(
           chalk.dim(
             `The orchestrating agent must create state via 'ocr state init' for progress tracking.`,
           ),

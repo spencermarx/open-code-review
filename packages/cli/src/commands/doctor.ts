@@ -75,19 +75,19 @@ export const doctorCommand = new Command("doctor")
     console.log();
 
     if (hasIssues) {
-      console.log(chalk.red("  ✗ Issues found"));
-      console.log();
+      console.error(chalk.red("  ✗ Issues found"));
+      console.error();
 
       if (!depResult.allRequiredFound) {
         const missing = depResult.checks.filter(
           (c) => c.required && !c.found,
         );
         for (const dep of missing) {
-          console.log(
+          console.error(
             `    ${chalk.yellow("⚠")} ${chalk.yellow(`${dep.name} was not found in PATH.`)}`,
           );
           if (dep.installHint) {
-            console.log(
+            console.error(
               `      ${chalk.dim("Install:")} ${chalk.white(dep.installHint)}`,
             );
           }
@@ -95,15 +95,15 @@ export const doctorCommand = new Command("doctor")
       }
 
       if (!ocrStatus.valid) {
-        console.log(
+        console.error(
           `    ${chalk.yellow("⚠")} ${chalk.yellow("OCR is not initialized in this directory.")}`,
         );
-        console.log(
+        console.error(
           `      ${chalk.dim("Run:")} ${chalk.white("ocr init")}`,
         );
       }
 
-      console.log();
+      console.error();
       process.exit(1);
     }
 

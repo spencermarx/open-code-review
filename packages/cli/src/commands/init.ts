@@ -49,8 +49,8 @@ export const initCommand = new Command("init")
             `Error: ${error instanceof Error ? error.message : "Invalid tools argument"}`,
           ),
         );
-        console.log();
-        console.log(
+        console.error();
+        console.error(
           chalk.dim(`Valid tool IDs: ${AI_TOOLS.map((t) => t.id).join(", ")}`),
         );
         process.exit(1);
@@ -120,9 +120,9 @@ export const initCommand = new Command("init")
 
     if (failed.length > 0) {
       console.log();
-      console.log(chalk.red("✗ Some installations failed:"));
+      console.error(chalk.red("✗ Some installations failed:"));
       for (const result of failed) {
-        console.log(`  ${chalk.red("✗")} ${result.tool.name}: ${result.error}`);
+        console.error(`  ${chalk.red("✗")} ${result.tool.name}: ${result.error}`);
       }
     }
 
@@ -130,9 +130,9 @@ export const initCommand = new Command("init")
     const allWarnings = results.flatMap((r) => r.warnings ?? []);
     if (allWarnings.length > 0) {
       console.log();
-      console.log(chalk.yellow("⚠ Warnings:"));
+      console.error(chalk.yellow("⚠ Warnings:"));
       for (const warning of allWarnings) {
-        console.log(`  ${chalk.yellow("⚠")} ${warning}`);
+        console.error(`  ${chalk.yellow("⚠")} ${warning}`);
       }
     }
 

@@ -30,7 +30,6 @@ afterEach(() => {
 
 function sessionDir(sessionId: string): string {
   const dir = join(sessionsDir, sessionId);
-  const { mkdirSync } = require("node:fs");
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -130,7 +129,6 @@ describe("stateTransition", () => {
       phase: "change-context",
       phaseNumber: 2,
       ocrDir,
-      sessionDir: dir,
     });
 
     const result = await stateShow(ocrDir, "transition-test");
@@ -153,7 +151,6 @@ describe("stateTransition", () => {
       phase: "analysis",
       phaseNumber: 3,
       ocrDir,
-      sessionDir: dir,
     });
 
     const result = await stateShow(ocrDir, "phase-event");
@@ -182,7 +179,6 @@ describe("stateTransition", () => {
       phaseNumber: 1,
       round: 2,
       ocrDir,
-      sessionDir: dir,
     });
 
     const result = await stateShow(ocrDir, "round-change");
@@ -208,7 +204,6 @@ describe("stateTransition", () => {
       phaseNumber: 2,
       round: 1, // same round
       ocrDir,
-      sessionDir: dir,
     });
 
     const result = await stateShow(ocrDir, "no-round-event");
@@ -234,7 +229,6 @@ describe("stateTransition", () => {
         phase: "context",
         phaseNumber: 1,
         ocrDir,
-        sessionDir: dir,
       }),
     ).rejects.toThrow("Session not found: nonexistent");
   });
@@ -261,10 +255,9 @@ describe("stateTransition", () => {
     for (const p of phases) {
       await stateTransition({
         sessionId: "multi-trans",
-        phase: p.phase,
+        phase: p.phase as import("../../state/types.js").ReviewPhase,
         phaseNumber: p.phaseNumber,
         ocrDir,
-        sessionDir: dir,
       });
     }
 
@@ -290,7 +283,6 @@ describe("stateClose", () => {
     await stateClose({
       sessionId: "close-test",
       ocrDir,
-      sessionDir: dir,
     });
 
     const result = await stateShow(ocrDir, "close-test");
@@ -311,7 +303,6 @@ describe("stateClose", () => {
     await stateClose({
       sessionId: "close-event",
       ocrDir,
-      sessionDir: dir,
     });
 
     const result = await stateShow(ocrDir, "close-event");
@@ -335,7 +326,6 @@ describe("stateClose", () => {
       stateClose({
         sessionId: "ghost",
         ocrDir,
-        sessionDir: dir,
       }),
     ).rejects.toThrow("Session not found: ghost");
   });
@@ -394,7 +384,6 @@ describe("stateShow", () => {
     await stateClose({
       sessionId: "temp",
       ocrDir,
-      sessionDir: dir,
     });
 
     // No active sessions now
@@ -417,7 +406,6 @@ describe("stateShow", () => {
       phase: "analysis",
       phaseNumber: 3,
       ocrDir,
-      sessionDir: dir,
     });
 
     const result = await stateShow(ocrDir, "events-show");
@@ -569,7 +557,6 @@ describe("resolveActiveSession", () => {
     await stateClose({
       sessionId: "closed-resolve",
       ocrDir,
-      sessionDir: dir,
     });
 
     await expect(resolveActiveSession(ocrDir)).rejects.toThrow(

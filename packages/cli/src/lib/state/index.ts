@@ -32,6 +32,8 @@ export type {
   ShowResult,
   WorkflowType,
   SessionStatus,
+  ReviewPhase,
+  MapPhase,
 } from "./types.js";
 
 /**

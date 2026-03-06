@@ -61,10 +61,9 @@ async function initDbAndSession(
   if (phase !== "context" || phaseNumber !== 1) {
     await stateTransition({
       sessionId,
-      phase,
+      phase: phase as import("../../state/types.js").ReviewPhase | import("../../state/types.js").MapPhase,
       phaseNumber,
       ocrDir,
-      sessionDir: dir,
     });
   }
 
@@ -112,7 +111,6 @@ describe("SQLite as primary read source", () => {
       phaseNumber: 1,
       round: 2,
       ocrDir,
-      sessionDir: dir,
     });
 
     // Create filesystem round directories so the strategy can see round 2
@@ -190,7 +188,6 @@ describe("Waiting state", () => {
     await stateClose({
       sessionId: "closed-session",
       ocrDir,
-      sessionDir: dir,
     });
 
     const dbPath = join(ocrDir, "data", "ocr.db");

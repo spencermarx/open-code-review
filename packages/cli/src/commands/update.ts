@@ -79,9 +79,9 @@ export const updateCommand = new Command("update")
     }
 
     if (toolsToUpdate.length === 0) {
-      console.log(chalk.yellow("  No configured AI tools found."));
-      console.log(chalk.dim("  Run `ocr init` to set up OCR first."));
-      console.log();
+      console.error(chalk.yellow("  No configured AI tools found."));
+      console.error(chalk.dim("  Run `ocr init` to set up OCR first."));
+      console.error();
       process.exit(1);
     }
 
@@ -154,9 +154,9 @@ export const updateCommand = new Command("update")
 
         if (failed.length > 0) {
           console.log();
-          console.log(chalk.red("  ✗ Some updates failed:"));
+          console.error(chalk.red("  ✗ Some updates failed:"));
           for (const result of failed) {
-            console.log(
+            console.error(
               `    ${chalk.red("✗")} ${result.tool.name}: ${result.error}`,
             );
           }
@@ -166,9 +166,9 @@ export const updateCommand = new Command("update")
         const allWarnings = results.flatMap((r) => r.warnings ?? []);
         if (allWarnings.length > 0) {
           console.log();
-          console.log(chalk.yellow("  ⚠ Warnings:"));
+          console.error(chalk.yellow("  ⚠ Warnings:"));
           for (const warning of allWarnings) {
-            console.log(`    ${chalk.yellow("⚠")} ${warning}`);
+            console.error(`    ${chalk.yellow("⚠")} ${warning}`);
           }
         }
 

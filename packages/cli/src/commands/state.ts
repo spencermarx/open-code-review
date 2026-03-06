@@ -106,26 +106,16 @@ const transitionSubcommand = new Command("transition")
       const ocrDir = join(targetDir, ".ocr");
 
       try {
-        let sessionId: string;
-        let sessionDir: string;
-
-        if (options.sessionId) {
-          sessionId = options.sessionId;
-          sessionDir = join(ocrDir, "sessions", sessionId);
-        } else {
-          const active = await resolveActiveSession(ocrDir);
-          sessionId = active.id;
-          sessionDir = active.sessionDir;
-        }
+        const sessionId = options.sessionId
+          ?? (await resolveActiveSession(ocrDir)).id;
 
         await stateTransition({
           sessionId,
-          phase: options.phase,
+          phase: options.phase as import("../lib/state/types.js").ReviewPhase | import("../lib/state/types.js").MapPhase,
           phaseNumber: options.phaseNumber,
           round: options.currentRound,
           mapRun: options.currentMapRun,
           ocrDir,
-          sessionDir,
         });
 
         console.log(
@@ -153,22 +143,12 @@ const closeSubcommand = new Command("close")
     const ocrDir = join(targetDir, ".ocr");
 
     try {
-      let sessionId: string;
-      let sessionDir: string;
-
-      if (options.sessionId) {
-        sessionId = options.sessionId;
-        sessionDir = join(ocrDir, "sessions", sessionId);
-      } else {
-        const active = await resolveActiveSession(ocrDir);
-        sessionId = active.id;
-        sessionDir = active.sessionDir;
-      }
+      const sessionId = options.sessionId
+        ?? (await resolveActiveSession(ocrDir)).id;
 
       await stateClose({
         sessionId,
         ocrDir,
-        sessionDir,
       });
 
       console.log(`${sessionId}: closed`);

@@ -41,26 +41,26 @@ export function requireOcrSetup(targetDir: string): OcrSetupStatus {
   const status = checkOcrSetup(targetDir);
 
   if (!status.valid) {
-    console.log();
-    console.log(chalk.red.bold("  ✗ OCR is not set up in this directory"));
-    console.log();
+    console.error();
+    console.error(chalk.red.bold("  ✗ OCR is not set up in this directory"));
+    console.error();
 
     if (!existsSync(status.ocrDir)) {
-      console.log(chalk.dim("  The .ocr directory was not found."));
+      console.error(chalk.dim("  The .ocr directory was not found."));
     } else if (!status.hasSkills) {
-      console.log(chalk.dim("  The .ocr/skills directory is missing."));
-      console.log(chalk.dim("  OCR may have been partially installed."));
+      console.error(chalk.dim("  The .ocr/skills directory is missing."));
+      console.error(chalk.dim("  OCR may have been partially installed."));
     }
 
-    console.log();
-    console.log(chalk.dim("  To set up OCR, run:"));
-    console.log();
-    console.log(chalk.white("    ocr init"));
-    console.log();
-    console.log(chalk.dim("  Or with npx:"));
-    console.log();
-    console.log(chalk.white("    npx @open-code-review/cli init"));
-    console.log();
+    console.error();
+    console.error(chalk.dim("  To set up OCR, run:"));
+    console.error();
+    console.error(chalk.white("    ocr init"));
+    console.error();
+    console.error(chalk.dim("  Or with npx:"));
+    console.error();
+    console.error(chalk.white("    npx @open-code-review/cli init"));
+    console.error();
 
     process.exit(1);
   }

@@ -12,21 +12,28 @@ import type {
 } from "./types.js";
 
 // ── Helpers ──
+// Local generic row-mapping utilities to avoid circular imports with ./index.js
+// which re-exports from this file.
 
-function rowToSession(columns: string[], values: (string | number | null)[]): SessionRow {
-  const obj: Record<string, unknown> = {};
-  for (let i = 0; i < columns.length; i++) {
-    obj[columns[i] as string] = values[i];
+type ExecResult = ReturnType<import("sql.js").Database["exec"]>;
+
+function resultToRows<T>(result: ExecResult): T[] {
+  if (result.length === 0 || !result[0]) {
+    return [];
   }
-  return obj as unknown as SessionRow;
+  const { columns, values } = result[0];
+  return values.map((row) => {
+    const obj: Record<string, unknown> = {};
+    for (let i = 0; i < columns.length; i++) {
+      obj[columns[i] as string] = row[i];
+    }
+    return obj as T;
+  });
 }
 
-function rowToEvent(columns: string[], values: (string | number | null)[]): EventRow {
-  const obj: Record<string, unknown> = {};
-  for (let i = 0; i < columns.length; i++) {
-    obj[columns[i] as string] = values[i];
-  }
-  return obj as unknown as EventRow;
+function resultToRow<T>(result: ExecResult): T | undefined {
+  const rows = resultToRows<T>(result);
+  return rows[0];
 }
 
 // ── Sessions ──
@@ -79,12 +86,12 @@ export function updateSession(
     values.push(params.current_map_run);
   }
 
-  // Always update updated_at
-  setClauses.push("updated_at = datetime('now')");
-
   if (setClauses.length === 0) {
     return;
   }
+
+  // Always update updated_at when there's something to update
+  setClauses.push("updated_at = datetime('now')");
 
   values.push(id);
   db.run(
@@ -94,41 +101,22 @@ export function updateSession(
 }
 
 export function getSession(db: Database, id: string): SessionRow | undefined {
-  const result = db.exec("SELECT * FROM sessions WHERE id = ?", [id]);
-  if (result.length === 0 || result[0]?.values.length === 0) {
-    return undefined;
-  }
-  const columns = result[0]?.columns;
-  const row = result[0]?.values[0];
-  if (!columns || !row) {
-    return undefined;
-  }
-  return rowToSession(columns, row as (string | number | null)[]);
+  return resultToRow<SessionRow>(
+    db.exec("SELECT * FROM sessions WHERE id = ?", [id]),
+  );
 }
 
 export function getLatestActiveSession(db: Database): SessionRow | undefined {
-  const result = db.exec(
-    "SELECT * FROM sessions WHERE status = 'active' ORDER BY started_at DESC LIMIT 1",
+  return resultToRow<SessionRow>(
+    db.exec(
+      "SELECT * FROM sessions WHERE status = 'active' ORDER BY started_at DESC LIMIT 1",
+    ),
   );
-  if (result.length === 0 || result[0]?.values.length === 0) {
-    return undefined;
-  }
-  const columns = result[0]?.columns;
-  const row = result[0]?.values[0];
-  if (!columns || !row) {
-    return undefined;
-  }
-  return rowToSession(columns, row as (string | number | null)[]);
 }
 
 export function getAllSessions(db: Database): SessionRow[] {
-  const result = db.exec("SELECT * FROM sessions ORDER BY started_at DESC");
-  if (result.length === 0 || !result[0]) {
-    return [];
-  }
-  const columns = result[0].columns;
-  return result[0].values.map((row) =>
-    rowToSession(columns, row as (string | number | null)[]),
+  return resultToRows<SessionRow>(
+    db.exec("SELECT * FROM sessions ORDER BY started_at DESC"),
   );
 }
 
@@ -162,16 +150,11 @@ export function getEventsForSession(
   db: Database,
   sessionId: string,
 ): EventRow[] {
-  const result = db.exec(
-    "SELECT * FROM orchestration_events WHERE session_id = ? ORDER BY id ASC",
-    [sessionId],
-  );
-  if (result.length === 0 || !result[0]) {
-    return [];
-  }
-  const columns = result[0].columns;
-  return result[0].values.map((row) =>
-    rowToEvent(columns, row as (string | number | null)[]),
+  return resultToRows<EventRow>(
+    db.exec(
+      "SELECT * FROM orchestration_events WHERE session_id = ? ORDER BY id ASC",
+      [sessionId],
+    ),
   );
 }
 

@@ -6,6 +6,24 @@ export type WorkflowType = "review" | "map";
 
 export type SessionStatus = "active" | "closed";
 
+export type ReviewPhase =
+  | "context"
+  | "change-context"
+  | "analysis"
+  | "reviews"
+  | "aggregation"
+  | "discourse"
+  | "synthesis"
+  | "complete";
+
+export type MapPhase =
+  | "map-context"
+  | "topology"
+  | "flow-analysis"
+  | "requirements-mapping"
+  | "synthesis"
+  | "complete";
+
 export type InitParams = {
   sessionId: string;
   branch: string;
@@ -16,18 +34,16 @@ export type InitParams = {
 
 export type TransitionParams = {
   sessionId: string;
-  phase: string;
+  phase: ReviewPhase | MapPhase;
   phaseNumber: number;
   round?: number;
   mapRun?: number;
   ocrDir: string;
-  sessionDir: string;
 };
 
 export type CloseParams = {
   sessionId: string;
   ocrDir: string;
-  sessionDir: string;
 };
 
 export type ShowResult = {

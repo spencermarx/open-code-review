@@ -7,8 +7,16 @@
     "ocr": "./dist/index.js"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./db": "./src/lib/db/index.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./db": {
+      "types": "./src/lib/db/index.ts",
+      "import": "./dist/lib/db/index.js",
+      "default": "./dist/lib/db/index.js"
+    }
   },
   "files": [
     "dist"
