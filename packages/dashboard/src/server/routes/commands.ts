@@ -75,7 +75,8 @@ export function createCommandsRouter(db: Database): Router {
       }))
       res.json(history)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch command history', detail: String(err) })
+      console.error('Failed to fetch command history:', err)
+      res.status(500).json({ error: 'Failed to fetch command history' })
     }
   })
 

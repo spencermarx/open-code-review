@@ -31,7 +31,8 @@ export function createChatRouter(db: Database, ocrDir: string): Router {
       const conversations = getConversationsForSession(db, sessionId)
       res.json(conversations)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch conversations', detail: String(err) })
+      console.error('Failed to fetch conversations:', err)
+      res.status(500).json({ error: 'Failed to fetch conversations' })
     }
   })
 
@@ -56,7 +57,8 @@ export function createChatRouter(db: Database, ocrDir: string): Router {
       const messages = getMessages(db, conversationId)
       res.json({ ...conversation, messages })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch conversation', detail: String(err) })
+      console.error('Failed to fetch conversation:', err)
+      res.status(500).json({ error: 'Failed to fetch conversation' })
     }
   })
 
@@ -82,7 +84,8 @@ export function createChatRouter(db: Database, ocrDir: string): Router {
       saveDb(db, ocrDir)
       res.status(200).json({ deleted: true })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to delete conversation', detail: String(err) })
+      console.error('Failed to delete conversation:', err)
+      res.status(500).json({ error: 'Failed to delete conversation' })
     }
   })
 

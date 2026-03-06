@@ -48,7 +48,8 @@ export function createNotesRouter(db: Database, ocrDir: string): Router {
       const notes = getNotes(db, targetType as NoteRow['target_type'], targetId)
       res.json(notes)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch notes', detail: String(err) })
+      console.error('Failed to fetch notes:', err)
+      res.status(500).json({ error: 'Failed to fetch notes' })
     }
   })
 
@@ -80,7 +81,8 @@ export function createNotesRouter(db: Database, ocrDir: string): Router {
       const note = getNote(db, noteId)
       res.status(201).json(note)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to create note', detail: String(err) })
+      console.error('Failed to create note:', err)
+      res.status(500).json({ error: 'Failed to create note' })
     }
   })
 
@@ -111,7 +113,8 @@ export function createNotesRouter(db: Database, ocrDir: string): Router {
       const note = getNote(db, noteId)
       res.json(note)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to update note', detail: String(err) })
+      console.error('Failed to update note:', err)
+      res.status(500).json({ error: 'Failed to update note' })
     }
   })
 
@@ -134,7 +137,8 @@ export function createNotesRouter(db: Database, ocrDir: string): Router {
       saveDb(db, ocrDir)
       res.status(200).json({ deleted: true })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to delete note', detail: String(err) })
+      console.error('Failed to delete note:', err)
+      res.status(500).json({ error: 'Failed to delete note' })
     }
   })
 

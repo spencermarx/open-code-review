@@ -89,7 +89,8 @@ export function createConfigRouter(ocrDir: string): Router {
       writeFileSync(configPath, content)
       res.json({ ide })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to update config', detail: String(err) })
+      console.error('Failed to update config:', err)
+      res.status(500).json({ error: 'Failed to update config' })
     }
   })
 

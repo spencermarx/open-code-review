@@ -38,6 +38,42 @@ const VALID_ROUND_STATUSES = new Set<RoundProgressRow['status']>([
   'dismissed',
 ])
 
+// ── Debounced save ──
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+let pendingDb: Database | null = null
+let pendingOcrDir: string | null = null
+
+function debouncedSave(db: Database, ocrDir: string): void {
+  pendingDb = db
+  pendingOcrDir = ocrDir
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    if (pendingDb && pendingOcrDir) {
+      saveDb(pendingDb, pendingOcrDir)
+    }
+    saveTimer = null
+    pendingDb = null
+    pendingOcrDir = null
+  }, 500)
+}
+
+/**
+ * Flush any pending debounced save immediately.
+ * Call this on server shutdown to ensure no writes are lost.
+ */
+export function flushSave(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  if (pendingDb && pendingOcrDir) {
+    saveDb(pendingDb, pendingOcrDir)
+    pendingDb = null
+    pendingOcrDir = null
+  }
+}
+
 export function createProgressRouter(db: Database, ocrDir: string): Router {
   const router = Router()
 
@@ -63,12 +99,13 @@ export function createProgressRouter(db: Database, ocrDir: string): Router {
       }
 
       upsertFileProgress(db, fileId, isReviewed)
-      saveDb(db, ocrDir)
+      debouncedSave(db, ocrDir)
 
       const progress = getFileProgress(db, fileId)
       res.json(progress)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to update file progress', detail: String(err) })
+      console.error('Failed to update file progress:', err)
+      res.status(500).json({ error: 'Failed to update file progress' })
     }
   })
 
@@ -82,10 +119,11 @@ export function createProgressRouter(db: Database, ocrDir: string): Router {
       }
 
       deleteFileProgress(db, fileId)
-      saveDb(db, ocrDir)
+      debouncedSave(db, ocrDir)
       res.status(200).json({ deleted: true })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to clear file progress', detail: String(err) })
+      console.error('Failed to clear file progress:', err)
+      res.status(500).json({ error: 'Failed to clear file progress' })
     }
   })
 
@@ -114,12 +152,13 @@ export function createProgressRouter(db: Database, ocrDir: string): Router {
       }
 
       upsertFindingProgress(db, findingId, status as FindingProgressRow['status'])
-      saveDb(db, ocrDir)
+      debouncedSave(db, ocrDir)
 
       const progress = getFindingProgress(db, findingId)
       res.json(progress)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to update finding progress', detail: String(err) })
+      console.error('Failed to update finding progress:', err)
+      res.status(500).json({ error: 'Failed to update finding progress' })
     }
   })
 
@@ -133,10 +172,11 @@ export function createProgressRouter(db: Database, ocrDir: string): Router {
       }
 
       deleteFindingProgress(db, findingId)
-      saveDb(db, ocrDir)
+      debouncedSave(db, ocrDir)
       res.status(200).json({ deleted: true })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to clear finding progress', detail: String(err) })
+      console.error('Failed to clear finding progress:', err)
+      res.status(500).json({ error: 'Failed to clear finding progress' })
     }
   })
 
@@ -165,12 +205,13 @@ export function createProgressRouter(db: Database, ocrDir: string): Router {
       }
 
       upsertRoundProgress(db, roundId, status as RoundProgressRow['status'])
-      saveDb(db, ocrDir)
+      debouncedSave(db, ocrDir)
 
       const progress = getRoundProgress(db, roundId)
       res.json(progress)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to update round progress', detail: String(err) })
+      console.error('Failed to update round progress:', err)
+      res.status(500).json({ error: 'Failed to update round progress' })
     }
   })
 
@@ -184,10 +225,11 @@ export function createProgressRouter(db: Database, ocrDir: string): Router {
       }
 
       deleteRoundProgress(db, roundId)
-      saveDb(db, ocrDir)
+      debouncedSave(db, ocrDir)
       res.status(200).json({ deleted: true })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to clear round progress', detail: String(err) })
+      console.error('Failed to clear round progress:', err)
+      res.status(500).json({ error: 'Failed to clear round progress' })
     }
   })
 

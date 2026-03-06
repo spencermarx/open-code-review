@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { io, type Socket } from 'socket.io-client'
+import { ensureAuthToken } from '../lib/auth'
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting'
 
@@ -28,34 +29,42 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const joinedRooms = useRef<Set<string>>(new Set())
 
   useEffect(() => {
-    const socket = io({
-      autoConnect: true,
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-    })
+    let cancelled = false
 
-    socketRef.current = socket
+    ensureAuthToken().then((token) => {
+      if (cancelled) return
 
-    socket.on('connect', () => {
-      setStatus('connected')
-      // Rejoin rooms after reconnection
-      for (const room of joinedRooms.current) {
-        socket.emit('join', room)
-      }
-    })
+      const socket = io({
+        autoConnect: true,
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        auth: { token },
+      })
 
-    socket.on('disconnect', () => {
-      setStatus('disconnected')
-    })
+      socketRef.current = socket
 
-    socket.io.on('reconnect_attempt', () => {
-      setStatus('reconnecting')
+      socket.on('connect', () => {
+        setStatus('connected')
+        // Rejoin rooms after reconnection
+        for (const room of joinedRooms.current) {
+          socket.emit('join', room)
+        }
+      })
+
+      socket.on('disconnect', () => {
+        setStatus('disconnected')
+      })
+
+      socket.io.on('reconnect_attempt', () => {
+        setStatus('reconnecting')
+      })
     })
 
     return () => {
-      socket.disconnect()
+      cancelled = true
+      socketRef.current?.disconnect()
       socketRef.current = null
     }
   }, [])

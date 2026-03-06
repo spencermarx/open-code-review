@@ -8,14 +8,32 @@ import type { Server as SocketIOServer, Socket } from 'socket.io'
  * Registers socket event handlers for a connected client.
  */
 export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void {
-  socket.on('join:session', (sessionId: string) => {
-    const room = `session:${sessionId}`
-    void socket.join(room)
+  socket.on('join:session', (sessionId: unknown) => {
+    try {
+      if (typeof sessionId !== 'string') {
+        socket.emit('error', { message: 'Invalid payload: sessionId must be a string' })
+        return
+      }
+      const room = `session:${sessionId}`
+      void socket.join(room)
+    } catch (err) {
+      console.error('Error in join:session handler:', err)
+      socket.emit('error', { message: 'Internal error' })
+    }
   })
 
-  socket.on('leave:session', (sessionId: string) => {
-    const room = `session:${sessionId}`
-    void socket.leave(room)
+  socket.on('leave:session', (sessionId: unknown) => {
+    try {
+      if (typeof sessionId !== 'string') {
+        socket.emit('error', { message: 'Invalid payload: sessionId must be a string' })
+        return
+      }
+      const room = `session:${sessionId}`
+      void socket.leave(room)
+    } catch (err) {
+      console.error('Error in leave:session handler:', err)
+      socket.emit('error', { message: 'Internal error' })
+    }
   })
 }
 

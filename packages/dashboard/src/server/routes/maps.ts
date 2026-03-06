@@ -46,7 +46,8 @@ export function createMapsRouter(db: Database): Router {
       const runs = getMapRunsForSession(db, req.params['id'] as string)
       res.json(runs)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch map runs', detail: String(err) })
+      console.error('Failed to fetch map runs:', err)
+      res.status(500).json({ error: 'Failed to fetch map runs' })
     }
   })
 
@@ -66,7 +67,8 @@ export function createMapsRouter(db: Database): Router {
       const sections = getSectionsForRun(db, run.id).map((s) => enrichSection(db, s))
       res.json({ ...run, sections })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch map run', detail: String(err) })
+      console.error('Failed to fetch map run:', err)
+      res.status(500).json({ error: 'Failed to fetch map run' })
     }
   })
 
@@ -86,7 +88,8 @@ export function createMapsRouter(db: Database): Router {
       const sections = getSectionsForRun(db, run.id).map((s) => enrichSection(db, s))
       res.json(sections)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch sections', detail: String(err) })
+      console.error('Failed to fetch sections:', err)
+      res.status(500).json({ error: 'Failed to fetch sections' })
     }
   })
 
@@ -102,7 +105,8 @@ export function createMapsRouter(db: Database): Router {
       const parsed = parseMapMd(artifact.content)
       res.json({ dependencies: parsed.dependencies })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch graph data', detail: String(err) })
+      console.error('Failed to fetch graph data:', err)
+      res.status(500).json({ error: 'Failed to fetch graph data' })
     }
   })
 

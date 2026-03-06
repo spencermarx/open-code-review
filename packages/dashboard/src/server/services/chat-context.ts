@@ -70,7 +70,7 @@ function buildReviewRoundContext(
 ): string {
   const roundDir = join(sessionsDir, sessionId, 'rounds', `round-${roundNumber}`)
   const finalPath = join(roundDir, 'final.md')
-  const reviewersDir = join(roundDir, 'reviewers')
+  const reviewersDir = join(roundDir, 'reviews')
 
   const parts: string[] = [
     `You are an expert code reviewer assisting with a code review session.`,

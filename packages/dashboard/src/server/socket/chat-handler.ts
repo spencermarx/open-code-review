@@ -131,241 +131,256 @@ export function registerChatHandlers(
   ocrDir: string
 ): void {
   socket.on('chat:send', (payload: ChatSendPayload) => {
-    const { conversationId, sessionId, targetType, targetId, message } = payload
+    try {
+      const { conversationId, sessionId, targetType, targetId, message } = payload ?? {} as ChatSendPayload
 
-    if (!conversationId || !sessionId || !targetType || !message) {
-      socket.emit('chat:error', {
-        conversationId,
-        error: 'Missing required fields: conversationId, sessionId, targetType, message',
-      })
-      return
-    }
+      if (
+        typeof conversationId !== 'string' ||
+        typeof sessionId !== 'string' ||
+        typeof targetType !== 'string' ||
+        typeof message !== 'string'
+      ) {
+        socket.emit('chat:error', {
+          conversationId: typeof conversationId === 'string' ? conversationId : null,
+          error: 'Invalid payload: conversationId, sessionId, targetType, and message must be strings',
+        })
+        return
+      }
 
-    // Ensure conversation exists in DB
-    upsertConversation(db, conversationId, sessionId, targetType, targetId)
-    saveDb(db, ocrDir)
-
-    // Store user message
-    insertMessage(db, conversationId, 'user', message)
-    saveDb(db, ocrDir)
-
-    // Check if conversation has a Claude session to resume
-    const conversation = getConversation(db, conversationId)
-    const claudeSessionId = conversation?.claude_session_id ?? null
-
-    // Build CLI flags and prompt separately.
-    // Prompt is written to a temp file then piped via `cat | claude` to avoid
-    // both shell interpretation issues and argument length limits.
-    const { flags, prompt } = buildCliInput(ocrDir, {
-      message,
-      sessionId,
-      targetType,
-      targetId,
-      claudeSessionId,
-    })
-
-    // Write prompt to a temp file
-    const tmpDir = join('/tmp', 'ocr-chat-prompts')
-    try { mkdirSync(tmpDir, { recursive: true }) } catch { /* exists */ }
-    const tmpFile = join(tmpDir, `${randomUUID()}.txt`)
-    writeFileSync(tmpFile, prompt)
-
-    // Build shell command: cat prompt | claude [flags]
-    // Using cat pipe avoids argument escaping entirely — the prompt content
-    // never touches the shell, only the temp file path does.
-    const flagStr = flags.map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ')
-    const shellCmd = `cat '${tmpFile}' | claude ${flagStr}`
-
-    const proc = spawn('sh', ['-c', shellCmd], {
-      cwd: process.cwd(),
-      env: cleanEnv(),
-    })
-
-    // Track the process
-    const timer = setTimeout(() => {
-      updateConversationStatus(db, conversationId, 'expired')
+      // Ensure conversation exists in DB
+      upsertConversation(db, conversationId, sessionId, targetType, targetId)
       saveDb(db, ocrDir)
-      cleanupChat(conversationId)
-    }, IDLE_TIMEOUT_MS)
 
-    activeChats.set(conversationId, { process: proc, conversationId, timer })
+      // Store user message
+      insertMessage(db, conversationId, 'user', message)
+      saveDb(db, ocrDir)
 
-    // Parse NDJSON stream for assistant text tokens and tool activity
-    let assistantText = ''
-    let lineBuffer = ''
-    let capturedClaudeSessionId: string | null = null
-    let thinkingStatusEmitted = false
-    const emittedToolUseIds = new Set<string>()
+      // Check if conversation has a Claude session to resume
+      const conversation = getConversation(db, conversationId)
+      const claudeSessionId = conversation?.claude_session_id ?? null
 
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      lineBuffer += chunk.toString()
-      const lines = lineBuffer.split('\n')
-      // Keep the last incomplete line in the buffer
-      lineBuffer = lines.pop() ?? ''
+      // Build CLI flags and prompt separately.
+      // Prompt is written to a temp file then piped via `cat | claude` to avoid
+      // both shell interpretation issues and argument length limits.
+      const { flags, prompt } = buildCliInput(ocrDir, {
+        message,
+        sessionId,
+        targetType,
+        targetId,
+        claudeSessionId,
+      })
 
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const parsed = JSON.parse(line) as Record<string, unknown>
-          handleNdjsonLine(parsed)
-        } catch {
-          // Skip non-JSON lines
-        }
-      }
-    })
+      // Write prompt to a temp file
+      const tmpDir = join('/tmp', 'ocr-chat-prompts')
+      try { mkdirSync(tmpDir, { recursive: true, mode: 0o700 }) } catch { /* exists */ }
+      const tmpFile = join(tmpDir, `${randomUUID()}.txt`)
+      writeFileSync(tmpFile, prompt, { mode: 0o600 })
 
-    function handleNdjsonLine(parsed: Record<string, unknown>): void {
-      const type = parsed['type'] as string | undefined
+      // Build shell command: cat prompt | claude [flags]
+      // Using cat pipe avoids argument escaping entirely — the prompt content
+      // never touches the shell, only the temp file path does.
+      const flagStr = flags.map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ')
+      const shellCmd = `cat '${tmpFile}' | claude ${flagStr}`
 
-      // Capture session ID from init or result messages
-      if (parsed['session_id']) {
-        capturedClaudeSessionId = parsed['session_id'] as string
-      }
+      const proc = spawn('sh', ['-c', shellCmd], {
+        cwd: process.cwd(),
+        env: cleanEnv(),
+      })
 
-      // Handle streaming events (from --include-partial-messages).
-      // These arrive as individual deltas, not accumulated messages.
-      if (type === 'stream_event') {
-        const event = parsed['event'] as Record<string, unknown> | undefined
-        if (!event) return
-        const eventType = event['type'] as string | undefined
+      // Track the process
+      const timer = setTimeout(() => {
+        updateConversationStatus(db, conversationId, 'expired')
+        saveDb(db, ocrDir)
+        cleanupChat(conversationId)
+      }, IDLE_TIMEOUT_MS)
 
-        // Text deltas — the actual response tokens
-        if (eventType === 'content_block_delta') {
-          const delta = event['delta'] as Record<string, unknown> | undefined
-          const deltaType = delta?.['type'] as string | undefined
+      activeChats.set(conversationId, { process: proc, conversationId, timer })
 
-          if (deltaType === 'text_delta' && typeof delta?.['text'] === 'string') {
-            const text = delta['text'] as string
-            assistantText += text
-            socket.emit('chat:token', { conversationId, token: text })
+      // Parse NDJSON stream for assistant text tokens and tool activity
+      let assistantText = ''
+      let lineBuffer = ''
+      let capturedClaudeSessionId: string | null = null
+      let thinkingStatusEmitted = false
+      const emittedToolUseIds = new Set<string>()
+
+      proc.stdout?.on('data', (chunk: Buffer) => {
+        lineBuffer += chunk.toString()
+        const lines = lineBuffer.split('\n')
+        // Keep the last incomplete line in the buffer
+        lineBuffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const parsed = JSON.parse(line) as Record<string, unknown>
+            handleNdjsonLine(parsed)
+          } catch {
+            // Skip non-JSON lines
           }
+        }
+      })
 
-          // Show "Thinking..." status during the thinking phase
-          if (deltaType === 'thinking_delta' && !thinkingStatusEmitted) {
-            thinkingStatusEmitted = true
-            socket.emit('chat:status', {
-              conversationId,
-              tool: 'thinking',
-              detail: 'Thinking...',
-            })
-          }
+      function handleNdjsonLine(parsed: Record<string, unknown>): void {
+        const type = parsed['type'] as string | undefined
+
+        // Capture session ID from init or result messages
+        if (parsed['session_id']) {
+          capturedClaudeSessionId = parsed['session_id'] as string
         }
 
-        // Tool use blocks — agentic activity indicator
-        if (eventType === 'content_block_start') {
-          const block = event['content_block'] as Record<string, unknown> | undefined
-          if (block?.['type'] === 'tool_use') {
-            const toolId = block['id'] as string
-            if (toolId && !emittedToolUseIds.has(toolId)) {
-              emittedToolUseIds.add(toolId)
-              const toolName = block['name'] as string
-              const input = (block['input'] as Record<string, unknown>) ?? {}
+        // Handle streaming events (from --include-partial-messages).
+        // These arrive as individual deltas, not accumulated messages.
+        if (type === 'stream_event') {
+          const event = parsed['event'] as Record<string, unknown> | undefined
+          if (!event) return
+          const eventType = event['type'] as string | undefined
+
+          // Text deltas — the actual response tokens
+          if (eventType === 'content_block_delta') {
+            const delta = event['delta'] as Record<string, unknown> | undefined
+            const deltaType = delta?.['type'] as string | undefined
+
+            if (deltaType === 'text_delta' && typeof delta?.['text'] === 'string') {
+              const text = delta['text'] as string
+              assistantText += text
+              socket.emit('chat:token', { conversationId, token: text })
+            }
+
+            // Show "Thinking..." status during the thinking phase
+            if (deltaType === 'thinking_delta' && !thinkingStatusEmitted) {
+              thinkingStatusEmitted = true
               socket.emit('chat:status', {
                 conversationId,
-                tool: toolName,
-                detail: formatToolDetail(toolName, input),
+                tool: 'thinking',
+                detail: 'Thinking...',
               })
             }
           }
+
+          // Tool use blocks — agentic activity indicator
+          if (eventType === 'content_block_start') {
+            const block = event['content_block'] as Record<string, unknown> | undefined
+            if (block?.['type'] === 'tool_use') {
+              const toolId = block['id'] as string
+              if (toolId && !emittedToolUseIds.has(toolId)) {
+                emittedToolUseIds.add(toolId)
+                const toolName = block['name'] as string
+                const input = (block['input'] as Record<string, unknown>) ?? {}
+                socket.emit('chat:status', {
+                  conversationId,
+                  tool: toolName,
+                  detail: formatToolDetail(toolName, input),
+                })
+              }
+            }
+          }
+        }
+
+        // Handle complete assistant messages (final text for DB storage).
+        // These arrive after all stream_event deltas are done.
+        if (type === 'assistant') {
+          const fullText = extractFullText(parsed)
+          if (fullText.length > 0) {
+            assistantText = fullText
+          }
         }
       }
 
-      // Handle complete assistant messages (final text for DB storage).
-      // These arrive after all stream_event deltas are done.
-      if (type === 'assistant') {
-        const fullText = extractFullText(parsed)
-        if (fullText.length > 0) {
-          assistantText = fullText
+      // Capture stderr for error reporting
+      let stderrBuffer = ''
+      proc.stderr?.on('data', (chunk: Buffer) => {
+        stderrBuffer += chunk.toString()
+      })
+
+      proc.on('close', (code) => {
+        // Clean up temp file
+        try { unlinkSync(tmpFile) } catch { /* ignore */ }
+
+        // Process any remaining buffered data
+        if (lineBuffer.trim()) {
+          try {
+            const parsed = JSON.parse(lineBuffer) as Record<string, unknown>
+            handleNdjsonLine(parsed)
+          } catch {
+            // Skip non-JSON remainder
+          }
         }
-      }
-    }
 
-    // Capture stderr for error reporting
-    let stderrBuffer = ''
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      stderrBuffer += chunk.toString()
-    })
-
-    proc.on('close', (code) => {
-      // Clean up temp file
-      try { unlinkSync(tmpFile) } catch { /* ignore */ }
-
-      // Process any remaining buffered data
-      if (lineBuffer.trim()) {
-        try {
-          const parsed = JSON.parse(lineBuffer) as Record<string, unknown>
-          handleNdjsonLine(parsed)
-        } catch {
-          // Skip non-JSON remainder
+        // Store Claude session ID for future resume
+        if (capturedClaudeSessionId) {
+          updateConversationClaudeSession(db, conversationId, capturedClaudeSessionId)
         }
-      }
 
-      // Store Claude session ID for future resume
-      if (capturedClaudeSessionId) {
-        updateConversationClaudeSession(db, conversationId, capturedClaudeSessionId)
-      }
+        // Store assistant response
+        if (assistantText.trim()) {
+          insertMessage(db, conversationId, 'assistant', assistantText.trim())
+        }
+        saveDb(db, ocrDir)
 
-      // Store assistant response
-      if (assistantText.trim()) {
-        insertMessage(db, conversationId, 'assistant', assistantText.trim())
-      }
-      saveDb(db, ocrDir)
+        if (code === 0) {
+          socket.emit('chat:done', { conversationId })
+        } else {
+          socket.emit('chat:error', {
+            conversationId,
+            error: stderrBuffer || `Claude process exited with code ${code}`,
+          })
+        }
 
-      if (code === 0) {
-        socket.emit('chat:done', { conversationId })
-      } else {
+        // Reset idle timer (keep entry for session tracking)
+        resetIdleTimer(conversationId, db, ocrDir)
+        // Remove process reference since it's done
+        const chat = activeChats.get(conversationId)
+        if (chat) {
+          chat.process = null
+        }
+      })
+
+      proc.on('error', (err) => {
         socket.emit('chat:error', {
           conversationId,
-          error: stderrBuffer || `Claude process exited with code ${code}`,
+          error: `Failed to spawn Claude: ${err.message}`,
         })
-      }
-
-      // Reset idle timer (keep entry for session tracking)
-      resetIdleTimer(conversationId, db, ocrDir)
-      // Remove process reference since it's done
-      const chat = activeChats.get(conversationId)
-      if (chat) {
-        chat.process = null
-      }
-    })
-
-    proc.on('error', (err) => {
-      socket.emit('chat:error', {
-        conversationId,
-        error: `Failed to spawn Claude: ${err.message}`,
+        cleanupChat(conversationId)
       })
-      cleanupChat(conversationId)
-    })
+    } catch (err) {
+      console.error('Error in chat:send handler:', err)
+      socket.emit('error', { message: 'Internal error' })
+    }
   })
 
   // Load conversation history
   socket.on('chat:history', (payload: ChatHistoryPayload) => {
-    const { conversationId } = payload
+    try {
+      const { conversationId } = payload
 
-    if (!conversationId) {
-      socket.emit('chat:error', {
-        conversationId: null,
-        error: 'Missing conversationId',
-      })
-      return
-    }
+      if (!conversationId) {
+        socket.emit('chat:error', {
+          conversationId: null,
+          error: 'Missing conversationId',
+        })
+        return
+      }
 
-    const conversation = getConversation(db, conversationId)
-    if (!conversation) {
+      const conversation = getConversation(db, conversationId)
+      if (!conversation) {
+        socket.emit('chat:history:result', {
+          conversationId,
+          conversation: null,
+          messages: [],
+        })
+        return
+      }
+
+      const messages = getMessages(db, conversationId)
       socket.emit('chat:history:result', {
         conversationId,
-        conversation: null,
-        messages: [],
+        conversation,
+        messages,
       })
-      return
+    } catch (err) {
+      console.error('Error in chat:history handler:', err)
+      socket.emit('error', { message: 'Internal error' })
     }
-
-    const messages = getMessages(db, conversationId)
-    socket.emit('chat:history:result', {
-      conversationId,
-      conversation,
-      messages,
-    })
   })
 }
 

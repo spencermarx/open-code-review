@@ -56,6 +56,8 @@ interface ProcessEntry {
   outputBuffer: string
   commandStr: string
   startedAt: string
+  /** Whether the process was spawned with detached: true (supports process group kill). */
+  detached: boolean
 }
 
 /** Active commands keyed by execution_id */
@@ -104,68 +106,89 @@ export function registerCommandHandlers(
   ocrDir: string
 ): void {
   socket.on('command:run', (payload: CommandRunPayload) => {
-    const { command } = payload
+    try {
+      if (typeof payload?.command !== 'string') {
+        socket.emit('command:error', {
+          error: 'Invalid payload: command must be a string',
+        })
+        return
+      }
 
-    // Parse the command string — strip leading "ocr " if present
-    const normalized = command.replace(/^ocr\s+/, '')
-    const parts = normalized.split(/\s+/)
-    const baseCommand = parts[0] ?? ''
-    const subArgs = parts.slice(1)
+      const { command } = payload
 
-    // Validate base command against whitelist (utility + AI)
-    if (!ALLOWED_COMMANDS.has(baseCommand) && !AI_COMMANDS.has(baseCommand)) {
-      socket.emit('command:error', {
-        error: `Command "${command}" is not allowed`,
-        allowed: [...ALLOWED_COMMANDS, ...AI_COMMANDS].map((c) => `ocr ${c}`),
+      // Parse the command string — strip leading "ocr " if present
+      const normalized = command.replace(/^ocr\s+/, '')
+      const parts = normalized.split(/\s+/)
+      const baseCommand = parts[0] ?? ''
+      const subArgs = parts.slice(1)
+
+      // Validate base command against whitelist (utility + AI)
+      if (!ALLOWED_COMMANDS.has(baseCommand) && !AI_COMMANDS.has(baseCommand)) {
+        socket.emit('command:error', {
+          error: `Command "${command}" is not allowed`,
+          allowed: [...ALLOWED_COMMANDS, ...AI_COMMANDS].map((c) => `ocr ${c}`),
+        })
+        return
+      }
+
+      // Concurrent command guard
+      if (activeCommands.size >= MAX_CONCURRENT) {
+        socket.emit('command:error', {
+          error: `Maximum ${MAX_CONCURRENT} concurrent commands allowed`,
+          running: Array.from(activeCommands.values()).map((e) => ({
+            execution_id: e.executionId,
+            command: e.commandStr,
+          })),
+        })
+        return
+      }
+
+      // Insert execution record
+      const startedAt = new Date().toISOString()
+      db.run(
+        `INSERT INTO command_executions (command, args, started_at)
+         VALUES (?, ?, ?)`,
+        [command, JSON.stringify(subArgs), startedAt]
+      )
+      const idResult = db.exec('SELECT last_insert_rowid() as id')
+      const executionId = (idResult[0]?.values[0]?.[0] as number) ?? 0
+
+      const isAi = AI_COMMANDS.has(baseCommand)
+      const entry: ProcessEntry = {
+        process: null!,
+        executionId: executionId,
+        outputBuffer: '',
+        commandStr: command,
+        startedAt: startedAt,
+        detached: isAi,
+      }
+      activeCommands.set(executionId, entry)
+
+      // Emit started event
+      const startedEvent: CommandStartedEvent = {
+        execution_id: executionId,
+        command,
+        args: subArgs,
+        started_at: startedAt,
+      }
+      io.emit('command:started', startedEvent)
+
+      // Emit warning so the client can show a confirmation dialog
+      io.emit('command:warning', {
+        execution_id: executionId,
+        message:
+          'This command runs an AI agent with full file system and shell access in your project directory. Only run commands you trust.',
       })
-      return
-    }
 
-    // Concurrent command guard
-    if (activeCommands.size >= MAX_CONCURRENT) {
-      socket.emit('command:error', {
-        error: `Maximum ${MAX_CONCURRENT} concurrent commands allowed`,
-        running: Array.from(activeCommands.values()).map((e) => ({
-          execution_id: e.executionId,
-          command: e.commandStr,
-        })),
-      })
-      return
-    }
-
-    // Insert execution record
-    const startedAt = new Date().toISOString()
-    db.run(
-      `INSERT INTO command_executions (command, args, started_at)
-       VALUES (?, ?, ?)`,
-      [command, JSON.stringify(subArgs), startedAt]
-    )
-    const idResult = db.exec('SELECT last_insert_rowid() as id')
-    const executionId = (idResult[0]?.values[0]?.[0] as number) ?? 0
-
-    const entry: ProcessEntry = {
-      process: null!,
-      executionId: executionId,
-      outputBuffer: '',
-      commandStr: command,
-      startedAt: startedAt,
-    }
-    activeCommands.set(executionId, entry)
-
-    // Emit started event
-    const startedEvent: CommandStartedEvent = {
-      execution_id: executionId,
-      command,
-      args: subArgs,
-      started_at: startedAt,
-    }
-    io.emit('command:started', startedEvent)
-
-    // Route to appropriate spawn path
-    if (AI_COMMANDS.has(baseCommand)) {
-      spawnAiCommand(io, socket, db, ocrDir, executionId, baseCommand, subArgs, entry)
-    } else {
-      spawnCliCommand(io, db, ocrDir, executionId, baseCommand, subArgs, entry)
+      // Route to appropriate spawn path
+      if (AI_COMMANDS.has(baseCommand)) {
+        spawnAiCommand(io, socket, db, ocrDir, executionId, baseCommand, subArgs, entry)
+      } else {
+        spawnCliCommand(io, db, ocrDir, executionId, baseCommand, subArgs, entry)
+      }
+    } catch (err) {
+      console.error('Error in command:run handler:', err)
+      socket.emit('error', { message: 'Internal error' })
     }
   })
 
@@ -173,33 +196,39 @@ export function registerCommandHandlers(
   // Kill the entire process group (sh + cat + claude pipeline) and
   // escalate to SIGKILL if the process doesn't exit within 5 seconds.
   socket.on('command:cancel', (payload?: { execution_id?: number }) => {
-    const targetId = payload?.execution_id
-    if (!targetId) return
+    try {
+      const targetId = payload?.execution_id
+      if (!targetId) return
 
-    const entry = activeCommands.get(targetId)
-    if (!entry) return
+      const entry = activeCommands.get(targetId)
+      if (!entry) return
 
-    const proc = entry.process
-    const pid = proc.pid
+      const proc = entry.process
+      const pid = proc.pid
 
-    // Try killing the process group first (negative PID), fall back to process
-    if (pid) {
-      try { process.kill(-pid, 'SIGTERM') } catch { proc.kill('SIGTERM') }
-    } else {
-      proc.kill('SIGTERM')
-    }
-
-    // Escalate to SIGKILL after timeout
-    const killTimer = setTimeout(() => {
-      if (!activeCommands.has(targetId)) return
-      if (pid) {
-        try { process.kill(-pid, 'SIGKILL') } catch { /* already dead */ }
+      // Only use process group kill (-pid) for detached processes (AI commands).
+      // Non-detached utility commands should be killed directly via proc.kill().
+      if (entry.detached && pid) {
+        try { process.kill(-pid, 'SIGTERM') } catch { proc.kill('SIGTERM') }
+      } else {
+        proc.kill('SIGTERM')
       }
-      proc.kill('SIGKILL')
-    }, 5000)
 
-    // Clear timer when process exits
-    proc.once('close', () => clearTimeout(killTimer))
+      // Escalate to SIGKILL after timeout
+      const killTimer = setTimeout(() => {
+        if (!activeCommands.has(targetId)) return
+        if (entry.detached && pid) {
+          try { process.kill(-pid, 'SIGKILL') } catch { /* already dead */ }
+        }
+        proc.kill('SIGKILL')
+      }, 5000)
+
+      // Clear timer when process exits
+      proc.once('close', () => clearTimeout(killTimer))
+    } catch (err) {
+      console.error('Error in command:cancel handler:', err)
+      socket.emit('error', { message: 'Internal error' })
+    }
   })
 }
 
@@ -223,7 +252,6 @@ function spawnCliCommand(
     : spawn('ocr', [baseCommand, ...subArgs], {
         cwd: process.cwd(),
         env: { ...process.env },
-        shell: true,
       })
   entry.process = proc
 
@@ -338,9 +366,9 @@ function spawnAiCommand(
 
   // 4. Write prompt to temp file
   const tmpDir = join('/tmp', 'ocr-cmd-prompts')
-  try { mkdirSync(tmpDir, { recursive: true }) } catch { /* exists */ }
+  try { mkdirSync(tmpDir, { recursive: true, mode: 0o700 }) } catch { /* exists */ }
   const tmpFile = join(tmpDir, `${randomUUID()}.txt`)
-  writeFileSync(tmpFile, prompt)
+  writeFileSync(tmpFile, prompt, { mode: 0o600 })
 
   // 5. Build Claude CLI flags
   // --allowedTools pre-authorizes tool use since --print mode is non-interactive

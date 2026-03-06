@@ -43,7 +43,8 @@ export function createReviewsRouter(db: Database): Router {
       }))
       res.json(enriched)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch rounds', detail: String(err) })
+      console.error('Failed to fetch rounds:', err)
+      res.status(500).json({ error: 'Failed to fetch rounds' })
     }
   })
 
@@ -63,7 +64,8 @@ export function createReviewsRouter(db: Database): Router {
       const reviewerOutputs = getReviewerOutputsForRound(db, round.id)
       res.json({ ...round, reviewer_outputs: reviewerOutputs, progress: getRoundProgress(db, round.id) ?? null })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch round', detail: String(err) })
+      console.error('Failed to fetch round:', err)
+      res.status(500).json({ error: 'Failed to fetch round' })
     }
   })
 
@@ -83,7 +85,8 @@ export function createReviewsRouter(db: Database): Router {
       const findings = getFindingsForRound(db, round.id)
       res.json(enrichFindingsWithProgress(db, findings))
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch findings', detail: String(err) })
+      console.error('Failed to fetch findings:', err)
+      res.status(500).json({ error: 'Failed to fetch findings' })
     }
   })
 
@@ -109,7 +112,8 @@ export function createReviewsRouter(db: Database): Router {
       const findings = getFindingsForReviewerOutput(db, output.id)
       res.json({ ...output, findings: enrichFindingsWithProgress(db, findings) })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch reviewer output', detail: String(err) })
+      console.error('Failed to fetch reviewer output:', err)
+      res.status(500).json({ error: 'Failed to fetch reviewer output' })
     }
   })
 

@@ -15,7 +15,8 @@ export function createSessionsRouter(db: Database): Router {
       const sessions = getAllSessions(db)
       res.json(sessions)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch sessions', detail: String(err) })
+      console.error('Failed to fetch sessions:', err)
+      res.status(500).json({ error: 'Failed to fetch sessions' })
     }
   })
 
@@ -29,7 +30,8 @@ export function createSessionsRouter(db: Database): Router {
       }
       res.json(session)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch session', detail: String(err) })
+      console.error('Failed to fetch session:', err)
+      res.status(500).json({ error: 'Failed to fetch session' })
     }
   })
 
@@ -44,7 +46,8 @@ export function createSessionsRouter(db: Database): Router {
       const events = getEventsForSession(db, req.params['id'] as string)
       res.json(events)
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch events', detail: String(err) })
+      console.error('Failed to fetch events:', err)
+      res.status(500).json({ error: 'Failed to fetch events' })
     }
   })
 

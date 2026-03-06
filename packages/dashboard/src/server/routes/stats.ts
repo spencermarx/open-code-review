@@ -22,7 +22,8 @@ export function createStatsRouter(db: Database): Router {
         unresolvedBlockers: stats.unresolved_blockers,
       })
     } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch stats', detail: String(err) })
+      console.error('Failed to fetch stats:', err)
+      res.status(500).json({ error: 'Failed to fetch stats' })
     }
   })
 
