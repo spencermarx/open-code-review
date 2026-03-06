@@ -5,7 +5,7 @@
  * Extracted from the previously duplicated spawn logic in command-runner.ts,
  * chat-handler.ts, and post-handler.ts.
  *
- * Invocation: `cat prompt.txt | claude --print --output-format stream-json [flags]`
+ * Invocation: `claude --print --output-format stream-json [flags]` with prompt on stdin
  * Output: NDJSON with stream_event / content_block_delta / assistant message types.
  */
 
@@ -18,7 +18,7 @@ import type {
   SpawnOptions,
   SpawnResult,
 } from './types.js'
-import { extractAssistantText, writeTempPrompt } from './helpers.js'
+import { extractAssistantText } from './helpers.js'
 import { cleanEnv } from '../../socket/env.js'
 
 // ── Default Tool Sets ──
@@ -64,19 +64,17 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
       flags.push('--resume', opts.resumeSessionId)
     }
 
-    // Write prompt to temp file, pipe via cat to avoid shell escaping
-    const tmpFile = writeTempPrompt(opts.prompt)
-    const flagStr = flags.map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ')
-    const shellCmd = `cat '${tmpFile}' | claude ${flagStr}`
-
-    const proc = spawn('sh', ['-c', shellCmd], {
+    // Spawn claude directly with stdin pipe (no shell needed)
+    const proc = spawn('claude', flags, {
       cwd: opts.cwd,
       env: cleanEnv(),
       detached: isWorkflow,
+      stdio: ['pipe', 'pipe', 'pipe'],
     })
 
-    // Store temp file path on process for cleanup
-    ;(proc as unknown as { _tmpFile?: string })._tmpFile = tmpFile
+    // Write prompt to stdin
+    proc.stdin?.write(opts.prompt)
+    proc.stdin?.end()
 
     return { process: proc, detached: isWorkflow }
   }
