@@ -207,6 +207,27 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE command_executions ADD COLUMN is_detached INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 5,
+    description: "Change orchestration_events FK to RESTRICT to protect audit trail",
+    sql: `
+      CREATE TABLE orchestration_events_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE RESTRICT,
+        event_type TEXT NOT NULL,
+        phase TEXT,
+        phase_number INTEGER,
+        round INTEGER,
+        metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO orchestration_events_new SELECT * FROM orchestration_events;
+      DROP TABLE orchestration_events;
+      ALTER TABLE orchestration_events_new RENAME TO orchestration_events;
+      CREATE INDEX idx_events_session ON orchestration_events(session_id);
+      CREATE INDEX idx_events_type ON orchestration_events(event_type);
+    `,
+  },
 ];
 
 /**

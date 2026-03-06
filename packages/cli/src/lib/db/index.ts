@@ -33,6 +33,8 @@ export {
   getLatestEventId,
 } from "./queries.js";
 
+export type { WorkflowType, SessionStatus } from "../state/types.js";
+
 export { runMigrations, MIGRATIONS } from "./migrations.js";
 
 // ── Generic query helpers ──
@@ -82,9 +84,19 @@ export function locateWasm(): string {
 
 /**
  * Applies required pragmas to every connection.
+ *
+ * Note: sql.js runs SQLite entirely in-memory (WASM). WAL mode and
+ * busy_timeout have no file-level effect here, but they establish the
+ * correct configuration if the database is ever opened by a native
+ * SQLite client (e.g. `sqlite3 .ocr/data/ocr.db`) or if we migrate
+ * to better-sqlite3 in the future. Concurrency between the CLI and
+ * dashboard is handled via the merge-before-write pattern in
+ * `packages/dashboard/src/server/db.ts`, not WAL locking.
  */
 export function applyPragmas(db: Database): void {
   db.run("PRAGMA foreign_keys = ON;");
+  db.run("PRAGMA journal_mode = WAL;");
+  db.run("PRAGMA busy_timeout = 5000;");
 }
 
 /**
