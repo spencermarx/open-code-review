@@ -40,10 +40,11 @@ export function renderProgressBar(
   label?: string,
 ): string {
   const width = 24;
-  const filled = Math.round((current / total) * width);
+  const ratio = total > 0 ? current / total : 0;
+  const filled = Math.round(ratio * width);
   const empty = width - filled;
   const bar = chalk.green("━".repeat(filled)) + chalk.dim("─".repeat(empty));
-  const percent = Math.round((current / total) * 100);
+  const percent = Math.round(ratio * 100);
   const percentStr = chalk.bold.white(`${percent}%`);
   return label
     ? `${bar}  ${percentStr} ${chalk.dim("·")} ${chalk.cyan(label)}`
