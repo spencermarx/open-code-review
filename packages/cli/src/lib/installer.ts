@@ -10,6 +10,7 @@ import {
 import { join, dirname } from "node:path";
 import { createRequire } from "node:module";
 import type { AIToolConfig } from "./config";
+import { ensureGitignore } from "./gitignore.js";
 
 const require = createRequire(import.meta.url);
 
@@ -180,13 +181,7 @@ export function installForTool(
   ensureDir(ocrDir);
   ensureDir(join(ocrDir, "sessions"));
 
-  const gitignoreContent = `# OCR session files
-sessions/
-`;
-  const gitignorePath = join(ocrDir, ".gitignore");
-  if (!existsSync(gitignorePath)) {
-    writeFileSync(gitignorePath, gitignoreContent);
-  }
+  ensureGitignore(ocrDir);
 
   // Preserve user-customized config.yaml if it exists
   const configPath = join(ocrDir, "config.yaml");

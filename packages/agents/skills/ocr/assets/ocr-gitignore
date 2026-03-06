@@ -1,12 +1,6 @@
-# OCR Session Directory .gitignore
-# Copy this to .ocr/.gitignore to exclude review sessions from git
-
-# Exclude all session data by default
+# OCR:START — managed by open-code-review (do not edit this block)
 sessions/
-
-# Or selectively include/exclude:
-# sessions/*
-# !sessions/important-review/
-
-# Keep the directory structure
-!.gitignore
+data/
+*.db-shm
+*.db-wal
+# OCR:END

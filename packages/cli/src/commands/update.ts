@@ -10,6 +10,7 @@ import {
   type InstallResult,
 } from "../lib/installer.js";
 import { injectIntoProjectFiles } from "../lib/injector.js";
+import { ensureGitignore } from "../lib/gitignore.js";
 import { requireOcrSetup } from "../lib/guards.js";
 import { getConfiguredToolIds } from "../lib/cli-config.js";
 
@@ -136,6 +137,9 @@ export const updateCommand = new Command("update")
           const result = installForTool(tool, targetDir);
           results.push(result);
         }
+
+        // Refresh managed .gitignore block
+        ensureGitignore(join(targetDir, ".ocr"));
 
         spinner.stop();
 
