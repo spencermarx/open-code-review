@@ -35,7 +35,7 @@ const LABELS: Partial<Record<BadgeVariant, string>> = {
   changes_made: 'Changes Made',
 }
 
-interface StatusBadgeProps {
+type StatusBadgeProps = {
   variant: BadgeVariant
   label?: string
   className?: string

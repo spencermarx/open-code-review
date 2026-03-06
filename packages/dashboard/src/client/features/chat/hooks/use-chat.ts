@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSocket, useSocketEvent } from '../../../providers/socket-provider'
 import type { ChatMessage, ChatTargetType, ChatToolStatus } from '../../../lib/api-types'
 
-interface UseChatReturn {
+type UseChatReturn = {
   messages: ChatMessage[]
   sendMessage: (text: string) => void
   isStreaming: boolean

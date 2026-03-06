@@ -3,7 +3,7 @@ import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 import type { ChatToolStatus } from '../../../lib/api-types'
 
-interface AgentActivityProps {
+type AgentActivityProps = {
   currentStatus: ChatToolStatus | null
   history: ChatToolStatus[]
 }

@@ -22,7 +22,7 @@ import { fetchApi } from '../lib/utils'
 
 export type TabStatus = 'running' | 'complete' | 'cancelled' | 'failed'
 
-export interface CommandTab {
+export type CommandTab = {
   executionId: number
   command: string
   output: string
@@ -31,7 +31,7 @@ export interface CommandTab {
   startedAt: string
 }
 
-interface ActiveCommandsResponse {
+type ActiveCommandsResponse = {
   running_count: number
   commands: Array<{
     execution_id: number
@@ -41,7 +41,7 @@ interface ActiveCommandsResponse {
   }>
 }
 
-interface CommandStateContextValue {
+type CommandStateContextValue = {
   tabs: CommandTab[]
   activeTabId: number | null
   runningCount: number

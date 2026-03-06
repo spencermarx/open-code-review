@@ -3,13 +3,13 @@ import { cn } from '../../lib/utils'
 
 export type PhaseStatus = 'pending' | 'active' | 'complete' | 'skipped'
 
-export interface Phase {
+export type Phase = {
   name: string
   status: PhaseStatus
   timestamp?: string
 }
 
-interface PhaseTimelineProps {
+type PhaseTimelineProps = {
   phases: Phase[]
   className?: string
 }

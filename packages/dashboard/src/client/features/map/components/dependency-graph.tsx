@@ -7,11 +7,11 @@ import type { MapSection, SectionDependency } from '../../../lib/api-types'
 
 const MermaidRenderer = lazy(() => import('./mermaid-renderer'))
 
-interface GraphResponse {
+type GraphResponse = {
   dependencies: SectionDependency[]
 }
 
-interface DependencyGraphProps {
+type DependencyGraphProps = {
   sessionId: string
   runNumber: number
   sections: MapSection[]

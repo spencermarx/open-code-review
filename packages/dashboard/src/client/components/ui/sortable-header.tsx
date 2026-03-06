@@ -1,7 +1,7 @@
 import { ArrowUpDown } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
-interface SortableHeaderProps<T extends string> {
+type SortableHeaderProps<T extends string> = {
   label: string
   field: T
   activeField: T

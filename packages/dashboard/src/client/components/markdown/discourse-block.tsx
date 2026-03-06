@@ -4,7 +4,7 @@ import { MarkdownRenderer } from './markdown-renderer'
 
 type DiscourseType = 'AGREE' | 'CHALLENGE' | 'CONNECT' | 'SURFACE'
 
-interface DiscourseBlockProps {
+type DiscourseBlockProps = {
   type: DiscourseType
   content: string
   reviewer?: string
@@ -70,7 +70,7 @@ export function DiscourseBlock({ type, content, reviewer, className }: Discourse
   )
 }
 
-interface DiscourseSection {
+type DiscourseSection = {
   type: DiscourseType
   reviewer?: string
   content: string

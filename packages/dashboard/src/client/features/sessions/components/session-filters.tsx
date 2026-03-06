@@ -1,7 +1,7 @@
 import { cn } from '../../../lib/utils'
 import type { SessionStatus, WorkflowType } from '../../../lib/api-types'
 
-interface SessionFiltersProps {
+type SessionFiltersProps = {
   statusFilter: SessionStatus | 'all'
   workflowFilter: WorkflowType | 'all'
   onStatusChange: (status: SessionStatus | 'all') => void

@@ -34,7 +34,7 @@ const TRIAGE_FILTER_OPTIONS: { value: FindingTriage | 'all'; label: string }[] =
   { value: 'wont_fix', label: "Won't Fix" },
 ]
 
-interface FindingsTableProps {
+type FindingsTableProps = {
   findings: Finding[]
 }
 

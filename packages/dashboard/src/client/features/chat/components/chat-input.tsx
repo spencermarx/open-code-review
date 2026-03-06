@@ -3,7 +3,7 @@ import { SendHorizontal } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 import type { ChatTargetType } from '../../../lib/api-types'
 
-interface ChatInputProps {
+type ChatInputProps = {
   onSend: (text: string) => void
   isStreaming: boolean
   disabled?: boolean

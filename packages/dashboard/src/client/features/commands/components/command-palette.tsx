@@ -4,14 +4,14 @@ import { cn } from '../../../lib/utils'
 
 // ── Command registry ──
 
-interface CommandParam {
+type CommandParam = {
   name: string
   type: 'text' | 'toggle'
   label: string
   placeholder?: string
 }
 
-interface CommandDef {
+type CommandDef = {
   id: string
   command: string
   label: string
@@ -46,7 +46,7 @@ const COMMANDS: CommandDef[] = [
 
 // ── Parse a command string back into id + params (for re-run prefill) ──
 
-export interface ParsedCommand {
+export type ParsedCommand = {
   commandId: string
   params: Record<string, string | boolean>
 }
@@ -82,7 +82,7 @@ export function parseCommandString(raw: string): ParsedCommand | null {
 
 // ── Component ──
 
-interface CommandPaletteProps {
+type CommandPaletteProps = {
   isRunning: boolean
   runningCount?: number
   onRunCommand: (command: string) => void

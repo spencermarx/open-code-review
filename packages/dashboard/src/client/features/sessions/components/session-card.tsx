@@ -5,7 +5,7 @@ import { formatShortDate, formatElapsed } from '../../../lib/date-utils'
 import { cn } from '../../../lib/utils'
 import type { SessionSummary } from '../../../lib/api-types'
 
-interface SessionCardProps {
+type SessionCardProps = {
   session: SessionSummary
 }
 

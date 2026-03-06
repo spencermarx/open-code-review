@@ -2,13 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchApi } from '../lib/utils'
 import type { IdeType } from '../lib/utils'
 
-export interface AiCliStatus {
+export type AiCliStatus = {
   available: string[]
   active: string | null
   preferred: string
 }
 
-interface IdeConfig {
+type IdeConfig = {
   projectRoot: string
   ide: IdeType
   workspaceName: string

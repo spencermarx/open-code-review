@@ -4,7 +4,7 @@ import rehypeHighlight from 'rehype-highlight'
 import type { Components } from 'react-markdown'
 import { cn } from '../../lib/utils'
 
-interface MarkdownRendererProps {
+type MarkdownRendererProps = {
   content: string
   className?: string
 }

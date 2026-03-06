@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 
-interface StatCardProps {
+type StatCardProps = {
   title: string
   value: number | string
   icon: LucideIcon

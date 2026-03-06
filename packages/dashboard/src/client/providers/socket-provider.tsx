@@ -13,7 +13,7 @@ import { ensureAuthToken } from '../lib/auth'
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting'
 
-interface SocketContextValue {
+type SocketContextValue = {
   socket: Socket | null
   status: ConnectionStatus
   isConnected: boolean

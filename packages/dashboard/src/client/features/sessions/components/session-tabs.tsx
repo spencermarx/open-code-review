@@ -7,7 +7,7 @@ import { useSocketEvent } from '../../../providers/socket-provider'
 import { StatusBadge } from '../../../components/ui/status-badge'
 import type { SessionSummary, ReviewRound, MapRun, SessionStatus } from '../../../lib/api-types'
 
-interface SessionTabsProps {
+type SessionTabsProps = {
   session: SessionSummary
 }
 

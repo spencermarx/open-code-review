@@ -3,7 +3,7 @@ import { FileCode, X } from 'lucide-react'
 import { MarkdownRenderer } from '../../../components/markdown'
 import { useMapArtifact } from '../hooks/use-map-run'
 
-interface RawMapViewProps {
+type RawMapViewProps = {
   sessionId: string
 }
 

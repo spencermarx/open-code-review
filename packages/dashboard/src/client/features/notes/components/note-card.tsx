@@ -3,7 +3,7 @@ import { Pencil, Trash2, Check, X } from 'lucide-react'
 import type { Note } from '../hooks/use-notes'
 import { formatDateTime } from '../../../lib/date-utils'
 
-interface NoteCardProps {
+type NoteCardProps = {
   note: Note
   onUpdate: (id: string, content: string) => Promise<unknown>
   onDelete: (id: string) => Promise<unknown>

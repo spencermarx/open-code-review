@@ -7,7 +7,7 @@ import { ChatMessage, StreamingMessage } from './chat-message'
 import { ChatInput } from './chat-input'
 import type { ChatTargetType } from '../../../lib/api-types'
 
-interface ChatPanelProps {
+type ChatPanelProps = {
   sessionId: string
   targetType: ChatTargetType
   targetId: number

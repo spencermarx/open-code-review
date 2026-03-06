@@ -1,12 +1,12 @@
 import { Component, type ReactNode } from 'react'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
 
-interface ErrorBoundaryProps {
+type ErrorBoundaryProps = {
   children: ReactNode
   fallback?: ReactNode
 }
 
-interface ErrorBoundaryState {
+type ErrorBoundaryState = {
   hasError: boolean
   error: Error | null
 }

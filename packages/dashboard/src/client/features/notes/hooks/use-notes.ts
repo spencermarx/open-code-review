@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi } from '../../../lib/utils'
 
-export interface Note {
+export type Note = {
   id: string
   target_type: string
   target_id: string

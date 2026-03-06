@@ -6,7 +6,7 @@ import { useIdeConfig } from '../../../hooks/use-ide-config'
 import { useSocket } from '../../../providers/socket-provider'
 import { useCommandState } from '../../../providers/command-state-provider'
 
-interface AddressFeedbackPopoverProps {
+type AddressFeedbackPopoverProps = {
   sessionId: string
   roundNumber: number
 }

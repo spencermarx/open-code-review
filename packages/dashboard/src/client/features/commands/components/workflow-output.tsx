@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { Square, Sparkles } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 
-interface WorkflowOutputProps {
+type WorkflowOutputProps = {
   output: string
   isRunning: boolean
   exitCode: number | null
@@ -171,7 +171,7 @@ export function WorkflowOutput({
 
 // ── Output parsing ──
 
-interface OutputSegment {
+type OutputSegment = {
   type: 'text' | 'tool' | 'empty'
   text: string
 }

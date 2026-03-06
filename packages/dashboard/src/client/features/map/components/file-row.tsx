@@ -3,7 +3,7 @@ import { cn, buildIdeLink } from '../../../lib/utils'
 import { useIdeConfig } from '../../../hooks/use-ide-config'
 import type { MapFile } from '../../../lib/api-types'
 
-interface FileRowProps {
+type FileRowProps = {
   file: MapFile
   onToggle: (isReviewed: boolean) => void
   highlighted?: boolean

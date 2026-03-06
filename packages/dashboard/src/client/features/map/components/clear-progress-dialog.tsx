@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Trash2, X } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 
-interface ClearProgressDialogProps {
+type ClearProgressDialogProps = {
   onConfirm: () => void
   isPending: boolean
 }

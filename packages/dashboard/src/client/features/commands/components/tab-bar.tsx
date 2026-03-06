@@ -2,7 +2,7 @@ import { X, Ban, CheckCircle2, XCircle } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 import type { CommandTab } from '../../../providers/command-state-provider'
 
-interface TabBarProps {
+type TabBarProps = {
   tabs: CommandTab[]
   activeTabId: number | null
   onSelectTab: (id: number) => void

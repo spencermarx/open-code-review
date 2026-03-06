@@ -15,7 +15,7 @@ const TRIAGE_OPTIONS: { value: FindingTriage; label: string }[] = [
   { value: 'wont_fix', label: "Won't Fix" },
 ]
 
-interface FindingRowProps {
+type FindingRowProps = {
   finding: Finding
   onTriageChange: (findingId: number, status: FindingTriage) => void
 }

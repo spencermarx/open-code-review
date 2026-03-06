@@ -11,7 +11,7 @@ import {
 type ThemeMode = 'system' | 'light' | 'dark'
 type ResolvedTheme = 'light' | 'dark'
 
-interface ThemeContextValue {
+type ThemeContextValue = {
   mode: ThemeMode
   resolved: ResolvedTheme
   cycle: () => void

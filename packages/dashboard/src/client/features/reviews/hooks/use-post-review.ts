@@ -2,13 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSocket, useSocketEvent } from '../../../providers/socket-provider'
 import type { PostReviewStep, PostCheckResult, ChatToolStatus } from '../../../lib/api-types'
 
-export interface ActivityLogEntry {
+export type ActivityLogEntry = {
   tool: string
   detail: string
   timestamp: number
 }
 
-interface UsePostReviewReturn {
+type UsePostReviewReturn = {
   step: PostReviewStep
   checkResult: PostCheckResult | null
   streamingContent: string

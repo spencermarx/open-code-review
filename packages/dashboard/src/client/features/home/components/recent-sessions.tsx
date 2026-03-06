@@ -4,7 +4,7 @@ import { StatusBadge } from '../../../components/ui/status-badge'
 import { timeAgo } from '../../../lib/date-utils'
 import type { SessionSummary } from '../../../lib/api-types'
 
-interface RecentSessionsProps {
+type RecentSessionsProps = {
   sessions: SessionSummary[]
 }
 

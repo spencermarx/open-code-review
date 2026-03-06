@@ -10,7 +10,7 @@ const REVIEWER_COLORS: Record<string, string> = {
   testing: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/25',
 }
 
-interface ReviewerCardProps {
+type ReviewerCardProps = {
   sessionId: string
   roundNumber: number
   reviewer: ReviewerOutput

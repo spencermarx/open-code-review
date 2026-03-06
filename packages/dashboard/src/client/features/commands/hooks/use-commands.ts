@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchApi } from '../../../lib/utils'
 
-export interface CommandHistoryEntry {
+export type CommandHistoryEntry = {
   id: string
   command: string
   args: string | null

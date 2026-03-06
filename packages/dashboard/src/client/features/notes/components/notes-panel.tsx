@@ -3,7 +3,7 @@ import { StickyNote, Plus, X } from 'lucide-react'
 import { useNotes } from '../hooks/use-notes'
 import { NoteCard } from './note-card'
 
-interface NotesPanelProps {
+type NotesPanelProps = {
   targetType: 'session' | 'round' | 'finding' | 'run' | 'section' | 'file'
   targetId: string
 }

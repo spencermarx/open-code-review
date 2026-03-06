@@ -1,7 +1,7 @@
 import { SessionCard } from './session-card'
 import type { SessionSummary } from '../../../lib/api-types'
 
-interface SessionListProps {
+type SessionListProps = {
   sessions: SessionSummary[]
 }
 

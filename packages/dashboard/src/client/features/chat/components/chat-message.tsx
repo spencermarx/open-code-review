@@ -4,7 +4,7 @@ import { MarkdownRenderer } from '../../../components/markdown/markdown-renderer
 import { AgentActivity } from './agent-activity'
 import type { ChatMessage as ChatMessageType, ChatToolStatus } from '../../../lib/api-types'
 
-interface ChatMessageProps {
+type ChatMessageProps = {
   message: ChatMessageType
 }
 
@@ -49,7 +49,7 @@ const THINKING_PHRASES = [
   'Preparing a thoughtful response...',
 ]
 
-interface StreamingMessageProps {
+type StreamingMessageProps = {
   content: string
   toolStatus: ChatToolStatus | null
   toolHistory: ChatToolStatus[]

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useId } from 'react'
 import mermaid from 'mermaid'
 import { useTheme } from '../../../providers/theme-provider'
 
-interface MermaidRendererProps {
+type MermaidRendererProps = {
   definition: string
   onNodeClick?: (nodeId: string) => void
 }

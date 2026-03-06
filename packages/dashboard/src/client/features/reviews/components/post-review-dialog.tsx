@@ -24,7 +24,7 @@ import { cn } from "../../../lib/utils";
 import { MarkdownRenderer } from "../../../components/markdown/markdown-renderer";
 import { usePostReview, type ActivityLogEntry } from "../hooks/use-post-review";
 
-interface PostReviewDialogProps {
+type PostReviewDialogProps = {
   sessionId: string;
   roundNumber: number;
   finalContent: string;

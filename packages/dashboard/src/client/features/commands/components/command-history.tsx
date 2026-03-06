@@ -209,7 +209,7 @@ function HistoryItem({
 
 // ── Main component ──
 
-interface CommandHistoryProps {
+type CommandHistoryProps = {
   isRunning: boolean
   onRerun: (command: string) => void
 }
@@ -337,7 +337,7 @@ export function CommandHistory({ isRunning, onRerun }: CommandHistoryProps) {
                     <span className={cn(
                       'tabular-nums',
                       statusFilter === opt.value
-                        ? 'text-zinc-400 dark:text-zinc-500'
+                        ? 'text-zinc-300 dark:text-zinc-400'
                         : 'text-zinc-400 dark:text-zinc-500',
                     )}>
                       {count}

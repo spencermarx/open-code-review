@@ -3,7 +3,7 @@ import { cn } from '../../lib/utils'
 
 type Verdict = 'APPROVE' | 'REQUEST CHANGES' | 'NEEDS DISCUSSION'
 
-interface VerdictBannerProps {
+type VerdictBannerProps = {
   verdict: Verdict
   blockerCount?: number
   suggestionCount?: number

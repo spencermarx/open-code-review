@@ -1,6 +1,6 @@
 import { cn } from '../../lib/utils'
 
-interface ProgressBarProps {
+type ProgressBarProps = {
   value: number
   max: number
   className?: string
