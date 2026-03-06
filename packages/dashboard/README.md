@@ -23,6 +23,19 @@ The dashboard is bundled into the `@open-code-review/cli` package and is not pub
 - **Live progress** — Watch active reviews in real-time via WebSocket
 - **Command runner** — Execute OCR commands directly from the dashboard with tabbed terminal output
 - **Notes** — Attach notes to sessions for tracking follow-up items
+- **Post to GitHub** — Post review findings directly to your GitHub PR as a comment, with optional AI-powered human review translation
+- **Human review translation** — Generate a natural, first-person rewrite of the multi-reviewer synthesis that sounds like a single developer wrote it, following Google's code review guidelines
+
+## Post to GitHub
+
+The review round page includes a "Post to GitHub" button that:
+
+1. Checks `gh` auth status and finds the PR for the current branch
+2. Offers two modes: post the team review as-is, or generate a human review translation
+3. Human review mode streams tokens in real-time via Claude CLI, producing a natural first-person review
+4. Preview, edit, and save drafts before posting to the PR
+
+**Requirements:** GitHub CLI (`gh`) must be installed and authenticated. The branch must have an open PR.
 
 ## Architecture
 
@@ -34,6 +47,7 @@ src/
 │   ├── providers/            # React Query, Socket.IO, theme
 │   └── router.tsx            # React Router routes
 ├── server/                   # Express + Socket.IO
+│   ├── prompts/              # LLM prompt generators
 │   ├── routes/               # REST API endpoints
 │   ├── services/             # Filesystem sync, markdown parsers
 │   ├── socket/               # WebSocket handlers, command runner

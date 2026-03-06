@@ -34,6 +34,17 @@ agents/
     └── plugin.json
 ```
 
+## Prerequisites
+
+All OCR workflows require the CLI for session state management. Before running any review or map command, ensure the CLI is installed:
+
+```bash
+npm install -g @open-code-review/cli
+ocr init
+```
+
+The CLI provides the `ocr state` commands that track workflow progress through each phase. Without it, reviews will fail at phase transitions.
+
 ## Installation
 
 ### Via CLI (Recommended)

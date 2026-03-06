@@ -112,7 +112,7 @@ Exits with code `0` when healthy, `1` when required dependencies are missing or 
 
 ### `ocr dashboard`
 
-Start the OCR dashboard web interface for browsing sessions, reviews, and maps.
+Start the OCR dashboard web interface for browsing sessions, reviews, maps, and posting reviews to GitHub. The dashboard is bundled with the CLI — no separate installation required.
 
 ```bash
 # Start on default port
@@ -125,7 +125,7 @@ ocr dashboard --port 8080
 ocr dashboard --no-open
 ```
 
-Requires OCR to be initialized (`.ocr/` must exist). The dashboard reads from the same SQLite database and session files used by the review workflow.
+Requires OCR to be initialized (`.ocr/` must exist). The dashboard reads from the same SQLite database and session files used by the review workflow. The dashboard also supports posting reviews directly to GitHub PRs with optional AI-powered human review translation.
 
 ### `ocr state`
 

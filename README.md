@@ -229,7 +229,11 @@ Requirements propagate to all reviewers—each evaluates the code against both t
 
 ## Posting to GitHub PRs
 
-After completing a review, post it directly to your PR as a comment:
+After completing a review, post it directly to your PR as a comment.
+
+### From the Terminal
+
+The `/ocr-post` command posts the most recent review round to your PR:
 
 ```
 /ocr-post
@@ -240,6 +244,23 @@ After completing a review, post it directly to your PR as a comment:
 </p>
 
 The posted review includes your summary, findings breakdown, and requirements assessment—giving human reviewers immediate context when they open the PR.
+
+### From the Dashboard
+
+The dashboard's review round page includes a **Post to GitHub** button that offers two posting modes:
+
+- **Post Team Review** — Posts the raw multi-reviewer synthesis as-is, exactly as it appears in your session
+- **Generate Human Review** — AI-rewrites all reviewer findings into a single, natural human voice
+
+<p align="center">
+  <img src="assets/ocr-tool-translate-to-human-review-button.png" alt="Post Review to GitHub dialog with Post Team Review and Generate Human Review options" width="700" />
+</p>
+
+**Why Human Review Translation matters:** Multi-reviewer synthesis can read like what it is—an AI merging outputs from several agents. The human review mode rewrites everything into first-person feedback that follows [Google's code review guidelines](https://google.github.io/eng-practices/review/reviewer/). The rewrite streams in real-time, and you can preview, edit in a textarea, and save drafts before posting.
+
+<p align="center">
+  <img src="assets/ocr-tool-example-translated-human-review.png" alt="Human-written review comment posted to a GitHub PR" width="700" />
+</p>
 
 **Prerequisites:**
 - GitHub CLI (`gh`) must be installed and authenticated
@@ -332,6 +353,7 @@ ocr dashboard --no-open        # Don't auto-open browser
 - **Track progress** — Watch active reviews in real-time via WebSocket
 - **Run commands** — Execute OCR commands directly from the dashboard with live terminal output
 - **Take notes** — Attach notes to sessions for tracking follow-up items
+- **Post to GitHub** — Post reviews directly to your PR with optional AI-powered human review translation
 
 The dashboard reads from the same `.ocr/` directory and SQLite database used by the CLI and review workflow. No separate configuration is needed.
 
@@ -555,6 +577,8 @@ This enables a natural "review → fix → re-review" workflow without losing hi
 - **Git** — For diff analysis
 - **An AI coding assistant** — Claude Code, Cursor, Windsurf, or [any supported tool](#installation)
 - **GitHub CLI** (`gh`) — Optional, for `/ocr-post`
+
+> **Important**: The CLI (`npm install -g @open-code-review/cli`) is required for all OCR workflows. Both review and map commands use `ocr state` for progress tracking at every phase transition. Install it globally or use `npx`.
 
 Run `ocr doctor` to verify your setup.
 
