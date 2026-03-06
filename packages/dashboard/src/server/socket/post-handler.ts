@@ -8,7 +8,7 @@
 
 import { execFile, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import type { Server as SocketIOServer, Socket } from 'socket.io'
@@ -20,6 +20,13 @@ import { AiCliService, formatToolDetail, cleanupTempFile, type NormalizedEvent }
 import { startTrackedExecution, type TrackedExecution } from './execution-tracker.js'
 
 const execFileAsync = promisify(execFile)
+
+/** Resolve session_dir to an absolute path. CLI stores relative paths (`.ocr/sessions/...`). */
+function resolveSessionDir(sessionDir: string, ocrDir: string, sessionId: string): string {
+  if (isAbsolute(sessionDir)) return sessionDir
+  // Resolve relative paths against the project root (parent of `.ocr/`)
+  return join(dirname(ocrDir), sessionDir)
+}
 
 /** Common git branch prefixes that use a slash separator. */
 const BRANCH_PREFIXES = [
@@ -36,6 +43,7 @@ const BRANCH_PREFIXES = [
 async function findPrForBranch(
   branch: string,
   env: NodeJS.ProcessEnv,
+  cwd: string,
 ): Promise<{ prNumber: number; prUrl: string; resolvedBranch: string } | null> {
   const candidates = [branch]
 
@@ -53,7 +61,7 @@ async function findPrForBranch(
       const { stdout } = await execFileAsync(
         'gh',
         ['pr', 'list', '--head', candidate, '--json', 'number,url', '--limit', '1'],
-        { env },
+        { env, cwd },
       )
       const prs = JSON.parse(stdout) as { number: number; url: string }[]
       if (prs.length > 0 && prs[0]) {
@@ -111,8 +119,9 @@ export function registerPostHandlers(
       const branch = session.branch
 
       // Check gh auth
+      const repoRoot = dirname(ocrDir)
       try {
-        await execFileAsync('gh', ['auth', 'status'], { env: cleanEnv() })
+        await execFileAsync('gh', ['auth', 'status'], { env: cleanEnv(), cwd: repoRoot })
       } catch {
         socket.emit('post:gh-result', {
           authenticated: false,
@@ -125,7 +134,7 @@ export function registerPostHandlers(
       }
 
       // Find PR for branch (tries slash-restored variants if needed)
-      const pr = await findPrForBranch(branch, cleanEnv())
+      const pr = await findPrForBranch(branch, cleanEnv(), repoRoot)
       if (pr) {
         socket.emit('post:gh-result', {
           authenticated: true,
@@ -178,7 +187,9 @@ export function registerPostHandlers(
       }
 
       // Read final.md + all reviewer outputs
-      const sessionDir = session.session_dir || join(ocrDir, 'sessions', sessionId)
+      const sessionDir = session.session_dir
+        ? resolveSessionDir(session.session_dir, ocrDir, sessionId)
+        : join(ocrDir, 'sessions', sessionId)
       const roundDir = join(sessionDir, 'rounds', `round-${roundNumber}`)
       const finalPath = join(roundDir, 'final.md')
 
@@ -237,13 +248,14 @@ export function registerPostHandlers(
         prompt = buildHumanReviewPrompt(finalContent, reviewerContents)
       }
 
-      // Spawn via the adapter
+      // Spawn via the adapter — use project root (parent of .ocr/) as CWD
+      const repoRoot = dirname(ocrDir)
       const spawnResult = adapter.spawn({
         prompt,
-        cwd: process.cwd(),
+        cwd: repoRoot,
         mode: 'query',
-        maxTurns: 1,
-        allowedTools: ['Read', 'Grep', 'Glob'],
+        maxTurns: 3,
+        allowedTools: ['Read', 'Grep', 'Glob', 'Write'],
       })
       const proc = spawnResult.process
 
@@ -264,6 +276,13 @@ export function registerPostHandlers(
       let lineBuffer = ''
       let thinkingStatusEmitted = false
 
+      // ── Write-tool state ──
+      // Tracks whether the AI has finished writing final-human.md so we
+      // can suppress post-Write conversational text.
+      let activeToolName = ''
+      let writeJsonBuf = ''
+      let writeDone = false
+
       proc.stdout?.on('data', (chunk: Buffer) => {
         lineBuffer += chunk.toString()
         const lines = lineBuffer.split('\n')
@@ -280,8 +299,12 @@ export function registerPostHandlers(
       function handleEvent(evt: NormalizedEvent): void {
         switch (evt.type) {
           case 'text':
-            assistantText += evt.text
-            socket.emit('post:token', { token: evt.text })
+            // After the Write tool finishes, suppress conversational text
+            // (e.g. "I've written the review to final-human.md")
+            if (!writeDone) {
+              assistantText += evt.text
+              socket.emit('post:token', { token: evt.text })
+            }
             break
           case 'thinking':
             if (!thinkingStatusEmitted) {
@@ -291,11 +314,32 @@ export function registerPostHandlers(
             }
             break
           case 'tool_start':
-            if (evt.name !== '__input_json_delta') {
+            if (evt.name === '__input_json_delta') {
+              // Accumulate Write tool's JSON (content is read from file on close).
+              // We don't stream it here — the preview appears cleanly via post:done.
+              if (activeToolName === 'Write') {
+                writeJsonBuf += (evt.input['partial_json'] as string)
+              }
+            } else {
+              // New tool starting — clear any accumulated reasoning text
+              if (assistantText) {
+                assistantText = ''
+                socket.emit('post:clear-stream')
+              }
+              activeToolName = evt.name
+              if (evt.name === 'Write') {
+                writeJsonBuf = ''
+              }
               const detail = formatToolDetail(evt.name, evt.input)
               socket.emit('post:status', { tool: evt.name, detail })
               tracker.appendOutput(`▸ ${detail}\n`)
             }
+            break
+          case 'tool_end':
+            if (activeToolName === 'Write') {
+              writeDone = true
+            }
+            activeToolName = ''
             break
           case 'full_text':
             assistantText = evt.text
@@ -322,10 +366,22 @@ export function registerPostHandlers(
           }
         }
 
-        if (code === 0 && assistantText.trim()) {
+        // Primary: read the file the AI wrote. Fallback: use captured assistantText.
+        const humanReviewPath = join(roundDir, 'final-human.md')
+        let generatedContent = ''
+        if (existsSync(humanReviewPath)) {
+          try {
+            generatedContent = readFileSync(humanReviewPath, 'utf-8').trim()
+          } catch { /* fall through */ }
+        }
+        if (!generatedContent && assistantText.trim()) {
+          generatedContent = assistantText.trim()
+        }
+
+        if (code === 0 && generatedContent) {
           tracker.appendOutput('\n✓ Human review generated\n')
           tracker.finish(0)
-          socket.emit('post:done', { content: assistantText.trim() })
+          socket.emit('post:done', { content: generatedContent })
         } else if (code === null) {
           // Process was killed (cancelled)
           tracker.appendOutput('\n✗ Cancelled\n')
@@ -390,7 +446,9 @@ export function registerPostHandlers(
           return
         }
 
-        const sessionDir = session.session_dir || join(ocrDir, 'sessions', sessionId)
+        const sessionDir = session.session_dir
+        ? resolveSessionDir(session.session_dir, ocrDir, sessionId)
+        : join(ocrDir, 'sessions', sessionId)
         const roundDir = join(sessionDir, 'rounds', `round-${roundNumber}`)
         mkdirSync(roundDir, { recursive: true })
 
@@ -432,11 +490,12 @@ export function registerPostHandlers(
         const tmpFile = join(tmpDir, `${randomUUID()}.md`)
         writeFileSync(tmpFile, content, { mode: 0o600 })
 
+        const repoRoot = dirname(ocrDir)
         try {
           const { stdout } = await execFileAsync(
             'gh',
             ['pr', 'comment', String(prNumber), '--body-file', tmpFile],
-            { env: cleanEnv() },
+            { env: cleanEnv(), cwd: repoRoot },
           )
 
           // Try to extract the comment URL from gh output
