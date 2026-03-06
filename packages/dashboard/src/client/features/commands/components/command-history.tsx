@@ -1,16 +1,13 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, History, RotateCcw } from 'lucide-react'
-import { cn, parseUtcDate } from '../../../lib/utils'
+import { cn } from '../../../lib/utils'
+import { formatDateTime } from '../../../lib/date-utils'
 import { useCommandHistory, type CommandHistoryEntry } from '../hooks/use-commands'
 
 function formatDuration(ms: number | null | undefined): string {
   if (ms == null || Number.isNaN(ms)) return '-'
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`
-}
-
-function formatTime(iso: string): string {
-  return parseUtcDate(iso).toLocaleString()
 }
 
 interface HistoryItemProps {
@@ -38,7 +35,7 @@ function HistoryItem({ entry, isRunning, onRerun }: HistoryItemProps) {
           )}
           <span className="min-w-0 flex-1 truncate font-mono text-sm">{entry.command}</span>
         </button>
-        <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">{formatTime(entry.started_at)}</span>
+        <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">{formatDateTime(entry.started_at)}</span>
         <span className="shrink-0 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
           {formatDuration(entry.duration_ms)}
         </span>

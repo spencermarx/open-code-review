@@ -7,6 +7,7 @@ import { StatusBadge } from '../../components/ui/status-badge'
 import { PhaseTimeline, type Phase } from '../../components/ui/phase-timeline'
 import { SessionTabs } from './components/session-tabs'
 import { fetchApi, parseUtcDate } from '../../lib/utils'
+import { formatDate } from '../../lib/date-utils'
 import type { OrchestrationEvent } from '../../lib/api-types'
 
 // Phase names must match the CLI's `ocr state transition --phase` values exactly.
@@ -60,16 +61,6 @@ function buildPhases(
     if (i + 1 < phaseNumber) return { name: label, status: 'complete' }
     if (i + 1 === phaseNumber) return { name: label, status: 'active' }
     return { name: label, status: 'pending' }
-  })
-}
-
-function formatDate(dateStr: string): string {
-  return parseUtcDate(dateStr).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
   })
 }
 

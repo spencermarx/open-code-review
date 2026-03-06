@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { GitBranch } from 'lucide-react'
 import { useTheme } from '../../../providers/theme-provider'
+import { authHeaders } from '../../../lib/auth'
 import type { MapSection, SectionDependency } from '../../../lib/api-types'
 
 const MermaidRenderer = lazy(() => import('./mermaid-renderer'))
@@ -20,11 +21,13 @@ interface DependencyGraphProps {
 export function DependencyGraph({ sessionId, runNumber, sections, onSectionClick }: DependencyGraphProps) {
   const { resolved: theme } = useTheme()
 
-  const { data, isLoading } = useQuery<GraphResponse>({
+  const { data, isLoading } = useQuery<GraphResponse | null>({
     queryKey: ['sessions', sessionId, 'runs', runNumber, 'graph'],
     queryFn: async () => {
-      const res = await fetch(`/api/sessions/${sessionId}/runs/${runNumber}/graph`)
-      if (res.status === 404) return null as unknown as GraphResponse
+      const res = await fetch(`/api/sessions/${sessionId}/runs/${runNumber}/graph`, {
+        headers: { ...authHeaders() },
+      })
+      if (res.status === 404) return null
       if (!res.ok) throw new Error('Failed to fetch graph data')
       return res.json()
     },

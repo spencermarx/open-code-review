@@ -1,13 +1,7 @@
 import { Link } from 'react-router-dom'
-import { User, Shield, TestTube, Sparkles } from 'lucide-react'
+import { User } from 'lucide-react'
 import type { ReviewerOutput } from '../../../lib/api-types'
-
-const REVIEWER_ICONS: Record<string, typeof User> = {
-  principal: Sparkles,
-  quality: User,
-  security: Shield,
-  testing: TestTube,
-}
+import { REVIEWER_ICONS } from '../constants'
 
 const REVIEWER_COLORS: Record<string, string> = {
   principal: 'text-violet-600 dark:text-violet-400 bg-violet-500/10 border-violet-500/25',

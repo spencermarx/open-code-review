@@ -1,17 +1,12 @@
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, User, Shield, TestTube, Sparkles } from 'lucide-react'
+import { ArrowLeft, User } from 'lucide-react'
 import { useReviewerDetail } from './hooks/use-reviews'
 import { MarkdownRenderer } from '../../components/markdown/markdown-renderer'
 import { FindingsTable } from './components/findings-table'
 import { useQuery } from '@tanstack/react-query'
 import type { Artifact } from '../../lib/api-types'
-
-const REVIEWER_ICONS: Record<string, typeof User> = {
-  principal: Sparkles,
-  quality: User,
-  security: Shield,
-  testing: TestTube,
-}
+import { authHeaders } from '../../lib/auth'
+import { REVIEWER_ICONS } from './constants'
 
 export function ReviewerDetailPage() {
   const {
@@ -43,6 +38,7 @@ export function ReviewerDetailPage() {
       if (!reviewer?.file_path) return ''
       const res = await fetch(
         `/api/sessions/${sessionId}/rounds/${roundNumber}/reviewers/${reviewerId}/content`,
+        { headers: { ...authHeaders() } },
       )
       if (!res.ok) return ''
       const data: Artifact = await res.json()

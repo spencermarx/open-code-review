@@ -1,11 +1,7 @@
 import { useState } from 'react'
 import { Pencil, Trash2, Check, X } from 'lucide-react'
 import type { Note } from '../hooks/use-notes'
-import { parseUtcDate } from '../../../lib/utils'
-
-function formatDate(iso: string): string {
-  return parseUtcDate(iso).toLocaleString()
-}
+import { formatDateTime } from '../../../lib/date-utils'
 
 interface NoteCardProps {
   note: Note
@@ -121,8 +117,8 @@ export function NoteCard({ note, onUpdate, onDelete }: NoteCardProps) {
         </div>
       </div>
       <div className="mt-2 flex gap-3 text-[11px] text-zinc-400 dark:text-zinc-500">
-        <span>{formatDate(note.created_at)}</span>
-        {wasEdited && <span>(edited {formatDate(note.updated_at)})</span>}
+        <span>{formatDateTime(note.created_at)}</span>
+        {wasEdited && <span>(edited {formatDateTime(note.updated_at)})</span>}
       </div>
     </div>
   )

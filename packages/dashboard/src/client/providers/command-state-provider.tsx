@@ -162,17 +162,18 @@ export function CommandStateProvider({ children }: { children: ReactNode }) {
       setTabMap((prev) => {
         const next = new Map(prev)
         next.delete(id)
+
+        // Compute the next active tab from the updated map (not a stale closure)
+        setActiveTabId((prevActive) => {
+          if (prevActive !== id) return prevActive
+          const remaining = Array.from(next.keys())
+          return remaining.length > 0 ? remaining[remaining.length - 1]! : null
+        })
+
         return next
       })
-
-      setActiveTabId((prev) => {
-        if (prev !== id) return prev
-        // Focus another tab -- pick the last remaining one, or null
-        const remaining = Array.from(tabMap.keys()).filter((k) => k !== id)
-        return remaining.length > 0 ? remaining[remaining.length - 1]! : null
-      })
     },
-    [tabMap],
+    [],
   )
 
   const cancelCommand = useCallback(

@@ -17,6 +17,20 @@ export default function MermaidRenderer({ definition, onNodeClick }: MermaidRend
   const { resolved: theme } = useTheme()
   const uniqueId = useId().replace(/:/g, '_')
 
+  // Re-initialize mermaid only when the theme changes (not on every definition change)
+  useEffect(() => {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: theme === 'dark' ? 'dark' : 'default',
+      securityLevel: 'loose',
+      flowchart: {
+        useMaxWidth: true,
+        htmlLabels: true,
+        curve: 'basis',
+      },
+    })
+  }, [theme])
+
   useEffect(() => {
     if (!definition || !containerRef.current) return
 
@@ -26,17 +40,6 @@ export default function MermaidRenderer({ definition, onNodeClick }: MermaidRend
       setError(null)
 
       try {
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: theme === 'dark' ? 'dark' : 'default',
-          securityLevel: 'loose',
-          flowchart: {
-            useMaxWidth: true,
-            htmlLabels: true,
-            curve: 'basis',
-          },
-        })
-
         if (cancelled) return
 
         const elementId = `mermaid${uniqueId}`

@@ -26,6 +26,15 @@ export function ChatPanel({ sessionId, targetType, targetId, onClose }: ChatPane
 
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  // Close panel on Escape key
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
   // Auto-scroll on new messages or streaming content
   useEffect(() => {
     const el = scrollRef.current

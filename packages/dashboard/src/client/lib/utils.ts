@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { authHeaders } from './auth'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -9,9 +10,17 @@ export function cn(...inputs: ClassValue[]) {
  * Fetch wrapper that throws on non-OK responses so TanStack Query
  * properly treats HTTP errors as errors instead of caching the
  * error body as valid data.
+ *
+ * Automatically injects the Authorization bearer token header.
  */
 export async function fetchApi<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...authHeaders(),
+      ...init?.headers,
+    },
+  })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`${res.status}: ${body || res.statusText}`)

@@ -1,18 +1,8 @@
 import { Link } from 'react-router-dom'
 import { GitBranch, Map, FileSearch } from 'lucide-react'
 import { StatusBadge } from '../../../components/ui/status-badge'
+import { timeAgo } from '../../../lib/date-utils'
 import type { SessionSummary } from '../../../lib/api-types'
-
-function timeAgo(dateStr: string): string {
-  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
-  if (seconds < 60) return 'just now'
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
 
 interface RecentSessionsProps {
   sessions: SessionSummary[]

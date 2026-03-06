@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Play, Sparkles } from 'lucide-react'
+import { Play, ShieldAlert, Sparkles } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 
 // ── Command registry ──
@@ -183,6 +183,12 @@ export function CommandPalette({ isRunning, runningCount, onRunCommand, prefill,
             {cmd.label}
           </button>
         ))}
+      </div>
+
+      {/* Security notice */}
+      <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+        <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>Commands run an AI agent with full read/write and shell access to your project. Only run in trusted environments.</span>
       </div>
 
       {/* Form body */}

@@ -1,29 +1,8 @@
 import { Link } from 'react-router-dom'
 import { GitBranch, FileSearch, Map, Clock } from 'lucide-react'
 import { StatusBadge } from '../../../components/ui/status-badge'
-import { parseUtcDate } from '../../../lib/utils'
+import { formatShortDate, formatElapsed } from '../../../lib/date-utils'
 import type { SessionSummary } from '../../../lib/api-types'
-
-function formatElapsed(startedAt: string): string {
-  const ms = Date.now() - parseUtcDate(startedAt).getTime()
-  const seconds = Math.floor(ms / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  const days = Math.floor(hours / 24)
-  return `${days}d`
-}
-
-function formatDate(dateStr: string): string {
-  return parseUtcDate(dateStr).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
 
 interface SessionCardProps {
   session: SessionSummary
@@ -57,7 +36,7 @@ export function SessionCard({ session }: SessionCardProps) {
       </div>
 
       <div className="mt-2 flex items-center gap-3 text-xs text-zinc-400 dark:text-zinc-500">
-        <span>{formatDate(session.started_at)}</span>
+        <span>{formatShortDate(session.started_at)}</span>
         <span className="flex items-center gap-1">
           <Clock className="h-3 w-3" />
           {formatElapsed(session.updated_at)}
