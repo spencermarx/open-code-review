@@ -5,6 +5,33 @@
  * applies pragmas, and provides typed query helpers for all tables.
  */
 
+/**
+ * ## Dual-Writer Ownership Model
+ *
+ * Two processes can write to `ocr.db`:
+ *
+ * - **CLI** (`ocr state init/transition/close`) — owns workflow state:
+ *   `sessions`, `orchestration_events`. Writes happen during review/map
+ *   workflows when the AI agent calls `ocr state` commands.
+ *
+ * - **Dashboard** (this server) — owns user-interaction tables:
+ *   `user_file_progress`, `user_finding_progress`, `user_round_progress`,
+ *   `user_notes`, `command_executions`, `chat_conversations`, `chat_messages`.
+ *   Also writes parsed artifact data: `review_rounds`, `reviewer_outputs`,
+ *   `review_findings`, `map_runs`, `map_sections`, `map_files`,
+ *   `markdown_artifacts`.
+ *
+ * Concurrency is managed via:
+ * 1. **Atomic writes** — temp file + rename prevents partial reads
+ * 2. **Merge-before-write** — dashboard calls `DbSyncWatcher.syncFromDisk()`
+ *    before saving to pull in CLI changes
+ * 3. **File watching** — `DbSyncWatcher` detects external writes and reloads
+ *
+ * Both processes use sql.js (in-memory WASM SQLite), so there is no
+ * file-level locking. The merge-before-write pattern prevents data loss
+ * under normal usage but is not a full MVCC solution.
+ */
+
 import { existsSync, readFileSync, renameSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import initSqlJs, { type Database } from 'sql.js'
