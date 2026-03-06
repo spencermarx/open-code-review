@@ -55,12 +55,12 @@ importers:
       log-update:
         specifier: ^7.0.2
         version: 7.0.2
-      open:
-        specifier: ^10
-        version: 10.2.0
       ora:
         specifier: ^8.1.1
         version: 8.2.0
+      socket.io:
+        specifier: ^4.8
+        version: 4.8.3
       sql.js:
         specifier: ^1.14.1
         version: 1.14.1
@@ -129,6 +129,9 @@ importers:
         specifier: ^3.5.0
         version: 3.5.0
     devDependencies:
+      '@open-code-review/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@tailwindcss/vite':
         specifier: ^4.2.1
         version: 4.2.1(vite@6.4.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
