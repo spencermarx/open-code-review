@@ -12,6 +12,8 @@ The command-line interface for Open Code Review. Handles multi-tool setup, real-
 
 4. **Dashboard**: The `ocr dashboard` command starts a local web interface for browsing sessions, reviews, and maps.
 
+> **Recommended:** Use `ocr dashboard` to launch the web interface for running commands, browsing reviews, triaging findings, and posting to GitHub — all from your browser. See the [Dashboard docs](../dashboard/README.md) for details.
+
 ## Installation
 
 ```bash
@@ -125,7 +127,9 @@ ocr dashboard --port 8080
 ocr dashboard --no-open
 ```
 
-Requires OCR to be initialized (`.ocr/` must exist). The dashboard reads from the same SQLite database and session files used by the review workflow. The dashboard also supports posting reviews directly to GitHub PRs with optional AI-powered human review translation.
+Requires OCR to be initialized (`.ocr/` must exist). The dashboard reads from the same SQLite database and session files used by the review workflow.
+
+**Key capabilities:** session browser, review triage, Code Review Map navigation with dependency graphs, Command Center for launching reviews/maps, AI-powered chat, posting to GitHub with human review translation, and address feedback tooling. See the [Dashboard README](../dashboard/README.md) for full details.
 
 ### `ocr state`
 

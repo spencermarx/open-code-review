@@ -14,15 +14,31 @@ ocr dashboard --no-open        # Don't auto-open browser
 
 The dashboard is bundled into the `@open-code-review/cli` package and is not published separately.
 
+<p align="center">
+  <img src="../../assets/ocr-tool-command-center.png" alt="OCR Dashboard Command Center" width="700" />
+</p>
+
 ## Features
 
 - **Session browser** — View all review and map sessions with status, branch, and timestamps
 - **Review detail** — Read individual reviewer findings, discourse, and final synthesis with rendered markdown
+
+<p align="center">
+  <img src="../../assets/ocr-tool-focused-review.png" alt="OCR review detail with findings" width="700" />
+</p>
+
 - **Review triage** — Set triage status on each review round (needs review, in progress, changes made, acknowledged, dismissed) with filtering and sorting
-- **Map visualization** — Navigate Code Review Maps with rendered Mermaid dependency graphs
+- **Map visualization** — Navigate Code Review Maps with rendered Mermaid dependency graphs and file-level progress tracking
+
+<p align="center">
+  <img src="../../assets/ocr-tool-focused-code-review-map.png" alt="OCR Code Review Map" width="700" />
+</p>
+
 - **Live progress** — Watch active reviews in real-time via WebSocket
 - **Command runner** — Execute OCR commands directly from the dashboard with tabbed terminal output
 - **Notes** — Attach notes to sessions for tracking follow-up items
+- **Address Feedback** — Copy the review file path and a portable AI prompt for implementing feedback in any coding tool, or run an agent directly with Claude Code/OpenCode
+- **Ask the Team** — AI-powered chat on review rounds and map runs for follow-up questions about findings, reviewer reasoning, or alternative approaches
 - **Post to GitHub** — Post review findings directly to your GitHub PR as a comment, with optional AI-powered human review translation
 - **Human review translation** — Generate a natural, first-person rewrite of the multi-reviewer synthesis that sounds like a single developer wrote it, following Google's code review guidelines
 
@@ -34,6 +50,14 @@ The review round page includes a "Post to GitHub" button that:
 2. Offers two modes: post the team review as-is, or generate a human review translation
 3. Human review mode streams tokens in real-time via Claude CLI, producing a natural first-person review
 4. Preview, edit, and save drafts before posting to the PR
+
+<p align="center">
+  <img src="../../assets/ocr-tool-translate-to-human-review-button.png" alt="Post Review to GitHub dialog" width="700" />
+</p>
+
+<p align="center">
+  <img src="../../assets/ocr-tool-example-translated-human-review.png" alt="Human-voice review posted to GitHub PR" width="700" />
+</p>
 
 **Requirements:** GitHub CLI (`gh`) must be installed and authenticated. The branch must have an open PR.
 

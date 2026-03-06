@@ -69,10 +69,6 @@ OCR gives you **full control over your review team composition**. You define:
 
 > **Note**: OCR does not replace human code review. Even the best LLMs make mistakes. The goal is to reduce the burden on human reviewers by catching issues earlier—not to eliminate human judgment from your process.
 
-<p align="center">
-  <img src="assets/ocr-tool-focused-review.png" alt="OCR review output" width="700" />
-</p>
-
 ## Installation
 
 OCR supports two distribution methods. Choose based on your environment:
@@ -103,9 +99,81 @@ For **Claude Code** users who prefer plugin-based installation with automatic up
 
 Plugin commands use the `/ocr:` prefix: `/ocr:review`, `/ocr:doctor`, etc.
 
+> **Next step:** After initialization, launch the dashboard to run your first review:
+> ```bash
+> ocr dashboard
+> ```
+
 ---
 
-## Quick Start
+## The Dashboard (Recommended)
+
+The dashboard is the recommended way to run reviews, browse results, and manage your review workflow. Launch it with `ocr dashboard` and open your browser — everything else happens in the UI.
+
+<p align="center">
+  <img src="assets/ocr-tool-command-center.png" alt="OCR Dashboard Command Center" width="700" />
+</p>
+
+### Run reviews and maps
+
+The **Command Center** lets you launch multi-agent code reviews and Code Review Maps directly from the dashboard. Specify targets, add requirements, toggle fresh starts — then watch live terminal output as agents work.
+
+### Browse and triage reviews
+
+View verdict banners, individual reviewer cards, findings tables, and cross-reviewer discourse for every review round. Set triage status on findings (needs review, in progress, changes made, acknowledged, dismissed) with filtering and sorting.
+
+<p align="center">
+  <img src="assets/ocr-tool-focused-review.png" alt="OCR review output with findings" width="700" />
+</p>
+
+### Explore Code Review Maps
+
+Navigate large changesets with section-based breakdowns, rendered Mermaid dependency graphs, and file-level progress tracking. Mark files as reviewed to track your progress through the map.
+
+<p align="center">
+  <img src="assets/ocr-tool-focused-code-review-map.png" alt="OCR Code Review Map" width="700" />
+</p>
+
+### Post to GitHub
+
+Two posting modes are available from the review round page:
+
+- **Post Team Review** — Posts the multi-reviewer synthesis as-is
+- **Generate Human Review** — AI-rewrites all findings into a single, natural human voice following [Google's code review guidelines](https://google.github.io/eng-practices/review/reviewer/). Preview, edit, and save drafts before posting.
+
+<p align="center">
+  <img src="assets/ocr-tool-translate-to-human-review-button.png" alt="Post Review to GitHub dialog" width="700" />
+</p>
+
+<p align="center">
+  <img src="assets/ocr-tool-example-translated-human-review.png" alt="Human-voice review posted to GitHub PR" width="700" />
+</p>
+
+### Address Feedback
+
+After reviewing the findings, address them directly. The dashboard provides a portable AI prompt you can copy into any coding tool, or — with Claude Code or OpenCode detected — run an agent directly from the dashboard to corroborate, validate, and implement changes from the review.
+
+### Ask the Team
+
+AI-powered chat is available on every review round and map run page. Ask follow-up questions about specific findings, request clarification on reviewer reasoning, or explore alternative approaches — all without leaving the dashboard.
+
+### Real-time progress
+
+Watch active reviews and maps as they run. WebSocket-based live updates show phase transitions, reviewer completions, and finding counts in real-time.
+
+### Session notes
+
+Attach notes to any session for tracking follow-up items, decisions, or context that doesn't belong in the review itself.
+
+---
+
+The dashboard reads from the same `.ocr/` directory and SQLite database used by the CLI and review workflow. No separate configuration is needed.
+
+---
+
+## IDE Workflows
+
+You can also run all OCR commands directly in your AI coding assistant using slash commands. This is useful when you prefer staying in your editor or working without the dashboard.
 
 ### Using the CLI (Claude Code, Cursor, Windsurf, etc.)
 
@@ -155,7 +223,7 @@ ocr progress
 ```markdown
 # Code Review: Feature/Auth Implementation
 
-## Verdict: ✅ APPROVE with suggestions
+## Verdict: APPROVE with suggestions
 
 ### Critical (0)
 No blocking issues.
@@ -168,9 +236,9 @@ No blocking issues.
 ### Requirements Verification
 | Requirement | Status |
 |-------------|--------|
-| JWT authentication | ✅ Implemented |
-| Refresh tokens | ✅ Implemented |
-| Password hashing | ✅ Using bcrypt |
+| JWT authentication | Implemented |
+| Refresh tokens | Implemented |
+| Password hashing | Using bcrypt |
 ```
 
 ### Using the Claude Code Plugin
@@ -192,6 +260,52 @@ No blocking issues.
 ```
 /ocr:doctor
 ```
+
+---
+
+## Code Review Maps
+
+For large changesets that span dozens or hundreds of files, **Code Review Maps** give you a structured navigation document — grouping related changes into sections, identifying key files, and surfacing dependencies.
+
+```
+/ocr-map                           # Map staged changes
+/ocr-map HEAD~10                   # Map last 10 commits
+/ocr-map feature/big-refactor      # Map branch vs main
+/ocr-map --requirements spec.md    # Map with requirements context
+/ocr-map --fresh                   # Regenerate from scratch
+```
+
+Maps produce a section-based breakdown of your changeset with file groupings, risk annotations, and suggested review order — ideal for orienting yourself (or a teammate) before diving into the code. You can also browse maps visually in the [dashboard](#the-dashboard-recommended) with dependency graphs and file-level progress tracking.
+
+### When to Use a Map
+
+- **Large changesets** — 20+ files where you'd spend hours just figuring out where to start
+- **Navigation aid** — You want a structured reading order before diving into details
+- **Onboarding a reviewer** — Share the map with a teammate so they can orient themselves quickly
+
+### When Review Alone is Sufficient
+
+For most changesets, `/ocr-review` is all you need. The Tech Lead and reviewers already trace upstream/downstream dependencies and explore beyond the diff. That lighter-weight context gathering is token-efficient and sufficient for the vast majority of changes. Maps add specialized agents (Map Architect, Flow Analysts) with redundancy — valuable for human navigation, but typically unnecessary for AI-driven feedback.
+
+### Using Both Tools
+
+Map and review are independent but complement each other best in this order:
+
+1. Run `/ocr-review` first — let the AI reviewers surface findings on quality, security, and architecture
+2. Run `/ocr-map` to generate a structured reading order for human review of the changeset
+3. Use the map as your "last mile" navigation guide — walk through the code yourself, informed by the AI's findings
+
+### Map Configuration
+
+```yaml
+# .ocr/config.yaml
+code-review-map:
+  agents:
+    flow_analysts: 2        # Default: 2 (range: 1-10)
+    requirements_mappers: 2  # Default: 2 (range: 1-10)
+```
+
+For large codebases, increase redundancy to 3-4 for higher-confidence groupings. For speed, set to 1.
 
 ---
 
@@ -231,7 +345,11 @@ Requirements propagate to all reviewers—each evaluates the code against both t
 
 After completing a review, post it directly to your PR as a comment.
 
-### From the Terminal
+### From the Dashboard
+
+The dashboard's review round page includes a **Post to GitHub** button with two posting modes — team review or human review translation. See [The Dashboard > Post to GitHub](#post-to-github) above for details.
+
+### From Your AI Assistant
 
 The `/ocr-post` command posts the most recent review round to your PR:
 
@@ -244,23 +362,6 @@ The `/ocr-post` command posts the most recent review round to your PR:
 </p>
 
 The posted review includes your summary, findings breakdown, and requirements assessment—giving human reviewers immediate context when they open the PR.
-
-### From the Dashboard
-
-The dashboard's review round page includes a **Post to GitHub** button that offers two posting modes:
-
-- **Post Team Review** — Posts the raw multi-reviewer synthesis as-is, exactly as it appears in your session
-- **Generate Human Review** — AI-rewrites all reviewer findings into a single, natural human voice
-
-<p align="center">
-  <img src="assets/ocr-tool-translate-to-human-review-button.png" alt="Post Review to GitHub dialog with Post Team Review and Generate Human Review options" width="700" />
-</p>
-
-**Why Human Review Translation matters:** Multi-reviewer synthesis can read like what it is—an AI merging outputs from several agents. The human review mode rewrites everything into first-person feedback that follows [Google's code review guidelines](https://google.github.io/eng-practices/review/reviewer/). The rewrite streams in real-time, and you can preview, edit in a textarea, and save drafts before posting.
-
-<p align="center">
-  <img src="assets/ocr-tool-example-translated-human-review.png" alt="Human-written review comment posted to a GitHub PR" width="700" />
-</p>
 
 **Prerequisites:**
 - GitHub CLI (`gh`) must be installed and authenticated
@@ -307,55 +408,6 @@ jobs:
 ```
 
 > **Tip**: Running OCR before human review means reviewers see code that's already been refined—they can focus on architectural decisions and business logic rather than catching routine issues.
-
----
-
-## Code Review Maps
-
-For large changesets that span dozens or hundreds of files, a full multi-agent review may not be the right starting point. **Code Review Maps** give you a structured navigation document first—grouping related changes into sections, identifying key files, and surfacing dependencies.
-
-```
-/ocr-map                           # Map staged changes
-/ocr-map HEAD~10                   # Map last 10 commits
-/ocr-map feature/big-refactor      # Map branch vs main
-/ocr-map --requirements spec.md    # Map with requirements context
-/ocr-map --fresh                   # Regenerate from scratch
-```
-
-Maps produce a section-based breakdown of your changeset with file groupings, risk annotations, and suggested review order—ideal for orienting yourself (or a teammate) before diving into the code.
-
-<p align="center">
-  <img src="assets/ocr-tool-focused-code-review-map.png" alt="OCR Code Review Map" width="700" />
-</p>
-
----
-
-## Dashboard
-
-The OCR Dashboard is a local web interface for browsing sessions, reviews, and maps across your project.
-
-```bash
-ocr dashboard                  # Start on default port (4173)
-ocr dashboard --port 8080      # Custom port
-ocr dashboard --no-open        # Don't auto-open browser
-```
-
-<p align="center">
-  <img src="assets/ocr-tool-command-center.png" alt="OCR Dashboard" width="700" />
-</p>
-
-**What you can do:**
-
-- **Browse sessions** — See all review and map sessions with status, branch, and timestamps
-- **Explore reviews** — Read individual reviewer findings, discourse, and final synthesis
-- **Triage reviews** — Set status on each review round (needs review, in progress, changes made, acknowledged, dismissed) with filtering and sorting
-- **View maps** — Navigate Code Review Maps with rendered Mermaid dependency graphs
-- **Track progress** — Watch active reviews in real-time via WebSocket
-- **Run commands** — Execute OCR commands directly from the dashboard with live terminal output
-- **Take notes** — Attach notes to sessions for tracking follow-up items
-- **Post to GitHub** — Post reviews directly to your PR with optional AI-powered human review translation
-
-The dashboard reads from the same `.ocr/` directory and SQLite database used by the CLI and review workflow. No separate configuration is needed.
 
 ---
 
@@ -504,14 +556,14 @@ This updates skills, references, and commands to the latest version while **pres
 
 | Asset | Updated | Notes |
 |-------|---------|-------|
-| `.ocr/skills/SKILL.md` | ✅ | Tech Lead orchestration |
-| `.ocr/skills/references/` | ✅ | Workflow, discourse rules |
-| `.ocr/skills/assets/reviewer-template.md` | ✅ | Template for custom reviewers |
-| `.ocr/skills/references/reviewers/` | ❌ | **Preserved** — all reviewer personas kept |
-| `.ocr/config.yaml` | ❌ | **Preserved** — your customizations are kept |
-| Tool commands (`.windsurf/`, etc.) | ✅ | Slash command definitions |
-| `AGENTS.md` / `CLAUDE.md` | ✅ | OCR managed blocks only |
-| `.ocr/sessions/` | ❌ | Review history untouched |
+| `.ocr/skills/SKILL.md` | Yes | Tech Lead orchestration |
+| `.ocr/skills/references/` | Yes | Workflow, discourse rules |
+| `.ocr/skills/assets/reviewer-template.md` | Yes | Template for custom reviewers |
+| `.ocr/skills/references/reviewers/` | No | **Preserved** — all reviewer personas kept |
+| `.ocr/config.yaml` | No | **Preserved** — your customizations are kept |
+| Tool commands (`.windsurf/`, etc.) | Yes | Slash command definitions |
+| `AGENTS.md` / `CLAUDE.md` | Yes | OCR managed blocks only |
+| `.ocr/sessions/` | No | Review history untouched |
 
 ### Update Options
 
@@ -573,7 +625,7 @@ This enables a natural "review → fix → re-review" workflow without losing hi
 
 ## Requirements
 
-- **Node.js** ≥ 20.0.0
+- **Node.js** >= 20.0.0
 - **Git** — For diff analysis
 - **An AI coding assistant** — Claude Code, Cursor, Windsurf, or [any supported tool](#installation)
 - **GitHub CLI** (`gh`) — Optional, for `/ocr-post`
