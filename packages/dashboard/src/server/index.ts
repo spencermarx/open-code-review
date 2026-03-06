@@ -158,6 +158,65 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   writeFileSync(pidFilePath, String(process.pid), { mode: 0o600 })
 
+  // ── Kill orphaned child processes ──
+  // Before marking stale rows, check if any unfinished commands have PIDs
+  // that are still alive and kill them. This handles the scenario where the
+  // dashboard was shut down while AI commands were mid-execution.
+  // Note: migrations have already been applied by openDb() above,
+  // so the pid column is guaranteed to exist.
+  const orphanResult = db.exec(
+    `SELECT id, pid, is_detached, started_at FROM command_executions
+     WHERE pid IS NOT NULL AND finished_at IS NULL`
+  )
+  if (orphanResult.length > 0 && orphanResult[0]) {
+    const { columns, values: orphanRows } = orphanResult[0]
+    const colIdx = Object.fromEntries(columns.map((c, i) => [c, i]))
+
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000 // 24 hours
+    let killedCount = 0
+
+    for (const row of orphanRows) {
+      const pid = row[colIdx['pid']!] as number
+      const isDetached = (row[colIdx['is_detached']!] as number) === 1
+      const startedAt = row[colIdx['started_at']!] as string
+
+      // Safety: skip PIDs from commands started more than 24 hours ago
+      // to avoid PID-reuse issues with very old stale entries
+      if (new Date(startedAt).getTime() < cutoff) continue
+
+      try {
+        // Check if process is still alive (signal 0 = no signal, just check)
+        process.kill(pid, 0)
+
+        // Process is alive — kill it
+        if (isDetached) {
+          try { process.kill(-pid, 'SIGTERM') } catch { process.kill(pid, 'SIGTERM') }
+        } else {
+          process.kill(pid, 'SIGTERM')
+        }
+        killedCount++
+        console.log(`Killed orphaned process (PID ${pid})`)
+
+        // Escalate to SIGKILL after 2 seconds for stubborn processes
+        setTimeout(() => {
+          try {
+            process.kill(pid, 0) // still alive?
+            if (isDetached) {
+              try { process.kill(-pid, 'SIGKILL') } catch { /* ignore */ }
+            }
+            process.kill(pid, 'SIGKILL')
+          } catch { /* already dead */ }
+        }, 2000)
+      } catch {
+        // Process not running — PID is stale, will be cleaned up below
+      }
+    }
+
+    if (killedCount > 0) {
+      console.log(`Killed ${killedCount} orphaned child process(es)`)
+    }
+  }
+
   // Mark any command_executions left in a broken state as cancelled.
   // Covers two cases:
   //   1. finished_at IS NULL — process was running when server stopped
@@ -170,7 +229,8 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     db.run(
       `UPDATE command_executions
        SET exit_code = -2, finished_at = COALESCE(finished_at, datetime('now')),
-           output = COALESCE(output, '') || '\n[Cancelled]'
+           output = COALESCE(output, '') || '\n[Cancelled]',
+           pid = NULL
        WHERE finished_at IS NULL OR exit_code IS NULL`
     )
     saveDb(db, ocrDir)
@@ -320,6 +380,43 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
     // Remove PID tracking file
     try { unlinkSync(pidFilePath) } catch { /* ignore */ }
+
+    // Kill all child processes tracked in the database.
+    // This is more robust than the in-memory Maps (which are lost on hot-reload).
+    try {
+      const activeResult = db.exec(
+        'SELECT id, pid, is_detached FROM command_executions WHERE pid IS NOT NULL AND finished_at IS NULL'
+      )
+      if (activeResult.length > 0 && activeResult[0]) {
+        const { columns, values: activeRows } = activeResult[0]
+        const colIdx = Object.fromEntries(columns.map((c, i) => [c, i]))
+
+        for (const row of activeRows) {
+          const pid = row[colIdx['pid']!] as number
+          const isDetached = (row[colIdx['is_detached']!] as number) === 1
+
+          try {
+            if (isDetached) {
+              try { process.kill(-pid, 'SIGTERM') } catch { process.kill(pid, 'SIGTERM') }
+            } else {
+              process.kill(pid, 'SIGTERM')
+            }
+            console.log(`Sent SIGTERM to child process (PID ${pid})`)
+          } catch { /* already dead */ }
+        }
+
+        // Clear PIDs and mark as cancelled
+        db.run(
+          `UPDATE command_executions
+           SET exit_code = -2, finished_at = datetime('now'),
+               output = COALESCE(output, '') || '\n[Cancelled — server shutdown]',
+               pid = NULL
+           WHERE pid IS NOT NULL AND finished_at IS NULL`
+        )
+      }
+    } catch (err) {
+      console.error('Error killing child processes on shutdown:', err)
+    }
 
     cleanupAllChats()
     cleanupAllPostGenerations()

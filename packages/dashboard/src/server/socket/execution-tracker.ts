@@ -15,6 +15,8 @@ export interface TrackedExecution {
   executionId: number
   /** Append text to the output buffer and emit `command:output`. */
   appendOutput: (content: string) => void
+  /** Store the child process PID so orphans can be detected after restart. */
+  setPid: (pid: number, isDetached: boolean) => void
   /** Finalize the execution record and emit `command:finished`. */
   finish: (exitCode: number | null) => void
 }
@@ -59,12 +61,20 @@ export function startTrackedExecution(
       io.emit('command:output', { execution_id: executionId, content })
     },
 
+    setPid(pid: number, isDetached: boolean) {
+      db.run(
+        'UPDATE command_executions SET pid = ?, is_detached = ? WHERE id = ?',
+        [pid, isDetached ? 1 : 0, executionId],
+      )
+    },
+
     finish(exitCode: number | null) {
       const finishedAt = new Date().toISOString()
 
+      // Clear PID so completed commands aren't mistaken for orphans
       db.run(
         `UPDATE command_executions
-         SET exit_code = ?, finished_at = ?, output = ?
+         SET exit_code = ?, finished_at = ?, output = ?, pid = NULL
          WHERE id = ?`,
         [exitCode, finishedAt, outputBuffer, executionId],
       )

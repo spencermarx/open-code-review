@@ -178,6 +178,8 @@ export type CommandExecutionRow = {
   id: number
   command: string
   args: string | null
+  pid: number | null
+  is_detached: number
   exit_code: number | null
   started_at: string
   finished_at: string | null

@@ -270,6 +270,14 @@ function spawnCliCommand(
       })
   entry.process = proc
 
+  // Persist PID for orphan detection on restart
+  if (proc.pid) {
+    db.run(
+      'UPDATE command_executions SET pid = ?, is_detached = 0 WHERE id = ?',
+      [proc.pid, executionId],
+    )
+  }
+
   proc.stdout?.on('data', (chunk: Buffer) => {
     const content = chunk.toString()
     entry.outputBuffer += content
@@ -388,6 +396,14 @@ function spawnAiCommand(
   const { process: proc, detached } = adapter.spawn({ mode: 'workflow', prompt, cwd: repoRoot })
   entry.process = proc
   entry.detached = detached
+
+  // Persist PID for orphan detection on restart
+  if (proc.pid) {
+    db.run(
+      'UPDATE command_executions SET pid = ?, is_detached = ? WHERE id = ?',
+      [proc.pid, detached ? 1 : 0, executionId],
+    )
+  }
 
   // Emit initial status
   io.emit('command:output', {
@@ -520,7 +536,7 @@ function finishExecution(
 
   db.run(
     `UPDATE command_executions
-     SET exit_code = ?, finished_at = ?, output = ?
+     SET exit_code = ?, finished_at = ?, output = ?, pid = NULL
      WHERE id = ?`,
     [code, finishedAt, output, executionId]
   )

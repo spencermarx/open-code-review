@@ -193,6 +193,20 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 3,
+    description: "Add PID tracking to command_executions for orphan process cleanup",
+    sql: `
+      ALTER TABLE command_executions ADD COLUMN pid INTEGER;
+    `,
+  },
+  {
+    version: 4,
+    description: "Add is_detached flag to command_executions for process group kill strategy",
+    sql: `
+      ALTER TABLE command_executions ADD COLUMN is_detached INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 /**
