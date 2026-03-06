@@ -73,59 +73,71 @@ The system SHALL create a .gitignore to exclude session data by default.
 
 ### Requirement: Session State Tracking
 
-The system SHALL maintain explicit state in `state.json` for reliable progress tracking with round awareness.
+The system SHALL maintain explicit state in SQLite as the primary store, with `state.json` written as a backward-compatible side-effect, for reliable progress tracking with round awareness.
 
-#### Scenario: State file creation
+#### Scenario: State stored in SQLite
+
 - **GIVEN** a new review session begins
-- **WHEN** the session directory is created
-- **THEN** the system SHALL create `state.json` with initial state including round information
+- **WHEN** the session is initialized via `ocr state init`
+- **THEN** the system SHALL insert a row into the `sessions` table in `.ocr/data/ocr.db` with initial state
+- **AND** insert a `session_created` event into `orchestration_events`
+- **AND** write `state.json` as a backward-compatible side-effect
 
-#### Scenario: State file format
+#### Scenario: State file format (SQLite)
+
 - **GIVEN** a session is in progress
-- **WHEN** `state.json` is read
+- **WHEN** the `sessions` table row is read
 - **THEN** it SHALL contain:
-  - `session_id` - Session identifier
+  - `id` - Session identifier
+  - `branch` - Branch name
+  - `status` - active or closed
+  - `workflow_type` - review or map
   - `current_phase` - Current workflow phase
   - `phase_number` - Numeric phase (1-8)
-  - `current_round` - Current round number (hint, reconcilable with filesystem)
+  - `current_round` - Current round number
+  - `current_map_run` - Current map run number
   - `started_at` - ISO timestamp of session start
-  - `round_started_at` - ISO timestamp of current round start (for multi-round timing)
   - `updated_at` - ISO timestamp of last update
+  - `session_dir` - Relative path to session directory
 
-#### Scenario: Filesystem-derived state
+#### Scenario: Filesystem-derived state (deprecated)
+
 - **GIVEN** a session directory exists
 - **WHEN** state information is needed
-- **THEN** the following SHALL be derived from filesystem:
-  - Round count from `rounds/round-*/` directory enumeration
-  - Round completion from presence of `final.md` in round directory
-  - Reviewers from files in `rounds/round-{n}/reviews/`
-  - Discourse completion from presence of `discourse.md` in round directory
+- **THEN** the system SHALL read from the `sessions` table in SQLite as the primary source
+- **AND** filesystem-derived state (round count from directory enumeration, round completion from `final.md` existence) SHALL be used only as a fallback when no SQLite row exists (legacy migration)
 
 #### Scenario: State updates at phase transitions
+
 - **GIVEN** a review progresses through phases
 - **WHEN** transitioning to a new phase
-- **THEN** the orchestrating agent SHALL update `state.json` with `current_phase` and `phase_number` BEFORE starting work on the phase
+- **THEN** the orchestrating agent SHALL call `ocr state transition` which updates the `sessions` table and inserts an `orchestration_events` row BEFORE starting work on the phase
+- **AND** `state.json` SHALL be written as a backward-compatible side-effect
 
 #### Scenario: Phase completion display
+
 - **GIVEN** the CLI displays progress
 - **WHEN** determining phase completion checkmarks
-- **THEN** the CLI SHALL derive completion from `state.json.phase_number` (phases < current are complete)
+- **THEN** the CLI SHALL derive completion from the `phase_number` column in the `sessions` table (phases < current are complete)
 
 #### Scenario: CLI progress tracking
-- **GIVEN** `state.json` exists in a session
-- **WHEN** `ocr progress` CLI is invoked
-- **THEN** the CLI SHALL read state.json for accurate progress display including current round
 
-#### Scenario: Missing state.json handling
-- **GIVEN** `state.json` is missing or corrupt in a session
+- **GIVEN** a session exists in SQLite
 - **WHEN** `ocr progress` CLI is invoked
-- **THEN** the CLI SHALL display "Waiting for session..." until valid state.json is created
-- **NOTE**: Future versions may implement filesystem reconstruction
+- **THEN** the CLI SHALL read from the `sessions` table for accurate progress display including current round
+- **AND** fall back to `state.json` if no SQLite row exists
+
+#### Scenario: Missing state handling
+
+- **GIVEN** no SQLite row exists and `state.json` is missing or corrupt in a session
+- **WHEN** `ocr progress` CLI is invoked
+- **THEN** the CLI SHALL display "Waiting for session..." until valid state is created
 
 #### Scenario: Cross-mode compatibility
+
 - **GIVEN** OCR runs as a Claude Code plugin
-- **WHEN** sessions are stored in `.ocr/sessions/`
-- **THEN** the standalone CLI SHALL find and track session progress identically
+- **WHEN** sessions are stored in `.ocr/sessions/` and state is written via `ocr state` commands
+- **THEN** the standalone CLI SHALL find and track session progress identically via SQLite
 
 ---
 
@@ -231,32 +243,40 @@ The system SHALL store discourse and synthesis outputs inside round directories,
 
 ### Requirement: State Reconciliation
 
-The system SHALL gracefully handle inconsistencies between `state.json` and filesystem state, treating filesystem as the source of truth.
+The system SHALL use SQLite as the authoritative source of truth for session state, with filesystem serving as the artifact delivery mechanism only.
 
-#### Scenario: Missing state.json
-- **GIVEN** a session directory exists without `state.json`
-- **WHEN** CLI or command reads the session
-- **THEN** the system SHOULD display "Waiting for session..." until the orchestrating agent creates `state.json`
-- **NOTE**: Future versions MAY implement filesystem reconstruction to derive state from artifacts
+#### Scenario: SQLite is authoritative
 
-#### Scenario: State references non-existent round
-- **GIVEN** `state.json` has `current_round: 3` but only `round-1/` and `round-2/` exist
-- **WHEN** CLI reads the session
-- **THEN** the system SHALL adjust `current_round` to highest existing round (2)
+- **GIVEN** a session exists in both SQLite and on the filesystem
+- **WHEN** any consumer needs session state (phase, status, round)
+- **THEN** the system SHALL read from SQLite
+- **AND** filesystem artifacts are parsed into SQLite by FilesystemSync but do NOT override orchestration state
 
-#### Scenario: Filesystem shows completion but state disagrees
-- **GIVEN** `rounds/round-1/final.md` exists but `state.json` says phase is "reviews"
-- **WHEN** CLI reads the session
-- **THEN** the system SHALL trust filesystem and treat round as complete
+#### Scenario: Missing SQLite row (legacy session)
+
+- **GIVEN** a session directory exists on filesystem without a corresponding SQLite row
+- **WHEN** `ocr state sync` or FilesystemSync runs
+- **THEN** the system SHALL backfill a `sessions` row from `state.json` if present
+- **AND** if `state.json` is also missing, the system SHALL create a minimal row with status derived from filesystem artifacts
+
+#### Scenario: State.json disagrees with SQLite
+
+- **GIVEN** `state.json` has different phase or round data than the `sessions` table
+- **WHEN** any consumer reads state
+- **THEN** the system SHALL trust SQLite as authoritative
+- **AND** `state.json` is NOT read by any first-party consumer in the new architecture (except as legacy fallback)
 
 #### Scenario: Corrupt state.json
-- **GIVEN** `state.json` contains invalid JSON
-- **WHEN** CLI attempts to read state
-- **THEN** the system SHOULD log a warning and MAY show "Waiting for session..." state
-- **NOTE**: Full filesystem reconstruction is a future enhancement
+
+- **GIVEN** `state.json` contains invalid JSON but SQLite has valid state
+- **WHEN** CLI or dashboard reads the session
+- **THEN** the system SHALL use SQLite state without error
+- **AND** `state.json` corruption does not affect the session
 
 #### Scenario: User creates empty round directory
+
 - **GIVEN** user manually creates `rounds/round-2/` with no contents
-- **WHEN** a new review is initiated
-- **THEN** the system SHALL treat the empty round as the target for the new review
+- **WHEN** FilesystemSync runs
+- **THEN** a `review_rounds` row is created in SQLite for the empty round
+- **AND** orchestration state in `sessions` table is NOT modified (only `ocr state` commands modify orchestration state)
 

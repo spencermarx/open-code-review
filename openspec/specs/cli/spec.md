@@ -145,25 +145,32 @@ The CLI SHALL provide a `progress` command that displays real-time code review p
 
 ### Requirement: Progress Phase Tracking
 
-The CLI SHALL track all 8 review phases by reading `state.json` from the session directory.
+The CLI SHALL track all 8 review phases by reading from SQLite (primary) with `state.json` fallback, from the session directory.
 
-#### Scenario: State file required
+#### Scenario: SQLite primary source
 
-- **GIVEN** a session directory exists
+- **GIVEN** a session exists in SQLite (`sessions` table)
 - **WHEN** progress command reads the session
-- **THEN** it SHALL read `state.json` for phase information
-- **AND** if `state.json` is missing, the session is treated as "waiting"
+- **THEN** it SHALL read phase information from the `sessions` table in `.ocr/data/ocr.db`
+- **AND** orchestration events from `orchestration_events` for timeline data
 
-#### Scenario: State file format
+#### Scenario: State.json fallback
 
-- **GIVEN** `state.json` exists in a session
+- **GIVEN** a session directory exists but no corresponding row in SQLite
+- **WHEN** progress command reads the session
+- **THEN** it SHALL fall back to reading `state.json` for phase information
+- **AND** if `state.json` is also missing, the session is treated as "waiting"
+
+#### Scenario: State file format (SQLite)
+
+- **GIVEN** a session row exists in SQLite
 - **WHEN** progress command reads it
 - **THEN** it SHALL parse:
   - `current_phase` - The current workflow phase
   - `phase_number` - Numeric phase (1-8)
   - `current_round` - Current round number
   - `started_at` - Session start timestamp
-  - `round_started_at` - Current round start timestamp (for multi-round timing)
+  - `updated_at` - Last update timestamp
 
 #### Scenario: Phase completion derived from state
 
@@ -175,13 +182,13 @@ The CLI SHALL track all 8 review phases by reading `state.json` from the session
 #### Scenario: Phase transitions
 
 - **GIVEN** progress command is running
-- **WHEN** `state.json` is updated with new phase
+- **WHEN** SQLite is updated with a new phase (or `state.json` as fallback)
 - **THEN** display updates to show the new current phase
 - **AND** completed phases show checkmarks
 
 #### Scenario: Waiting state
 
-- **GIVEN** user runs `ocr progress` with no active session or missing `state.json`
+- **GIVEN** user runs `ocr progress` with no active session in SQLite or `state.json`
 - **WHEN** the display renders
 - **THEN** a "Waiting for review" state is shown
 - **AND** the command continues watching for new sessions
@@ -189,7 +196,7 @@ The CLI SHALL track all 8 review phases by reading `state.json` from the session
 #### Scenario: Cross-mode compatibility
 
 - **GIVEN** OCR is running as a Claude Code plugin (not CLI installed)
-- **WHEN** the agent writes `state.json` to `.ocr/sessions/`
+- **WHEN** the agent writes state via `ocr state` commands (which write to SQLite)
 - **THEN** `npx @open-code-review/cli progress` SHALL track the session correctly
 
 ### Requirement: Error Handling
@@ -488,4 +495,148 @@ The agents package SHALL be structured as a valid Claude Code plugin for native 
 - **THEN** skills are installed from `skills/ocr/` to `.ocr/skills/`
 - **AND** commands are installed to tool-specific directories
 - **AND** both CLI and plugin installations work independently
+
+### Requirement: Doctor Command
+
+The CLI SHALL provide a `doctor` command that checks external dependencies and OCR installation status, providing actionable remediation for any issues found.
+
+#### Scenario: All checks pass
+
+- **GIVEN** `git`, `claude`, and `gh` are in PATH and OCR is initialized
+- **WHEN** user runs `ocr doctor`
+- **THEN** a compact status block shows green checkmarks with version numbers for all dependencies
+- **AND** OCR installation checks show `.ocr/skills/`, `.ocr/sessions/`, `.ocr/config.yaml`, `.ocr/data/ocr.db`
+- **AND** "Ready for code review!" summary is displayed
+- **AND** the process exits with code 0
+
+#### Scenario: Required dependency missing
+
+- **GIVEN** `claude` is not in PATH
+- **WHEN** user runs `ocr doctor`
+- **THEN** the preflight block shows a red `✗` next to "Claude Code" with "not found"
+- **AND** the summary shows "Issues found" with an install URL
+- **AND** the process exits with code 1
+
+#### Scenario: Optional dependency missing
+
+- **GIVEN** `gh` (GitHub CLI) is not in PATH but all required deps are present
+- **WHEN** user runs `ocr doctor`
+- **THEN** the preflight block shows a dim `✗` next to "GitHub CLI" with "not found (optional)"
+- **AND** the summary shows "Ready for code review!" (optional deps do not cause failure)
+- **AND** the process exits with code 0
+
+#### Scenario: OCR not initialized
+
+- **GIVEN** `.ocr/` directory does not exist
+- **WHEN** user runs `ocr doctor`
+- **THEN** OCR installation checks show dim `✗` for all OCR paths
+- **AND** the summary shows "Issues found" with instruction to run `ocr init`
+- **AND** the process exits with code 1
+
+#### Scenario: Informational OCR checks
+
+- **GIVEN** `.ocr/data/ocr.db` does not exist (no review run yet)
+- **WHEN** user runs `ocr doctor`
+- **THEN** the database check shows dim `✗` with "(created on first review)" hint
+- **AND** this does NOT cause exit code 1 (informational only)
+
+---
+
+### Requirement: Init Preflight Check
+
+The `ocr init` command SHALL display a dependency check block after the banner and before tool selection, without blocking initialization.
+
+#### Scenario: All dependencies found
+
+- **GIVEN** `git`, `claude`, and `gh` are in PATH
+- **WHEN** user runs `ocr init`
+- **THEN** a "Preflight" block shows green checkmarks with versions for all dependencies
+- **AND** tool selection proceeds normally
+
+#### Scenario: Required dependency missing during init
+
+- **GIVEN** `claude` is not in PATH
+- **WHEN** user runs `ocr init`
+- **THEN** the preflight block shows a red `✗` for Claude Code with "not found"
+- **AND** a yellow warning with install URL is displayed
+- **AND** initialization continues (non-blocking)
+- **AND** tool selection proceeds normally
+
+---
+
+### Requirement: Dependency Check Module
+
+The CLI SHALL provide a shared internal module for checking external binary dependencies, used by both `init` and `doctor` commands.
+
+#### Scenario: Check binary availability
+
+- **GIVEN** a list of dependencies to check (git, claude, gh)
+- **WHEN** `checkDependencies()` is called
+- **THEN** each binary is tested via `execFileSync(binary, ['--version'])` with a 5-second timeout
+- **AND** the version is parsed from stdout using a semver-like regex
+- **AND** the result includes `found`, `version`, `required`, and `installHint` for each dependency
+
+#### Scenario: Print dependency status
+
+- **GIVEN** a `DepCheckResult` from `checkDependencies()`
+- **WHEN** `printDepChecks()` is called
+- **THEN** a column-aligned block is printed with checkmarks/X marks and versions
+- **AND** missing required deps show red `✗` with warnings (unless `suppressWarnings` is true)
+- **AND** missing optional deps show dim `✗` with "(optional)" suffix
+
+### Requirement: Dashboard Command
+
+The CLI SHALL provide a `dashboard` command that starts a local HTTP + WebSocket server and opens the dashboard in the user's default browser.
+
+#### Scenario: Start dashboard
+
+- **GIVEN** user has run `ocr init` (`.ocr/` directory exists)
+- **WHEN** user runs `ocr dashboard`
+- **THEN** a local server starts on port 4173 (default) serving both HTTP and Socket.IO
+- **AND** the user's default browser opens to `http://localhost:4173`
+- **AND** the terminal displays the URL, Socket.IO status, and "Press Ctrl+C to stop"
+
+#### Scenario: Custom port
+
+- **GIVEN** port 4173 is in use
+- **WHEN** user runs `ocr dashboard --port 8080`
+- **THEN** server starts on port 8080
+
+#### Scenario: No browser auto-open
+
+- **WHEN** user runs `ocr dashboard --no-open`
+- **THEN** server starts but browser does not open
+
+#### Scenario: No OCR setup
+
+- **GIVEN** `.ocr/` directory does not exist
+- **WHEN** user runs `ocr dashboard`
+- **THEN** the command exits with an error: "OCR not initialized. Run `ocr init` first."
+
+#### Scenario: Database auto-creation
+
+- **GIVEN** `.ocr/` exists but `.ocr/data/ocr.db` does not
+- **WHEN** user runs `ocr dashboard`
+- **THEN** the database is created, migrations run, and the server starts normally
+
+---
+
+### Requirement: Zero Dashboard Startup Cost
+
+The dashboard code SHALL NOT be loaded unless the user runs `ocr dashboard`. Commands like `ocr init`, `ocr progress`, and `ocr state` MUST remain fast.
+
+#### Scenario: Dynamic import only on dashboard command
+
+- **GIVEN** user runs any CLI command other than `ocr dashboard`
+- **WHEN** the CLI process starts
+- **THEN** the dashboard server module (`dist/dashboard/server.js`) SHALL NOT be imported or loaded
+
+#### Scenario: Dashboard dependencies isolated
+
+- **GIVEN** the dashboard adds significant dependencies (React, Socket.IO, sql.js client bundle)
+- **WHEN** user runs `ocr init` or `ocr progress`
+- **THEN** none of these dependencies are loaded
+- **AND** CLI startup time is unaffected
+
+---
 
