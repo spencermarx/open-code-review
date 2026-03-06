@@ -89,7 +89,7 @@ export class FilesystemSync {
 
   // ── 6.1: Full Scan ──
 
-  async fullScan(): Promise<void> {
+  fullScan(): void {
     if (!existsSync(this.sessionsDir)) return
 
     const entries = readdirSync(this.sessionsDir, { withFileTypes: true })
@@ -97,11 +97,11 @@ export class FilesystemSync {
       if (!entry.isDirectory()) continue
       const sessionId = entry.name
       const sessionDir = join(this.sessionsDir, sessionId)
-      await this.syncSession(sessionId, sessionDir)
+      this.syncSession(sessionId, sessionDir)
     }
   }
 
-  private async syncSession(sessionId: string, sessionDir: string): Promise<void> {
+  private syncSession(sessionId: string, sessionDir: string): void {
     // Ensure session row exists using filesystem metadata
     this.ensureSessionRow(sessionId, sessionDir)
 
@@ -122,26 +122,26 @@ export class FilesystemSync {
           const reviewFiles = readdirSync(reviewsDir).filter((f) => f.endsWith('.md'))
           for (const reviewFile of reviewFiles) {
             const filePath = join(reviewsDir, reviewFile)
-            await this.processReviewerOutput(sessionId, roundNumber, filePath, reviewFile)
+            this.processReviewerOutput(sessionId, roundNumber, filePath, reviewFile)
           }
         }
 
         // Final.md
         const finalPath = join(roundDir, 'final.md')
         if (existsSync(finalPath)) {
-          await this.processFinalMd(sessionId, roundNumber, finalPath)
+          this.processFinalMd(sessionId, roundNumber, finalPath)
         }
 
         // final-human.md (human-voice rewrite)
         const finalHumanPath = join(roundDir, 'final-human.md')
         if (existsSync(finalHumanPath)) {
-          await this.processGenericArtifact(sessionId, 'final-human', finalHumanPath, roundNumber)
+          this.processGenericArtifact(sessionId, 'final-human', finalHumanPath, roundNumber)
         }
 
         // Discourse.md
         const discoursePath = join(roundDir, 'discourse.md')
         if (existsSync(discoursePath)) {
-          await this.processGenericArtifact(sessionId, 'discourse', discoursePath, roundNumber)
+          this.processGenericArtifact(sessionId, 'discourse', discoursePath, roundNumber)
         }
       }
     }
@@ -160,7 +160,7 @@ export class FilesystemSync {
         // map.md
         const mapPath = join(runDir, 'map.md')
         if (existsSync(mapPath)) {
-          await this.processMapMd(sessionId, runNumber, mapPath)
+          this.processMapMd(sessionId, runNumber, mapPath)
         }
 
         // Other map artifacts
@@ -172,7 +172,7 @@ export class FilesystemSync {
         for (const [fileName, artifactType] of mapArtifacts) {
           const filePath = join(runDir, fileName)
           if (existsSync(filePath)) {
-            await this.processGenericArtifact(sessionId, artifactType, filePath, undefined, runNumber)
+            this.processGenericArtifact(sessionId, artifactType, filePath, undefined, runNumber)
           }
         }
       }
@@ -186,7 +186,7 @@ export class FilesystemSync {
     for (const [fileName, artifactType] of sessionArtifacts) {
       const filePath = join(sessionDir, fileName)
       if (existsSync(filePath)) {
-        await this.processGenericArtifact(sessionId, artifactType, filePath)
+        this.processGenericArtifact(sessionId, artifactType, filePath)
       }
     }
   }
@@ -336,16 +336,24 @@ export class FilesystemSync {
     event: ArtifactEvent,
   ): void {
     if (!this.io) return
-    this.io.emit(`artifact:${action}`, event)
+    this.io.to(`session:${event.sessionId}`).emit(`artifact:${action}`, event)
   }
 
   // ── 6.2: Map Parser Integration ──
 
-  private async processMapMd(
+  private processMapMd(
     sessionId: string,
     runNumber: number,
     filePath: string,
-  ): Promise<void> {
+  ): void {
+    // Check mtime — skip if file hasn't changed since last parse
+    const existingRun = queryFirst(
+      this.db,
+      'SELECT id, parsed_at FROM map_runs WHERE session_id = ? AND run_number = ?',
+      [sessionId, runNumber],
+    )
+    if (existingRun && this.shouldSkip(filePath, existingRun['parsed_at'] ?? null)) return
+
     const content = readFileSync(filePath, 'utf-8')
     const parsed = parseMapMd(content)
 
@@ -364,6 +372,26 @@ export class FilesystemSync {
     )
     const mapRunId = runRow?.['id'] as number | undefined
     if (!mapRunId) return
+
+    // Stash user progress before delete (cascade will destroy it)
+    const stashedFileProgress = new Map<string, { isReviewed: number; reviewedAt: string | null }>()
+    const progressResult = this.db.exec(
+      `SELECT mf.file_path, ufp.is_reviewed, ufp.reviewed_at
+       FROM user_file_progress ufp
+       JOIN map_files mf ON mf.id = ufp.map_file_id
+       JOIN map_sections ms ON ms.id = mf.section_id
+       WHERE ms.map_run_id = ?`,
+      [mapRunId],
+    )
+    if (progressResult[0]) {
+      for (const row of progressResult[0].values) {
+        const fp = row[0] as string
+        stashedFileProgress.set(fp, {
+          isReviewed: row[1] as number,
+          reviewedAt: row[2] as string | null,
+        })
+      }
+    }
 
     // Clean old sections/files for this run (parser may have changed)
     const oldSections = this.db.exec(
@@ -401,6 +429,23 @@ export class FilesystemSync {
            VALUES (?, ?, ?, ?, ?, ?)`,
           [sectionId, file.filePath, file.role, file.linesAdded, file.linesDeleted, fi],
         )
+
+        // Restore stashed user progress for this file
+        const stashed = stashedFileProgress.get(file.filePath)
+        if (stashed) {
+          const newFileRow = queryFirst(
+            this.db,
+            'SELECT id FROM map_files WHERE section_id = ? AND file_path = ?',
+            [sectionId, file.filePath],
+          )
+          if (newFileRow) {
+            this.db.run(
+              `INSERT OR REPLACE INTO user_file_progress (map_file_id, is_reviewed, reviewed_at)
+               VALUES (?, ?, ?)`,
+              [newFileRow['id'] as number, stashed.isReviewed, stashed.reviewedAt],
+            )
+          }
+        }
       }
     }
 
@@ -437,12 +482,12 @@ export class FilesystemSync {
 
   // ── 6.3: Reviewer Output Integration ──
 
-  private async processReviewerOutput(
+  private processReviewerOutput(
     sessionId: string,
     roundNumber: number,
     filePath: string,
     fileName: string,
-  ): Promise<void> {
+  ): void {
     // Ensure review_round exists
     this.db.run(
       `INSERT OR IGNORE INTO review_rounds (session_id, round_number)
@@ -463,6 +508,14 @@ export class FilesystemSync {
     const reviewerType = nameMatch?.[1] ?? fileName.replace(/\.md$/, '')
     const instanceNumber = nameMatch?.[2] ? parseInt(nameMatch[2], 10) : 1
 
+    // Check mtime — skip if file hasn't changed since last parse
+    const existingOutput = queryFirst(
+      this.db,
+      'SELECT id, parsed_at FROM reviewer_outputs WHERE round_id = ? AND reviewer_type = ? AND instance_number = ?',
+      [roundId, reviewerType, instanceNumber],
+    )
+    if (existingOutput && this.shouldSkip(filePath, existingOutput['parsed_at'] ?? null)) return
+
     const content = readFileSync(filePath, 'utf-8')
     const parsed = parseReviewerOutput(content)
 
@@ -480,6 +533,25 @@ export class FilesystemSync {
     )
     const outputId = outputRow?.['id'] as number | undefined
     if (!outputId) return
+
+    // Stash user progress before delete (cascade will destroy it)
+    const stashedFindingProgress = new Map<string, { status: string; updatedAt: string | null }>()
+    const findingProgressResult = this.db.exec(
+      `SELECT rf.title, rf.severity, rf.file_path, ufp.status, ufp.updated_at
+       FROM user_finding_progress ufp
+       JOIN review_findings rf ON rf.id = ufp.finding_id
+       WHERE rf.reviewer_output_id = ?`,
+      [outputId],
+    )
+    if (findingProgressResult[0]) {
+      for (const row of findingProgressResult[0].values) {
+        const key = `${row[0] as string}|${row[1] as string}|${row[2] as string}`
+        stashedFindingProgress.set(key, {
+          status: row[3] as string,
+          updatedAt: row[4] as string | null,
+        })
+      }
+    }
 
     // Delete existing findings for this output (they get replaced on re-parse)
     this.db.run('DELETE FROM review_findings WHERE reviewer_output_id = ?', [outputId])
@@ -501,6 +573,24 @@ export class FilesystemSync {
           sqlNow(),
         ],
       )
+
+      // Restore stashed user progress for this finding
+      const key = `${finding.title}|${finding.severity}|${finding.filePath ?? ''}`
+      const stashed = stashedFindingProgress.get(key)
+      if (stashed) {
+        const newFindingRow = queryFirst(
+          this.db,
+          'SELECT id FROM review_findings WHERE reviewer_output_id = ? AND title = ? AND severity = ? AND file_path IS ?',
+          [outputId, finding.title, finding.severity, finding.filePath ?? null],
+        )
+        if (newFindingRow) {
+          this.db.run(
+            `INSERT OR REPLACE INTO user_finding_progress (finding_id, status, updated_at)
+             VALUES (?, ?, ?)`,
+            [newFindingRow['id'] as number, stashed.status, stashed.updatedAt],
+          )
+        }
+      }
     }
 
     // Store raw markdown
@@ -515,11 +605,11 @@ export class FilesystemSync {
 
   // ── 6.4: Final.md Integration ──
 
-  private async processFinalMd(
+  private processFinalMd(
     sessionId: string,
     roundNumber: number,
     filePath: string,
-  ): Promise<void> {
+  ): void {
     // Ensure review_round exists
     this.db.run(
       `INSERT OR IGNORE INTO review_rounds (session_id, round_number)
@@ -604,13 +694,13 @@ export class FilesystemSync {
 
   // ── Generic artifact (discourse, topology, etc.) ──
 
-  private async processGenericArtifact(
+  private processGenericArtifact(
     sessionId: string,
     artifactType: ArtifactType,
     filePath: string,
     roundNumber?: number,
     _runNumber?: number,
-  ): Promise<void> {
+  ): void {
     // Check mtime via markdown_artifacts table
     const relPath = relative(this.sessionsDir, filePath)
     const existing = queryFirst(
@@ -676,14 +766,17 @@ export class FilesystemSync {
       filePath,
       setTimeout(() => {
         this.debounceTimers.delete(filePath)
-        void this.processChangedFile(filePath)
-          .then(() => this.onSync?.())
-          .catch((err) => console.error(`[FilesystemSync] Error processing ${filePath}:`, err))
+        try {
+          this.processChangedFile(filePath)
+          this.onSync?.()
+        } catch (err) {
+          console.error(`[FilesystemSync] Error processing ${filePath}:`, err)
+        }
       }, 100),
     )
   }
 
-  private async processChangedFile(filePath: string): Promise<void> {
+  private processChangedFile(filePath: string): void {
     // Determine session from path
     const relFromSessions = relative(this.sessionsDir, filePath)
     const parts = relFromSessions.split('/')
@@ -703,7 +796,7 @@ export class FilesystemSync {
     const reviewerMatch = relFromSessions.match(/rounds\/round-(\d+)\/reviews\/(.+\.md)$/)
     if (reviewerMatch) {
       const roundNumber = parseInt(reviewerMatch[1] ?? '0', 10)
-      await this.processReviewerOutput(sessionId, roundNumber, filePath, reviewerMatch[2] ?? '')
+      this.processReviewerOutput(sessionId, roundNumber, filePath, reviewerMatch[2] ?? '')
       return
     }
 
@@ -711,7 +804,7 @@ export class FilesystemSync {
     const finalMatch = relFromSessions.match(/rounds\/round-(\d+)\/final\.md$/)
     if (finalMatch) {
       const roundNumber = parseInt(finalMatch[1] ?? '0', 10)
-      await this.processFinalMd(sessionId, roundNumber, filePath)
+      this.processFinalMd(sessionId, roundNumber, filePath)
       return
     }
 
@@ -719,7 +812,7 @@ export class FilesystemSync {
     const finalHumanMatch = relFromSessions.match(/rounds\/round-(\d+)\/final-human\.md$/)
     if (finalHumanMatch) {
       const roundNumber = parseInt(finalHumanMatch[1] ?? '0', 10)
-      await this.processGenericArtifact(sessionId, 'final-human', filePath, roundNumber)
+      this.processGenericArtifact(sessionId, 'final-human', filePath, roundNumber)
       return
     }
 
@@ -727,7 +820,7 @@ export class FilesystemSync {
     const discourseMatch = relFromSessions.match(/rounds\/round-(\d+)\/discourse\.md$/)
     if (discourseMatch) {
       const roundNumber = parseInt(discourseMatch[1] ?? '0', 10)
-      await this.processGenericArtifact(sessionId, 'discourse', filePath, roundNumber)
+      this.processGenericArtifact(sessionId, 'discourse', filePath, roundNumber)
       return
     }
 
@@ -735,7 +828,7 @@ export class FilesystemSync {
     const mapMatch = relFromSessions.match(/map\/runs\/run-(\d+)\/map\.md$/)
     if (mapMatch) {
       const runNumber = parseInt(mapMatch[1] ?? '0', 10)
-      await this.processMapMd(sessionId, runNumber, filePath)
+      this.processMapMd(sessionId, runNumber, filePath)
       return
     }
 
@@ -751,18 +844,18 @@ export class FilesystemSync {
       }
       const artifactType = typeMap[artifactName]
       if (artifactType) {
-        await this.processGenericArtifact(sessionId, artifactType, filePath, undefined, runNumber)
+        this.processGenericArtifact(sessionId, artifactType, filePath, undefined, runNumber)
       }
       return
     }
 
     // Session-level artifacts
     if (fileName === 'context.md') {
-      await this.processGenericArtifact(sessionId, 'context', filePath)
+      this.processGenericArtifact(sessionId, 'context', filePath)
       return
     }
     if (fileName === 'discovered-standards.md') {
-      await this.processGenericArtifact(sessionId, 'discovered-standards', filePath)
+      this.processGenericArtifact(sessionId, 'discovered-standards', filePath)
       return
     }
   }

@@ -288,10 +288,12 @@ API updates.
       writeFileSync(join(sessionDir, 'context.md'), '# Context')
 
       const emitted: { event: string; data: unknown }[] = []
+      const emitFn = (event: string, data: unknown) => {
+        emitted.push({ event, data })
+      }
       const mockIo = {
-        emit: (event: string, data: unknown) => {
-          emitted.push({ event, data })
-        },
+        emit: emitFn,
+        to: () => ({ emit: emitFn }),
       } as unknown as import('socket.io').Server
 
       const sync = new FilesystemSync(db, sessionsDir, mockIo)
