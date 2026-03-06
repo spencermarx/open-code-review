@@ -1,3 +1,60 @@
+## 1.5.0 (2026-03-06)
+
+### 🚀 Features
+
+- initialize claude flow / ruflo ([1a73d7f](https://github.com/spencermarx/open-code-review/commit/1a73d7f))
+- **agents:** update skill references with state tracking and map workflow ([f880146](https://github.com/spencermarx/open-code-review/commit/f880146))
+- **agents:** add setup-guard reference and review-feedback command ([fb8da57](https://github.com/spencermarx/open-code-review/commit/fb8da57))
+- **agents:** add address and translate-review-to-single-human commands ([c29d27b](https://github.com/spencermarx/open-code-review/commit/c29d27b))
+- **cli:** add SQLite database layer, state management, and progress tracking ([1bcc2c2](https://github.com/spencermarx/open-code-review/commit/1bcc2c2))
+- **cli:** add doctor command and init preflight dependency checks ([51d1350](https://github.com/spencermarx/open-code-review/commit/51d1350))
+- **cli:** add dashboard command and register all new commands ([a7a61b7](https://github.com/spencermarx/open-code-review/commit/a7a61b7))
+- **cli:** add tiered capability model to init and doctor ([f84df6f](https://github.com/spencermarx/open-code-review/commit/f84df6f))
+- **dashboard:** add web dashboard package ([0789634](https://github.com/spencermarx/open-code-review/commit/0789634))
+- **dashboard:** add bearer token auth and harden server security ([d2af985](https://github.com/spencermarx/open-code-review/commit/d2af985))
+- **dashboard:** add post-to-GitHub with human review translation ([555417b](https://github.com/spencermarx/open-code-review/commit/555417b))
+- **dashboard:** display workspace name and git branch in sidebar ([5bb1072](https://github.com/spencermarx/open-code-review/commit/5bb1072))
+- **dashboard:** add AI CLI adapter strategy with unified execution tracking ([71e3aef](https://github.com/spencermarx/open-code-review/commit/71e3aef))
+- **dashboard:** add capability-aware UI for command center and chat ([ce8963c](https://github.com/spencermarx/open-code-review/commit/ce8963c))
+- **dashboard:** enrich session detail with per-workflow progress ([4b18ffb](https://github.com/spencermarx/open-code-review/commit/4b18ffb))
+- **dashboard:** add address feedback popover with capability detection ([a5a7d51](https://github.com/spencermarx/open-code-review/commit/a5a7d51))
+- **dashboard:** add GitHub documentation link to header ([360a35d](https://github.com/spencermarx/open-code-review/commit/360a35d))
+- **dashboard:** add Write tool tracking and phase-aware generation to post handler ([378eb08](https://github.com/spencermarx/open-code-review/commit/378eb08))
+- **dashboard:** save edited review on GitHub submit and add draft saved feedback ([5e5ad26](https://github.com/spencermarx/open-code-review/commit/5e5ad26))
+- **dashboard:** add search, filter, and sort to command history ([c37b69a](https://github.com/spencermarx/open-code-review/commit/c37b69a))
+- **dashboard:** add PID tracking and orphaned process cleanup on startup ([39c6d0a](https://github.com/spencermarx/open-code-review/commit/39c6d0a))
+- **dashboard:** implement OpenCode CLI adapter with NDJSON parser ([afe97b3](https://github.com/spencermarx/open-code-review/commit/afe97b3))
+- **ocr:** add address command and multi-round review support ([c866cd3](https://github.com/spencermarx/open-code-review/commit/c866cd3))
+
+### 🩹 Fixes
+
+- use git root path for Claude hook commands and add ruflo MCP server ([64e74fd](https://github.com/spencermarx/open-code-review/commit/64e74fd))
+- **build:** add createRequire banner for ESM server bundle and fix workspace resolution ([fc3b8a2](https://github.com/spencermarx/open-code-review/commit/fc3b8a2))
+- **cli:** guard against division by zero in renderProgressBar ([82aa6d0](https://github.com/spencermarx/open-code-review/commit/82aa6d0))
+- **dashboard:** consolidate date utilities and fix client component bugs ([f2b6bf1](https://github.com/spencermarx/open-code-review/commit/f2b6bf1))
+- **dashboard:** add filesystem-sync safety nets for interrupted sessions ([072cdd9](https://github.com/spencermarx/open-code-review/commit/072cdd9))
+- **dashboard:** correct Socket.IO room event names and null-safe process entry ([5829ba8](https://github.com/spencermarx/open-code-review/commit/5829ba8))
+- **dashboard:** use event delegation for Mermaid click listeners ([25028fe](https://github.com/spencermarx/open-code-review/commit/25028fe))
+- **dashboard:** improve breadcrumb links, workflow output, and home error state ([f8c0afd](https://github.com/spencermarx/open-code-review/commit/f8c0afd))
+- **dashboard:** clear command palette params on confirm and use exit code -2 for cancelled commands ([1151e34](https://github.com/spencermarx/open-code-review/commit/1151e34))
+- **dashboard:** include git branch in document title when available ([268eb21](https://github.com/spencermarx/open-code-review/commit/268eb21))
+- **dashboard:** mark stale commands with null exit_code as cancelled on startup ([5eaee2d](https://github.com/spencermarx/open-code-review/commit/5eaee2d))
+- **dashboard:** simplify buildPhases logic and decouple workflow completion from session status ([18a11ae](https://github.com/spencermarx/open-code-review/commit/18a11ae))
+- **dashboard:** use project root as CWD for all spawned processes ([a3f0cf4](https://github.com/spencermarx/open-code-review/commit/a3f0cf4))
+- **dashboard:** align session card verdict with review triage status ([5b4b672](https://github.com/spencermarx/open-code-review/commit/5b4b672))
+- **dashboard:** resolve CLI path via workspace root marker instead of walk-up ([9c94760](https://github.com/spencermarx/open-code-review/commit/9c94760))
+- **dashboard:** use tmpdir() for temp files and pass GitHub tokens to child env ([326f317](https://github.com/spencermarx/open-code-review/commit/326f317))
+- **dashboard:** harden socket handlers with buffer limits and flush on shutdown ([eac80af](https://github.com/spencermarx/open-code-review/commit/eac80af))
+- **db:** add WAL/busy_timeout pragmas and protect orchestration audit trail ([b1b84a5](https://github.com/spencermarx/open-code-review/commit/b1b84a5))
+- **db:** prevent cascade-delete data loss with mtime checks and progress stash/restore ([34b0013](https://github.com/spencermarx/open-code-review/commit/34b0013))
+- **ocr:** run address workflow autonomously without user acknowledgment ([b3ddde4](https://github.com/spencermarx/open-code-review/commit/b3ddde4))
+- **security:** harden auth, sanitize env, validate inputs, and disable stub adapter ([b0bf40e](https://github.com/spencermarx/open-code-review/commit/b0bf40e))
+
+### ❤️ Thank You
+
+- claude-flow @agentic-org
+- Spencer Marx
+
 ## 1.4.0 (2026-01-29)
 
 ### 🚀 Features
