@@ -5,7 +5,7 @@ import { MarkdownRenderer } from '../../components/markdown/markdown-renderer'
 import { FindingsTable } from './components/findings-table'
 import { useQuery } from '@tanstack/react-query'
 import type { Artifact } from '../../lib/api-types'
-import { authHeaders } from '../../lib/auth'
+import { fetchApi } from '../../lib/utils'
 import { REVIEWER_ICONS } from './constants'
 
 export function ReviewerDetailPage() {
@@ -36,13 +36,14 @@ export function ReviewerDetailPage() {
     queryKey: ['reviewer-content', sessionId, roundNumber, reviewerId],
     queryFn: async () => {
       if (!reviewer?.file_path) return ''
-      const res = await fetch(
-        `/api/sessions/${sessionId}/rounds/${roundNumber}/reviewers/${reviewerId}/content`,
-        { headers: { ...authHeaders() } },
-      )
-      if (!res.ok) return ''
-      const data: Artifact = await res.json()
-      return data.content ?? ''
+      try {
+        const data = await fetchApi<Artifact>(
+          `/api/sessions/${sessionId}/rounds/${roundNumber}/reviewers/${reviewerId}/content`,
+        )
+        return data.content ?? ''
+      } catch {
+        return ''
+      }
     },
     enabled: !!reviewer?.file_path,
   })

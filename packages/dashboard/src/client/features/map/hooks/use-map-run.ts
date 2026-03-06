@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSocketEvent } from '../../../providers/socket-provider'
 import { fetchApi } from '../../../lib/utils'
-import { authHeaders } from '../../../lib/auth'
 import type { MapRun, Artifact } from '../../../lib/api-types'
 
 export function useMapRun(sessionId: string, runNumber: number) {
@@ -43,13 +42,11 @@ export function useToggleFileReview(sessionId: string, runNumber: number) {
       fileId: number
       isReviewed: boolean
     }) => {
-      const res = await fetch(`/api/map-files/${fileId}/progress`, {
+      return fetchApi(`/api/map-files/${fileId}/progress`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_reviewed: isReviewed }),
       })
-      if (!res.ok) throw new Error('Failed to update file progress')
-      return res.json()
     },
     onMutate: async ({ fileId, isReviewed }) => {
       await queryClient.cancelQueries({ queryKey })
@@ -88,12 +85,9 @@ export function useClearMapProgress(sessionId: string, runNumber: number) {
 
   return useMutation({
     mutationFn: async (runId: number) => {
-      const res = await fetch(`/api/map-runs/${runId}/progress`, {
+      return fetchApi(`/api/map-runs/${runId}/progress`, {
         method: 'DELETE',
-        headers: { ...authHeaders() },
       })
-      if (!res.ok) throw new Error('Failed to clear progress')
-      return res.json()
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
