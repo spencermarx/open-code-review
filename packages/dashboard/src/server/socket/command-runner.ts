@@ -6,18 +6,17 @@
  *
  * Supports two command types:
  * - Utility commands (progress, state): spawned via the local OCR CLI
- * - AI workflow commands (map, review): spawned via Claude Code headless mode
+ * - AI workflow commands (map, review): spawned via the AI CLI adapter strategy
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
 import type { Server as SocketIOServer, Socket } from 'socket.io'
 import type { Database } from 'sql.js'
 import { saveDb } from '../db.js'
+import { AiCliService, formatToolDetail, cleanupTempFile, type NormalizedEvent } from '../services/ai-cli/index.js'
 import { resolveLocalCli } from './cli-resolver.js'
-import { cleanEnv } from './env.js'
 
 // ── Types ──
 
@@ -43,8 +42,8 @@ const ALLOWED_COMMANDS = new Set([
   'state',
 ])
 
-/** AI workflow commands — spawned via Claude Code headless mode. */
-const AI_COMMANDS = new Set(['map', 'review'])
+/** AI workflow commands — spawned via the AI CLI adapter strategy. */
+const AI_COMMANDS = new Set(['map', 'review', 'translate-review-to-single-human', 'address'])
 
 // ── State ──
 
@@ -103,7 +102,8 @@ export function registerCommandHandlers(
   io: SocketIOServer,
   socket: Socket,
   db: Database,
-  ocrDir: string
+  ocrDir: string,
+  aiCliService: AiCliService
 ): void {
   socket.on('command:run', (payload: CommandRunPayload) => {
     try {
@@ -127,6 +127,14 @@ export function registerCommandHandlers(
         socket.emit('command:error', {
           error: `Command "${command}" is not allowed`,
           allowed: [...ALLOWED_COMMANDS, ...AI_COMMANDS].map((c) => `ocr ${c}`),
+        })
+        return
+      }
+
+      // Guard AI commands — require an available AI CLI
+      if (AI_COMMANDS.has(baseCommand) && !aiCliService.isAvailable()) {
+        socket.emit('command:error', {
+          error: 'No AI CLI available. Install Claude Code or OpenCode to run AI commands from the dashboard.',
         })
         return
       }
@@ -182,7 +190,7 @@ export function registerCommandHandlers(
 
       // Route to appropriate spawn path
       if (AI_COMMANDS.has(baseCommand)) {
-        spawnAiCommand(io, socket, db, ocrDir, executionId, baseCommand, subArgs, entry)
+        spawnAiCommand(io, socket, db, ocrDir, executionId, baseCommand, subArgs, entry, aiCliService)
       } else {
         spawnCliCommand(io, db, ocrDir, executionId, baseCommand, subArgs, entry)
       }
@@ -277,7 +285,7 @@ function spawnCliCommand(
   })
 }
 
-// ── AI workflow command spawn (Claude headless) ──
+// ── AI workflow command spawn (adapter strategy) ──
 
 function spawnAiCommand(
   io: SocketIOServer,
@@ -287,8 +295,11 @@ function spawnAiCommand(
   executionId: number,
   baseCommand: string,
   subArgs: string[],
-  entry: ProcessEntry
+  entry: ProcessEntry,
+  aiCliService: AiCliService
 ): void {
+  const adapter = aiCliService.getAdapter()!
+
   // 1. Read the command .md file
   const commandMdPath = join(ocrDir, 'commands', `${baseCommand}.md`)
   let commandContent: string
@@ -336,7 +347,7 @@ function spawnAiCommand(
     promptLines.push(`Requirements: ${requirements}`)
   }
 
-  // Resolve the local CLI so the spawned Claude uses the correct version.
+  // Resolve the local CLI so the spawned AI uses the correct version.
   // The globally-installed `ocr` may be absent or outdated; resolveLocalCli()
   // finds the monorepo or production-bundled entry point dynamically.
   const localCli = resolveLocalCli()
@@ -364,39 +375,11 @@ function spawnAiCommand(
   promptLines.push('', '---', '', commandContent)
   const prompt = promptLines.join('\n')
 
-  // 4. Write prompt to temp file
-  const tmpDir = join('/tmp', 'ocr-cmd-prompts')
-  try { mkdirSync(tmpDir, { recursive: true, mode: 0o700 }) } catch { /* exists */ }
-  const tmpFile = join(tmpDir, `${randomUUID()}.txt`)
-  writeFileSync(tmpFile, prompt, { mode: 0o600 })
-
-  // 5. Build Claude CLI flags
-  // --allowedTools pre-authorizes tool use since --print mode is non-interactive
-  // (no user to approve permission prompts)
-  const flags = [
-    '--print',
-    '--output-format', 'stream-json',
-    '--verbose',
-    '--include-partial-messages',
-    '--max-turns', '50',
-    '--allowedTools',
-    'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
-    'TodoWrite', 'TodoRead',
-  ]
-
-  // 6. Spawn via cat pipe to avoid shell escaping issues
-  const flagStr = flags.map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ')
-  const shellCmd = `cat '${tmpFile}' | claude ${flagStr}`
-
-  // Use the repo root (parent of .ocr/) as cwd so Claude can access all project files
+  // 4. Spawn via adapter
   const repoRoot = dirname(ocrDir)
-
-  const proc = spawn('sh', ['-c', shellCmd], {
-    cwd: repoRoot,
-    env: cleanEnv(),
-    detached: true,
-  })
+  const { process: proc, detached } = adapter.spawn({ mode: 'workflow', prompt, cwd: repoRoot })
   entry.process = proc
+  entry.detached = detached
 
   // Emit initial status
   io.emit('command:output', {
@@ -404,10 +387,9 @@ function spawnAiCommand(
     content: `▸ Starting OCR ${baseCommand} workflow...\n`,
   })
 
-  // 7. Parse NDJSON stream
+  // 5. Parse structured output via adapter
   let lineBuffer = ''
 
-  // Track active tool blocks — accumulate input JSON before emitting detail
   interface PendingTool { name: string; inputJson: string }
   const pendingTools = new Map<number, PendingTool>()
   let currentBlockIndex = -1
@@ -435,73 +417,36 @@ function spawnAiCommand(
 
     for (const line of lines) {
       if (!line.trim()) continue
-      try {
-        const parsed = JSON.parse(line) as Record<string, unknown>
-        handleNdjsonLine(parsed)
-      } catch {
-        // Non-JSON lines — emit as-is
+      const events = adapter.parseLine(line)
+      if (events.length === 0 && line.trim()) {
         emitContent(line + '\n')
+        continue
+      }
+      for (const evt of events) {
+        switch (evt.type) {
+          case 'text':
+            emitContent(evt.text)
+            break
+          case 'tool_start':
+            if (evt.name === '__input_json_delta') {
+              const idx = (evt.input['blockIndex'] as number) ?? currentBlockIndex
+              const tool = pendingTools.get(idx)
+              if (tool) tool.inputJson += evt.input['partial_json'] as string
+            } else {
+              const idx = ++currentBlockIndex
+              pendingTools.set(idx, { name: evt.name, inputJson: '' })
+            }
+            break
+          case 'tool_end':
+            flushPendingTool(evt.blockIndex >= 0 ? evt.blockIndex : currentBlockIndex)
+            break
+          case 'full_text':
+            entry.outputBuffer = evt.text
+            break
+        }
       }
     }
   })
-
-  function handleNdjsonLine(parsed: Record<string, unknown>): void {
-    const type = parsed['type'] as string | undefined
-
-    if (type === 'stream_event') {
-      const event = parsed['event'] as Record<string, unknown> | undefined
-      if (!event) return
-      const eventType = event['type'] as string | undefined
-      const blockIndex = event['index'] as number | undefined
-
-      // Text deltas — the actual response text
-      if (eventType === 'content_block_delta') {
-        const delta = event['delta'] as Record<string, unknown> | undefined
-        const deltaType = delta?.['type'] as string | undefined
-
-        if (deltaType === 'text_delta' && typeof delta?.['text'] === 'string') {
-          emitContent(delta['text'] as string)
-        }
-
-        // Accumulate tool input JSON
-        if (deltaType === 'input_json_delta' && typeof delta?.['partial_json'] === 'string') {
-          const idx = blockIndex ?? currentBlockIndex
-          const tool = pendingTools.get(idx)
-          if (tool) {
-            tool.inputJson += delta['partial_json'] as string
-          }
-        }
-        // Skip thinking_delta — internal reasoning
-      }
-
-      // Tool use start — record the block, don't emit yet
-      if (eventType === 'content_block_start') {
-        const block = event['content_block'] as Record<string, unknown> | undefined
-        if (block?.['type'] === 'tool_use') {
-          const idx = blockIndex ?? ++currentBlockIndex
-          currentBlockIndex = idx
-          pendingTools.set(idx, {
-            name: block['name'] as string,
-            inputJson: '',
-          })
-        }
-      }
-
-      // Tool use complete — now we have the full input, emit the detail
-      if (eventType === 'content_block_stop') {
-        const idx = blockIndex ?? currentBlockIndex
-        flushPendingTool(idx)
-      }
-    }
-
-    // Complete assistant message — capture full text for DB
-    if (type === 'assistant') {
-      const fullText = extractAssistantText(parsed)
-      if (fullText.length > 0) {
-        entry.outputBuffer = fullText
-      }
-    }
-  }
 
   // Capture stderr
   let stderrBuffer = ''
@@ -510,16 +455,24 @@ function spawnAiCommand(
   })
 
   proc.on('close', (code) => {
-    // Clean up temp file
-    try { unlinkSync(tmpFile) } catch { /* ignore */ }
+    const tmpFile = (proc as any)._tmpFile
+    if (tmpFile) cleanupTempFile(tmpFile)
 
     // Process remaining buffered data
     if (lineBuffer.trim()) {
-      try {
-        const parsed = JSON.parse(lineBuffer) as Record<string, unknown>
-        handleNdjsonLine(parsed)
-      } catch {
-        // Skip
+      const events = adapter.parseLine(lineBuffer)
+      for (const evt of events) {
+        switch (evt.type) {
+          case 'text':
+            emitContent(evt.text)
+            break
+          case 'tool_end':
+            flushPendingTool(evt.blockIndex >= 0 ? evt.blockIndex : currentBlockIndex)
+            break
+          case 'full_text':
+            entry.outputBuffer = evt.text
+            break
+        }
       }
     }
 
@@ -534,10 +487,10 @@ function spawnAiCommand(
   })
 
   proc.on('error', (err) => {
-    // Clean up temp file
-    try { unlinkSync(tmpFile) } catch { /* ignore */ }
+    const tmpFile = (proc as any)._tmpFile
+    if (tmpFile) cleanupTempFile(tmpFile)
 
-    const errContent = `Failed to spawn Claude: ${err.message}\n`
+    const errContent = `Failed to spawn AI CLI: ${err.message}\n`
     entry.outputBuffer += errContent
     io.emit('command:output', { execution_id: executionId, content: errContent })
     finishExecution(io, db, ocrDir, executionId, -1, entry.outputBuffer)
@@ -571,49 +524,4 @@ function finishExecution(
   })
 
   activeCommands.delete(executionId)
-}
-
-/**
- * Format a tool_use block into a human-readable terminal line.
- */
-function formatToolDetail(tool: string, input: Record<string, unknown>): string {
-  switch (tool) {
-    case 'Read':
-      return `Reading ${input['file_path'] ?? 'file'}`
-    case 'Write':
-      return `Writing ${input['file_path'] ?? 'file'}`
-    case 'Edit':
-      return `Editing ${input['file_path'] ?? 'file'}`
-    case 'Grep':
-      return `Searching for "${input['pattern'] ?? '...'}"`
-    case 'Glob':
-      return `Finding files matching ${input['pattern'] ?? '...'}`
-    case 'Bash': {
-      let cmd = (input['command'] as string) ?? '...'
-      // Strip "cd /long/path && " prefix — the cwd is already known
-      cmd = cmd.replace(/^cd\s+\S+\s*&&\s*/, '')
-      return `Running: ${cmd.slice(0, 120)}`
-    }
-    case 'Agent':
-      return `Spawning agent: ${input['description'] ?? '...'}`
-    default:
-      return `Using ${tool}`
-  }
-}
-
-/**
- * Extract concatenated text from a complete assistant message.
- */
-function extractAssistantText(parsed: Record<string, unknown>): string {
-  const msg = parsed['message'] as Record<string, unknown> | undefined
-  const content = msg?.['content'] as Array<Record<string, unknown>> | undefined
-  if (!content) return ''
-
-  let text = ''
-  for (const block of content) {
-    if (block['type'] === 'text' && typeof block['text'] === 'string') {
-      text += block['text']
-    }
-  }
-  return text
 }

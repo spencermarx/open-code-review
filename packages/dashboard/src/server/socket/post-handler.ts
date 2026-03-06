@@ -2,11 +2,11 @@
  * Socket.IO post-to-GitHub handler.
  *
  * Manages the "Post to GitHub" flow: checking gh auth, generating
- * human-voice reviews via Claude CLI, saving drafts, and posting
+ * human-voice reviews via the AI CLI adapter, saving drafts, and posting
  * PR comments via gh CLI.
  */
 
-import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { execFile, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -16,6 +16,8 @@ import type { Database } from 'sql.js'
 import { getSession, saveDb } from '../db.js'
 import { cleanEnv } from './env.js'
 import { buildHumanReviewPrompt } from '../prompts/human-review.js'
+import { AiCliService, formatToolDetail, cleanupTempFile, type NormalizedEvent } from '../services/ai-cli/index.js'
+import { startTrackedExecution, type TrackedExecution } from './execution-tracker.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -69,43 +71,15 @@ async function findPrForBranch(
 
 const activeGenerations = new Map<string, ChildProcess>()
 
-// ── Helpers ──
-
-function formatToolDetail(tool: string, input: Record<string, unknown>): string {
-  switch (tool) {
-    case 'Read':
-      return `Reading ${input['file_path'] ?? 'file'}`
-    case 'Grep':
-      return `Searching for "${input['pattern'] ?? '...'}"`
-    case 'Glob':
-      return `Finding files matching ${input['pattern'] ?? '...'}`
-    default:
-      return `Using ${tool}`
-  }
-}
-
-function extractFullText(parsed: Record<string, unknown>): string {
-  const msg = parsed['message'] as Record<string, unknown> | undefined
-  const content = msg?.['content'] as Array<Record<string, unknown>> | undefined
-  if (!content) return ''
-
-  let text = ''
-  for (const block of content) {
-    if (block['type'] === 'text' && typeof block['text'] === 'string') {
-      text += block['text']
-    }
-  }
-  return text
-}
-
 /**
  * Registers post-to-GitHub socket handlers for a connected client.
  */
 export function registerPostHandlers(
-  _io: SocketIOServer,
+  io: SocketIOServer,
   socket: Socket,
   db: Database,
   ocrDir: string,
+  aiCliService: AiCliService,
 ): void {
   // ── Check GitHub CLI auth + find PR ──
   socket.on('post:check-gh', async (payload: { sessionId: string }) => {
@@ -180,12 +154,20 @@ export function registerPostHandlers(
     }
   })
 
-  // ── Generate human review via Claude ──
+  // ── Generate human review via AI CLI adapter ──
   socket.on('post:generate', (payload: { sessionId: string; roundNumber: number }) => {
     try {
       const { sessionId, roundNumber } = payload ?? {}
       if (typeof sessionId !== 'string' || typeof roundNumber !== 'number') {
         socket.emit('post:error', { error: 'Invalid payload' })
+        return
+      }
+
+      const adapter = aiCliService.getAdapter()
+      if (!adapter) {
+        socket.emit('post:error', {
+          error: 'No AI CLI available. Install Claude Code or OpenCode to generate human reviews.',
+        })
         return
       }
 
@@ -220,41 +202,67 @@ export function registerPostHandlers(
         }
       }
 
-      // Build prompt
-      const prompt = buildHumanReviewPrompt(finalContent, reviewerContents)
+      // Build prompt: try command file first, fall back to inline prompt
+      let prompt: string
+      const commandMdPath = join(ocrDir, 'commands', 'translate-review-to-single-human.md')
+      try {
+        const commandContent = readFileSync(commandMdPath, 'utf-8')
 
-      // Write prompt to temp file
-      const tmpDir = join('/tmp', 'ocr-post-prompts')
-      try { mkdirSync(tmpDir, { recursive: true, mode: 0o700 }) } catch { /* exists */ }
-      const tmpFile = join(tmpDir, `${randomUUID()}.txt`)
-      writeFileSync(tmpFile, prompt, { mode: 0o600 })
+        // Build a prompt that injects the source material into the command instructions
+        const promptLines = [
+          'Follow the instructions below to translate this review into a single human-voice PR comment.',
+          '',
+          '## Source Material',
+          '',
+          '<final-review>',
+          finalContent,
+          '</final-review>',
+          '',
+        ]
 
-      // Build shell command
-      const flags = [
-        '--print',
-        '--output-format', 'stream-json',
-        '--verbose',
-        '--include-partial-messages',
-        '--max-turns', '1',
-        '--allowedTools', 'Read,Grep,Glob',
-      ]
-      const flagStr = flags.map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ')
-      const shellCmd = `cat '${tmpFile}' | claude ${flagStr}`
+        for (const reviewer of reviewerContents) {
+          promptLines.push(
+            `<reviewer-output name="${reviewer.name}">`,
+            reviewer.content,
+            '</reviewer-output>',
+            '',
+          )
+        }
 
-      const proc = spawn('sh', ['-c', shellCmd], {
+        promptLines.push('---', '', commandContent)
+        prompt = promptLines.join('\n')
+      } catch {
+        // Fallback: use inline prompt if command file not found
+        // (backwards compat for users who haven't run ocr update)
+        prompt = buildHumanReviewPrompt(finalContent, reviewerContents)
+      }
+
+      // Spawn via the adapter
+      const spawnResult = adapter.spawn({
+        prompt,
         cwd: process.cwd(),
-        env: cleanEnv(),
+        mode: 'query',
+        maxTurns: 1,
+        allowedTools: ['Read', 'Grep', 'Glob'],
       })
+      const proc = spawnResult.process
 
       // Track process for cancellation
       const generationKey = `${sessionId}-${roundNumber}`
       activeGenerations.set(generationKey, proc)
 
-      // Parse NDJSON stream
+      // Track in command_executions for active commands + history
+      const tracker = startTrackedExecution(
+        io, db, ocrDir,
+        'ocr translate-review-to-single-human',
+        [sessionId, `round-${roundNumber}`],
+      )
+      tracker.appendOutput('▸ Generating human-voice review...\n')
+
+      // Parse normalized event stream
       let assistantText = ''
       let lineBuffer = ''
       let thinkingStatusEmitted = false
-      const emittedToolUseIds = new Set<string>()
 
       proc.stdout?.on('data', (chunk: Buffer) => {
         lineBuffer += chunk.toString()
@@ -263,61 +271,35 @@ export function registerPostHandlers(
 
         for (const line of lines) {
           if (!line.trim()) continue
-          try {
-            const parsed = JSON.parse(line) as Record<string, unknown>
-            handleNdjsonLine(parsed)
-          } catch {
-            // Skip non-JSON lines
+          for (const evt of adapter.parseLine(line)) {
+            handleEvent(evt)
           }
         }
       })
 
-      function handleNdjsonLine(parsed: Record<string, unknown>): void {
-        const type = parsed['type'] as string | undefined
-
-        if (type === 'stream_event') {
-          const event = parsed['event'] as Record<string, unknown> | undefined
-          if (!event) return
-          const eventType = event['type'] as string | undefined
-
-          if (eventType === 'content_block_delta') {
-            const delta = event['delta'] as Record<string, unknown> | undefined
-            const deltaType = delta?.['type'] as string | undefined
-
-            if (deltaType === 'text_delta' && typeof delta?.['text'] === 'string') {
-              const text = delta['text'] as string
-              assistantText += text
-              socket.emit('post:token', { token: text })
-            }
-
-            if (deltaType === 'thinking_delta' && !thinkingStatusEmitted) {
+      function handleEvent(evt: NormalizedEvent): void {
+        switch (evt.type) {
+          case 'text':
+            assistantText += evt.text
+            socket.emit('post:token', { token: evt.text })
+            break
+          case 'thinking':
+            if (!thinkingStatusEmitted) {
               thinkingStatusEmitted = true
               socket.emit('post:status', { tool: 'thinking', detail: 'Thinking...' })
+              tracker.appendOutput('▸ Thinking...\n')
             }
-          }
-
-          if (eventType === 'content_block_start') {
-            const block = event['content_block'] as Record<string, unknown> | undefined
-            if (block?.['type'] === 'tool_use') {
-              const toolId = block['id'] as string
-              if (toolId && !emittedToolUseIds.has(toolId)) {
-                emittedToolUseIds.add(toolId)
-                const toolName = block['name'] as string
-                const input = (block['input'] as Record<string, unknown>) ?? {}
-                socket.emit('post:status', {
-                  tool: toolName,
-                  detail: formatToolDetail(toolName, input),
-                })
-              }
+            break
+          case 'tool_start':
+            if (evt.name !== '__input_json_delta') {
+              const detail = formatToolDetail(evt.name, evt.input)
+              socket.emit('post:status', { tool: evt.name, detail })
+              tracker.appendOutput(`▸ ${detail}\n`)
             }
-          }
-        }
-
-        if (type === 'assistant') {
-          const fullText = extractFullText(parsed)
-          if (fullText.length > 0) {
-            assistantText = fullText
-          }
+            break
+          case 'full_text':
+            assistantText = evt.text
+            break
         }
       }
 
@@ -327,34 +309,42 @@ export function registerPostHandlers(
       })
 
       proc.on('close', (code) => {
-        try { unlinkSync(tmpFile) } catch { /* ignore */ }
+        // Clean up temp file stored on process by the adapter
+        const tmpFile = (proc as unknown as { _tmpFile?: string })._tmpFile
+        if (tmpFile) cleanupTempFile(tmpFile)
+
         activeGenerations.delete(generationKey)
 
         // Process remaining buffer
         if (lineBuffer.trim()) {
-          try {
-            const parsed = JSON.parse(lineBuffer) as Record<string, unknown>
-            handleNdjsonLine(parsed)
-          } catch {
-            // Skip
+          for (const evt of adapter.parseLine(lineBuffer)) {
+            handleEvent(evt)
           }
         }
 
         if (code === 0 && assistantText.trim()) {
+          tracker.appendOutput('\n✓ Human review generated\n')
+          tracker.finish(0)
           socket.emit('post:done', { content: assistantText.trim() })
         } else if (code === null) {
           // Process was killed (cancelled)
+          tracker.appendOutput('\n✗ Cancelled\n')
+          tracker.finish(-1)
           socket.emit('post:cancelled', {})
         } else {
+          tracker.appendOutput(`\n✗ ${stderrBuffer || `Exit code ${code}`}\n`)
+          tracker.finish(code)
           socket.emit('post:error', {
-            error: stderrBuffer || `Claude process exited with code ${code}`,
+            error: stderrBuffer || `AI CLI process exited with code ${code}`,
           })
         }
       })
 
       proc.on('error', (err) => {
+        tracker.appendOutput(`\n✗ Failed to spawn: ${err.message}\n`)
+        tracker.finish(-1)
         socket.emit('post:error', {
-          error: `Failed to spawn Claude: ${err.message}`,
+          error: `Failed to spawn AI CLI: ${err.message}`,
         })
         activeGenerations.delete(generationKey)
       })
@@ -428,6 +418,14 @@ export function registerPostHandlers(
           return
         }
 
+        // Track in command_executions
+        const tracker = startTrackedExecution(
+          io, db, ocrDir,
+          'ocr post-to-github',
+          [`PR #${prNumber}`],
+        )
+        tracker.appendOutput(`▸ Posting review to PR #${prNumber}...\n`)
+
         // Write content to temp file for --body-file
         const tmpDir = join('/tmp', 'ocr-post-comments')
         try { mkdirSync(tmpDir, { recursive: true, mode: 0o700 }) } catch { /* exists */ }
@@ -444,11 +442,16 @@ export function registerPostHandlers(
           // Try to extract the comment URL from gh output
           const urlMatch = stdout.match(/(https:\/\/github\.com\S+)/)?.[0] ?? null
 
+          tracker.appendOutput(`✓ Posted to PR #${prNumber}${urlMatch ? ` — ${urlMatch}` : ''}\n`)
+          tracker.finish(0)
           socket.emit('post:submit-result', { success: true, commentUrl: urlMatch })
         } catch (err) {
+          const errMsg = err instanceof Error ? err.message : 'Unknown error'
+          tracker.appendOutput(`✗ ${errMsg}\n`)
+          tracker.finish(1)
           socket.emit('post:submit-result', {
             success: false,
-            error: `Failed to post comment: ${err instanceof Error ? err.message : 'Unknown error'}`,
+            error: `Failed to post comment: ${errMsg}`,
           })
         } finally {
           try { unlinkSync(tmpFile) } catch { /* ignore */ }

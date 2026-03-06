@@ -1,15 +1,12 @@
 /**
  * Socket.IO chat handler.
  *
- * Manages "Ask the Team" AI chat conversations by spawning Claude CLI
- * processes, streaming NDJSON responses as socket events, and persisting
- * messages to the database.
+ * Manages "Ask the Team" AI chat conversations by spawning an AI CLI
+ * process via the adapter strategy, streaming normalized events as
+ * socket events, and persisting messages to the database.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process'
-import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import type { ChildProcess } from 'node:child_process'
 import type { Server as SocketIOServer, Socket } from 'socket.io'
 import type { Database } from 'sql.js'
 import {
@@ -23,7 +20,8 @@ import {
   type ChatConversationRow,
 } from '../db.js'
 import { buildChatContext, type ChatTarget } from '../services/chat-context.js'
-import { cleanEnv } from './env.js'
+import { AiCliService, formatToolDetail, cleanupTempFile } from '../services/ai-cli/index.js'
+import { startTrackedExecution, type TrackedExecution } from './execution-tracker.js'
 
 // ── Types ──
 
@@ -89,46 +87,14 @@ function resetIdleTimer(
 }
 
 /**
- * Format a tool_use block into a human-readable description.
- */
-function formatToolDetail(tool: string, input: Record<string, unknown>): string {
-  switch (tool) {
-    case 'Read':
-      return `Reading ${input['file_path'] ?? 'file'}`
-    case 'Grep':
-      return `Searching for "${input['pattern'] ?? '...'}"`
-    case 'Glob':
-      return `Finding files matching ${input['pattern'] ?? '...'}`
-    default:
-      return `Using ${tool}`
-  }
-}
-
-/**
- * Extract the full concatenated text from an assistant message's content blocks.
- */
-function extractFullText(parsed: Record<string, unknown>): string {
-  const msg = parsed['message'] as Record<string, unknown> | undefined
-  const content = msg?.['content'] as Array<Record<string, unknown>> | undefined
-  if (!content) return ''
-
-  let text = ''
-  for (const block of content) {
-    if (block['type'] === 'text' && typeof block['text'] === 'string') {
-      text += block['text']
-    }
-  }
-  return text
-}
-
-/**
  * Registers chat socket handlers for a connected client.
  */
 export function registerChatHandlers(
   io: SocketIOServer,
   socket: Socket,
   db: Database,
-  ocrDir: string
+  ocrDir: string,
+  aiCliService: AiCliService
 ): void {
   socket.on('chat:send', (payload: ChatSendPayload) => {
     try {
@@ -147,6 +113,14 @@ export function registerChatHandlers(
         return
       }
 
+      if (!aiCliService.isAvailable()) {
+        socket.emit('chat:error', {
+          conversationId,
+          error: 'No AI CLI available. Install Claude Code or OpenCode to use the chat feature.',
+        })
+        return
+      }
+
       // Ensure conversation exists in DB
       upsertConversation(db, conversationId, sessionId, targetType, targetId)
       saveDb(db, ocrDir)
@@ -159,33 +133,28 @@ export function registerChatHandlers(
       const conversation = getConversation(db, conversationId)
       const claudeSessionId = conversation?.claude_session_id ?? null
 
-      // Build CLI flags and prompt separately.
-      // Prompt is written to a temp file then piped via `cat | claude` to avoid
-      // both shell interpretation issues and argument length limits.
-      const { flags, prompt } = buildCliInput(ocrDir, {
-        message,
-        sessionId,
-        targetType,
-        targetId,
-        claudeSessionId,
-      })
+      // Build context for first message (no session to resume)
+      let prompt: string
+      if (claudeSessionId) {
+        prompt = message
+      } else {
+        const target: ChatTarget = targetType === 'map_run'
+          ? { type: 'map_run', sessionId, runNumber: targetId }
+          : { type: 'review_round', sessionId, roundNumber: targetId }
+        const context = buildChatContext(ocrDir, target)
+        prompt = `${context}\n\nUser: ${message}`
+      }
 
-      // Write prompt to a temp file
-      const tmpDir = join('/tmp', 'ocr-chat-prompts')
-      try { mkdirSync(tmpDir, { recursive: true, mode: 0o700 }) } catch { /* exists */ }
-      const tmpFile = join(tmpDir, `${randomUUID()}.txt`)
-      writeFileSync(tmpFile, prompt, { mode: 0o600 })
-
-      // Build shell command: cat prompt | claude [flags]
-      // Using cat pipe avoids argument escaping entirely — the prompt content
-      // never touches the shell, only the temp file path does.
-      const flagStr = flags.map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ')
-      const shellCmd = `cat '${tmpFile}' | claude ${flagStr}`
-
-      const proc = spawn('sh', ['-c', shellCmd], {
+      const adapter = aiCliService.getAdapter()!
+      const spawnResult = adapter.spawn({
+        prompt,
         cwd: process.cwd(),
-        env: cleanEnv(),
+        mode: 'query',
+        maxTurns: 1,
+        allowedTools: ['Read', 'Grep', 'Glob'],
+        resumeSessionId: claudeSessionId ?? undefined,
       })
+      const proc = spawnResult.process
 
       // Track the process
       const timer = setTimeout(() => {
@@ -196,12 +165,20 @@ export function registerChatHandlers(
 
       activeChats.set(conversationId, { process: proc, conversationId, timer })
 
-      // Parse NDJSON stream for assistant text tokens and tool activity
+      // Track in command_executions for active commands + history
+      const chatLabel = targetType === 'map_run' ? 'map' : 'review'
+      const tracker = startTrackedExecution(
+        io, db, ocrDir,
+        `ocr chat (${chatLabel})`,
+        [sessionId],
+      )
+      tracker.appendOutput('▸ Ask the Team — processing message...\n')
+
+      // Parse normalized event stream for assistant text tokens and tool activity
       let assistantText = ''
       let lineBuffer = ''
       let capturedClaudeSessionId: string | null = null
       let thinkingStatusEmitted = false
-      const emittedToolUseIds = new Set<string>()
 
       proc.stdout?.on('data', (chunk: Buffer) => {
         lineBuffer += chunk.toString()
@@ -211,80 +188,44 @@ export function registerChatHandlers(
 
         for (const line of lines) {
           if (!line.trim()) continue
-          try {
-            const parsed = JSON.parse(line) as Record<string, unknown>
-            handleNdjsonLine(parsed)
-          } catch {
-            // Skip non-JSON lines
+          for (const evt of adapter.parseLine(line)) {
+            switch (evt.type) {
+              case 'text':
+                assistantText += evt.text
+                socket.emit('chat:token', { conversationId, token: evt.text })
+                break
+              case 'thinking':
+                if (!thinkingStatusEmitted) {
+                  thinkingStatusEmitted = true
+                  socket.emit('chat:status', {
+                    conversationId,
+                    tool: 'thinking',
+                    detail: 'Thinking...',
+                  })
+                  tracker.appendOutput('▸ Thinking...\n')
+                }
+                break
+              case 'tool_start':
+                if (evt.name !== '__input_json_delta') {
+                  const detail = formatToolDetail(evt.name, evt.input)
+                  socket.emit('chat:status', {
+                    conversationId,
+                    tool: evt.name,
+                    detail,
+                  })
+                  tracker.appendOutput(`▸ ${detail}\n`)
+                }
+                break
+              case 'full_text':
+                assistantText = evt.text
+                break
+              case 'session_id':
+                capturedClaudeSessionId = evt.id
+                break
+            }
           }
         }
       })
-
-      function handleNdjsonLine(parsed: Record<string, unknown>): void {
-        const type = parsed['type'] as string | undefined
-
-        // Capture session ID from init or result messages
-        if (parsed['session_id']) {
-          capturedClaudeSessionId = parsed['session_id'] as string
-        }
-
-        // Handle streaming events (from --include-partial-messages).
-        // These arrive as individual deltas, not accumulated messages.
-        if (type === 'stream_event') {
-          const event = parsed['event'] as Record<string, unknown> | undefined
-          if (!event) return
-          const eventType = event['type'] as string | undefined
-
-          // Text deltas — the actual response tokens
-          if (eventType === 'content_block_delta') {
-            const delta = event['delta'] as Record<string, unknown> | undefined
-            const deltaType = delta?.['type'] as string | undefined
-
-            if (deltaType === 'text_delta' && typeof delta?.['text'] === 'string') {
-              const text = delta['text'] as string
-              assistantText += text
-              socket.emit('chat:token', { conversationId, token: text })
-            }
-
-            // Show "Thinking..." status during the thinking phase
-            if (deltaType === 'thinking_delta' && !thinkingStatusEmitted) {
-              thinkingStatusEmitted = true
-              socket.emit('chat:status', {
-                conversationId,
-                tool: 'thinking',
-                detail: 'Thinking...',
-              })
-            }
-          }
-
-          // Tool use blocks — agentic activity indicator
-          if (eventType === 'content_block_start') {
-            const block = event['content_block'] as Record<string, unknown> | undefined
-            if (block?.['type'] === 'tool_use') {
-              const toolId = block['id'] as string
-              if (toolId && !emittedToolUseIds.has(toolId)) {
-                emittedToolUseIds.add(toolId)
-                const toolName = block['name'] as string
-                const input = (block['input'] as Record<string, unknown>) ?? {}
-                socket.emit('chat:status', {
-                  conversationId,
-                  tool: toolName,
-                  detail: formatToolDetail(toolName, input),
-                })
-              }
-            }
-          }
-        }
-
-        // Handle complete assistant messages (final text for DB storage).
-        // These arrive after all stream_event deltas are done.
-        if (type === 'assistant') {
-          const fullText = extractFullText(parsed)
-          if (fullText.length > 0) {
-            assistantText = fullText
-          }
-        }
-      }
 
       // Capture stderr for error reporting
       let stderrBuffer = ''
@@ -294,15 +235,23 @@ export function registerChatHandlers(
 
       proc.on('close', (code) => {
         // Clean up temp file
-        try { unlinkSync(tmpFile) } catch { /* ignore */ }
+        const tmpFile = (proc as any)._tmpFile
+        if (tmpFile) cleanupTempFile(tmpFile)
 
         // Process any remaining buffered data
         if (lineBuffer.trim()) {
-          try {
-            const parsed = JSON.parse(lineBuffer) as Record<string, unknown>
-            handleNdjsonLine(parsed)
-          } catch {
-            // Skip non-JSON remainder
+          for (const evt of adapter.parseLine(lineBuffer)) {
+            switch (evt.type) {
+              case 'text':
+                assistantText += evt.text
+                break
+              case 'full_text':
+                assistantText = evt.text
+                break
+              case 'session_id':
+                capturedClaudeSessionId = evt.id
+                break
+            }
           }
         }
 
@@ -318,11 +267,16 @@ export function registerChatHandlers(
         saveDb(db, ocrDir)
 
         if (code === 0) {
+          tracker.appendOutput('\n✓ Response complete\n')
+          tracker.finish(0)
           socket.emit('chat:done', { conversationId })
         } else {
+          const errMsg = stderrBuffer || `CLI process exited with code ${code}`
+          tracker.appendOutput(`\n✗ ${errMsg}\n`)
+          tracker.finish(code)
           socket.emit('chat:error', {
             conversationId,
-            error: stderrBuffer || `Claude process exited with code ${code}`,
+            error: errMsg,
           })
         }
 
@@ -336,9 +290,11 @@ export function registerChatHandlers(
       })
 
       proc.on('error', (err) => {
+        tracker.appendOutput(`\n✗ Failed to spawn: ${err.message}\n`)
+        tracker.finish(-1)
         socket.emit('chat:error', {
           conversationId,
-          error: `Failed to spawn Claude: ${err.message}`,
+          error: `Failed to spawn AI CLI: ${err.message}`,
         })
         cleanupChat(conversationId)
       })
@@ -391,39 +347,4 @@ export function cleanupAllChats(): void {
   for (const conversationId of activeChats.keys()) {
     cleanupChat(conversationId)
   }
-}
-
-// ── Internal helpers ──
-
-function buildCliInput(
-  ocrDir: string,
-  opts: {
-    message: string
-    sessionId: string
-    targetType: ChatConversationRow['target_type']
-    targetId: number
-    claudeSessionId: string | null
-  }
-): { flags: string[]; prompt: string } {
-  const flags = [
-    '--print',
-    '--output-format', 'stream-json',
-    '--verbose',
-    '--include-partial-messages',
-    '--max-turns', '1',
-    '--allowedTools', 'Read,Grep,Glob',
-  ]
-
-  if (opts.claudeSessionId) {
-    flags.push('--resume', opts.claudeSessionId)
-    return { flags, prompt: opts.message }
-  }
-
-  // First message — build context and send as prompt
-  const target: ChatTarget = opts.targetType === 'map_run'
-    ? { type: 'map_run', sessionId: opts.sessionId, runNumber: opts.targetId }
-    : { type: 'review_round', sessionId: opts.sessionId, roundNumber: opts.targetId }
-
-  const context = buildChatContext(ocrDir, target)
-  return { flags, prompt: `${context}\n\nUser: ${opts.message}` }
 }
