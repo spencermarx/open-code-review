@@ -227,7 +227,7 @@ export class DbSyncWatcher {
       diskDb.exec('SELECT * FROM orchestration_events ORDER BY id ASC'),
     )
 
-    let insertedCount = 0
+    const newEvents: Row[] = []
     const affectedSessions = new Set<string>()
 
     for (const row of diskEvents) {
@@ -251,16 +251,158 @@ export class DbSyncWatcher {
           col(row, 'metadata'), col(row, 'created_at'),
         ],
       )
-      insertedCount++
+      newEvents.push(row)
       affectedSessions.add(sessionId)
     }
 
-    // Emit events for affected sessions so the client refreshes
-    if (insertedCount > 0) {
-      for (const sessionId of affectedSessions) {
-        this.io.emit('session:events', { session_id: sessionId })
+    // Process only newly inserted completion events (not historical ones)
+    for (const row of newEvents) {
+      const eventType = col(row, 'event_type') as string
+      const sessionId = col(row, 'session_id') as string
+      const metadataStr = col(row, 'metadata') as string | null
+
+      if (eventType === 'round_completed') {
+        const roundNumber = col(row, 'round') as number | null
+        if (sessionId && roundNumber && metadataStr) {
+          this.processRoundCompletedEvent(sessionId, roundNumber, metadataStr)
+        }
+      } else if (eventType === 'map_completed') {
+        const runNumber = col(row, 'round') as number | null // round column stores map run #
+        if (sessionId && runNumber && metadataStr) {
+          this.processMapCompletedEvent(sessionId, runNumber, metadataStr)
+        }
       }
     }
+
+    // Emit events for affected sessions so the client refreshes
+    if (newEvents.length > 0) {
+      for (const sessionId of affectedSessions) {
+        this.io.to(`session:${sessionId}`).emit('session:events', { session_id: sessionId })
+      }
+    }
+  }
+
+  /**
+   * Process a `round_completed` orchestration event.
+   * Upserts review_rounds with orchestrator data for real-time dashboard updates.
+   * Idempotent — skips if round already has source='orchestrator'.
+   */
+  private processRoundCompletedEvent(
+    sessionId: string,
+    roundNumber: number,
+    metadataStr: string,
+  ): void {
+    let metadata: Record<string, unknown>
+    try {
+      metadata = JSON.parse(metadataStr)
+    } catch {
+      return
+    }
+
+    // Check if orchestrator already populated this round
+    const existing = this.db.exec(
+      'SELECT source FROM review_rounds WHERE session_id = ? AND round_number = ?',
+      [sessionId, roundNumber],
+    )
+    const rows = resultToRows<Row>(existing)
+    if (rows.length > 0 && col(rows[0]!, 'source') === 'orchestrator') {
+      return // Already populated — idempotent
+    }
+
+    // Ensure round row exists
+    this.db.run(
+      `INSERT OR IGNORE INTO review_rounds (session_id, round_number)
+       VALUES (?, ?)`,
+      [sessionId, roundNumber],
+    )
+
+    // Update with orchestrator data
+    this.db.run(
+      `UPDATE review_rounds
+       SET verdict = ?, blocker_count = ?, suggestion_count = ?, should_fix_count = ?,
+           reviewer_count = ?, total_finding_count = ?, source = 'orchestrator',
+           parsed_at = datetime('now')
+       WHERE session_id = ? AND round_number = ?`,
+      [
+        (metadata.verdict as string) ?? null,
+        (metadata.blocker_count as number) ?? 0,
+        (metadata.suggestion_count as number) ?? 0,
+        (metadata.should_fix_count as number) ?? 0,
+        (metadata.reviewer_count as number) ?? 0,
+        (metadata.total_finding_count as number) ?? 0,
+        sessionId,
+        roundNumber,
+      ],
+    )
+
+    // Emit real-time update (room-scoped to avoid cross-session noise)
+    this.io.to(`session:${sessionId}`).emit('round:updated', {
+      sessionId,
+      roundNumber,
+      verdict: metadata.verdict,
+      blockerCount: metadata.blocker_count,
+      shouldFixCount: metadata.should_fix_count,
+      suggestionCount: metadata.suggestion_count,
+      source: 'orchestrator',
+    })
+  }
+
+  /**
+   * Process a `map_completed` orchestration event.
+   * Upserts map_runs with orchestrator data for real-time dashboard updates.
+   * Idempotent — skips if run already has source='orchestrator'.
+   */
+  private processMapCompletedEvent(
+    sessionId: string,
+    runNumber: number,
+    metadataStr: string,
+  ): void {
+    let metadata: Record<string, unknown>
+    try {
+      metadata = JSON.parse(metadataStr)
+    } catch {
+      return
+    }
+
+    // Check if orchestrator already populated this run
+    const existing = this.db.exec(
+      'SELECT source FROM map_runs WHERE session_id = ? AND run_number = ?',
+      [sessionId, runNumber],
+    )
+    const rows = resultToRows<Row>(existing)
+    if (rows.length > 0 && col(rows[0]!, 'source') === 'orchestrator') {
+      return // Already populated — idempotent
+    }
+
+    // Ensure run row exists
+    this.db.run(
+      `INSERT OR IGNORE INTO map_runs (session_id, run_number)
+       VALUES (?, ?)`,
+      [sessionId, runNumber],
+    )
+
+    // Update with orchestrator data
+    this.db.run(
+      `UPDATE map_runs
+       SET file_count = ?, section_count = ?, source = 'orchestrator',
+           parsed_at = datetime('now')
+       WHERE session_id = ? AND run_number = ?`,
+      [
+        (metadata.file_count as number) ?? 0,
+        (metadata.section_count as number) ?? 0,
+        sessionId,
+        runNumber,
+      ],
+    )
+
+    // Emit real-time update (room-scoped to avoid cross-session noise)
+    this.io.to(`session:${sessionId}`).emit('map:updated', {
+      sessionId,
+      runNumber,
+      fileCount: metadata.file_count,
+      sectionCount: metadata.section_count,
+      source: 'orchestrator',
+    })
   }
 
   /**

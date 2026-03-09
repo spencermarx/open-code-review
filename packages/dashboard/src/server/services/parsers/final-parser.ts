@@ -2,6 +2,11 @@
  * Parser for final.md review synthesis files.
  *
  * Extracts verdict, blocker count, should-fix count, and suggestion count.
+ *
+ * Supports two formats:
+ *   1. Explicit count lines:  `**Blockers**: 3`
+ *   2. Section-based counting: counts items under `## Blockers` / `## Suggestions`
+ *      Items can be `### Title` sub-headings or `- bullet` list items.
  */
 
 export type ParsedFinal = {
@@ -12,9 +17,9 @@ export type ParsedFinal = {
 }
 
 const VERDICT_RE = /^\*?\*?\s*(?:##\s*)?Verdict\s*\*?\*?\s*:?\s*\*?\*?\s*(.*)/im
-const BLOCKERS_RE = /\*?\*?Blockers?\*?\*?\s*:?\s*(\d+)/i
-const SHOULD_FIX_RE = /\*?\*?Should\s*Fix\*?\*?\s*:?\s*(\d+)/i
-const SUGGESTIONS_RE = /\*?\*?Suggestions?\*?\*?\s*:?\s*(\d+)/i
+const BLOCKERS_RE = /^\*\*Blockers?\*\*\s*:?\s*(\d+)/im
+const SHOULD_FIX_RE = /^\*\*Should\s*Fix\*\*\s*:?\s*(\d+)/im
+const SUGGESTIONS_RE = /^\*\*Suggestions?\*\*\s*:?\s*(\d+)/im
 
 /**
  * Parses a final.md file into structured review metadata.
@@ -40,36 +45,69 @@ export function parseFinalMd(content: string): ParsedFinal {
   let shouldFixCount = shouldFixMatch ? parseInt(shouldFixMatch[1] ?? '0', 10) : 0
   let suggestionCount = suggestionsMatch ? parseInt(suggestionsMatch[1] ?? '0', 10) : 0
 
-  // Fallback: count ## Blocker, ## Should Fix, ## Suggestion headers
+  // Fallback: count items under ## Blocker / ## Should Fix / ## Suggestion headers
   if (!blockerMatch) {
-    blockerCount = countSectionHeaders(content, /^##\s+Blockers?\b/im)
+    blockerCount = countSectionItems(content, /^##\s+Blockers?\b/im)
   }
   if (!shouldFixMatch) {
-    shouldFixCount = countSectionHeaders(content, /^##\s+Should\s*Fix\b/im)
+    shouldFixCount = countSectionItems(content, /^##\s+Should\s*Fix\b/im)
   }
   if (!suggestionsMatch) {
-    suggestionCount = countSectionHeaders(content, /^##\s+Suggestions?\b/im)
+    suggestionCount = countSectionItems(content, /^##\s+Suggestions?\b/im)
   }
 
   return { verdict, blockerCount, shouldFixCount, suggestionCount }
 }
 
 /**
- * Counts numbered items under a section heading.
+ * Counts items under a section heading.
+ *
+ * Recognises three item patterns:
+ *   - `### 1. Title`          (numbered sub-headings)
+ *   - `### 🚫 Title`          (emoji-prefixed sub-headings used for blockers)
+ *   - `- text — @reviewer`    (bullet items used for suggestions)
+ *
+ * Category sub-headings (`### Architecture`, `### Testing`) are NOT counted
+ * as items — they are grouping headers whose children (bullets) are the
+ * actual items.
+ *
+ * Stops counting at the next `## ` heading or `---` separator.
  */
-function countSectionHeaders(content: string, sectionRe: RegExp): number {
+function countSectionItems(content: string, sectionRe: RegExp): number {
   const match = content.match(sectionRe)
-  if (!match?.index) return 0
+  if (!match?.index && match?.index !== 0) return 0
 
-  // Count ### sub-headings under this section until the next ## heading
   const afterSection = content.slice(match.index + (match[0]?.length ?? 0))
   const lines = afterSection.split('\n')
   let count = 0
 
   for (const line of lines) {
-    // Stop at next ## heading (but not ###)
-    if (line.match(/^##\s+[^#]/) && !line.match(/^###/)) break
-    if (line.match(/^###\s+\d+\./)) count++
+    const trimmed = line.trim()
+
+    // Stop at next ## heading (but not ###) or horizontal rule separator
+    if (/^##\s+[^#]/.test(trimmed)) break
+    if (/^---+\s*$/.test(trimmed)) break
+
+    // Count numbered sub-headings:  ### 1. Title
+    if (/^###\s+\d+\./.test(trimmed)) {
+      count++
+      continue
+    }
+
+    // Count emoji-prefixed sub-headings:  ### 🚫 Title
+    if (/^###\s+[^\w\s#]/.test(trimmed)) {
+      count++
+      continue
+    }
+
+    // Count top-level bullet items with attribution:  - "text" — @reviewer
+    // or plain bullets directly under the section:     - **Title** — desc
+    // Skip sentinel bullets like "- None", "- No blockers", "- N/A"
+    if (/^-\s+\S/.test(trimmed)) {
+      if (/^-\s+(?:none\b|no\s|n\/a\b)/i.test(trimmed)) continue
+      count++
+      continue
+    }
   }
 
   return count

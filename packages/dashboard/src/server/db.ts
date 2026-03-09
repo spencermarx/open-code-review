@@ -82,6 +82,9 @@ export type ReviewRoundRow = {
   should_fix_count: number
   final_md_path: string | null
   parsed_at: string | null
+  source: string | null
+  reviewer_count: number
+  total_finding_count: number
 }
 
 export type ReviewerOutputRow = {
@@ -122,8 +125,10 @@ export type MapRunRow = {
   session_id: string
   run_number: number
   file_count: number
+  section_count: number
   map_md_path: string | null
   parsed_at: string | null
+  source: string | null
 }
 
 export type MapSectionRow = {

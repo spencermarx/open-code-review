@@ -5,7 +5,7 @@
  */
 
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs'
-import { join, basename, relative } from 'node:path'
+import { join, basename, dirname, relative } from 'node:path'
 import { watch, type FSWatcher } from 'chokidar'
 import type { Database } from 'sql.js'
 import type { Server as SocketIOServer } from 'socket.io'
@@ -89,7 +89,7 @@ export class FilesystemSync {
 
   // ── 6.1: Full Scan ──
 
-  fullScan(): void {
+  async fullScan(): Promise<void> {
     if (!existsSync(this.sessionsDir)) return
 
     const entries = readdirSync(this.sessionsDir, { withFileTypes: true })
@@ -126,6 +126,12 @@ export class FilesystemSync {
           }
         }
 
+        // round-meta.json (orchestrator-first — process BEFORE final.md)
+        const roundMetaPath = join(roundDir, 'round-meta.json')
+        if (existsSync(roundMetaPath)) {
+          this.processRoundMeta(sessionId, roundNumber, roundMetaPath)
+        }
+
         // Final.md
         const finalPath = join(roundDir, 'final.md')
         if (existsSync(finalPath)) {
@@ -156,6 +162,12 @@ export class FilesystemSync {
         if (!runMatch) continue
         const runNumber = parseInt(runMatch[1] ?? '0', 10)
         const runDir = join(mapDir, runEntry.name)
+
+        // map-meta.json (orchestrator-first — process BEFORE map.md)
+        const mapMetaPath = join(runDir, 'map-meta.json')
+        if (existsSync(mapMetaPath)) {
+          this.processMapMeta(sessionId, runNumber, mapMetaPath)
+        }
 
         // map.md
         const mapPath = join(runDir, 'map.md')
@@ -349,18 +361,27 @@ export class FilesystemSync {
     // Check mtime — skip if file hasn't changed since last parse
     const existingRun = queryFirst(
       this.db,
-      'SELECT id, parsed_at FROM map_runs WHERE session_id = ? AND run_number = ?',
+      'SELECT id, parsed_at, source FROM map_runs WHERE session_id = ? AND run_number = ?',
       [sessionId, runNumber],
     )
     if (existingRun && this.shouldSkip(filePath, existingRun['parsed_at'] ?? null)) return
+
+    // If orchestrator already populated this run via map-meta.json,
+    // skip section/file parsing but still store raw markdown
+    if (existingRun?.['source'] === 'orchestrator') {
+      const content = readFileSync(filePath, 'utf-8')
+      const action = this.upsertMarkdownArtifact(sessionId, 'map', filePath, content, undefined)
+      this.emitArtifactEvent(action, { sessionId, artifactType: 'map', filePath })
+      return
+    }
 
     const content = readFileSync(filePath, 'utf-8')
     const parsed = parseMapMd(content)
 
     // Upsert map_run
     this.db.run(
-      `INSERT OR REPLACE INTO map_runs (session_id, run_number, file_count, map_md_path, parsed_at)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO map_runs (session_id, run_number, file_count, map_md_path, parsed_at, source)
+       VALUES (?, ?, ?, ?, ?, 'parser')`,
       [sessionId, runNumber, parsed.sections.reduce((sum, s) => sum + s.files.length, 0), filePath, sqlNow()],
     )
 
@@ -497,11 +518,25 @@ export class FilesystemSync {
 
     const roundRow = queryFirst(
       this.db,
-      'SELECT id FROM review_rounds WHERE session_id = ? AND round_number = ?',
+      'SELECT id, source FROM review_rounds WHERE session_id = ? AND round_number = ?',
       [sessionId, roundNumber],
     )
     const roundId = roundRow?.['id'] as number | undefined
     if (!roundId) return
+
+    // If orchestrator already populated this round, skip findings parsing
+    // but still store the raw markdown for chat context
+    if (roundRow?.['source'] === 'orchestrator') {
+      const content = readFileSync(filePath, 'utf-8')
+      const action = this.upsertMarkdownArtifact(sessionId, 'reviewer-output', filePath, content, roundNumber)
+      this.emitArtifactEvent(action, {
+        sessionId,
+        artifactType: 'reviewer-output',
+        roundNumber,
+        filePath,
+      })
+      return
+    }
 
     // Parse reviewer type and instance from filename (e.g., "principal-1.md")
     const nameMatch = fileName.replace(/\.md$/, '').match(/^(.+?)-(\d+)$/)
@@ -603,9 +638,9 @@ export class FilesystemSync {
     })
   }
 
-  // ── 6.4: Final.md Integration ──
+  // ── 6.3b: Round Meta (Orchestrator-First) ──
 
-  private processFinalMd(
+  private processRoundMeta(
     sessionId: string,
     roundNumber: number,
     filePath: string,
@@ -620,44 +655,447 @@ export class FilesystemSync {
     // Check mtime
     const existingRound = queryFirst(
       this.db,
-      'SELECT parsed_at FROM review_rounds WHERE session_id = ? AND round_number = ?',
+      'SELECT parsed_at, source FROM review_rounds WHERE session_id = ? AND round_number = ?',
       [sessionId, roundNumber],
     )
-    if (existingRound && this.shouldSkip(filePath, existingRound['parsed_at'] ?? null)) return
+    if (existingRound?.['source'] === 'orchestrator' && this.shouldSkip(filePath, existingRound['parsed_at'] ?? null)) return
 
-    const content = readFileSync(filePath, 'utf-8')
-    const parsed = parseFinalMd(content)
+    let raw: unknown
+    try {
+      raw = JSON.parse(readFileSync(filePath, 'utf-8'))
+    } catch {
+      console.error(`[FilesystemSync] Failed to parse ${filePath}`)
+      return
+    }
 
-    // Update the round row with parsed final data
-    this.db.run(
-      `UPDATE review_rounds SET verdict = ?, blocker_count = ?, suggestion_count = ?, should_fix_count = ?, final_md_path = ?, parsed_at = ?
-       WHERE session_id = ? AND round_number = ?`,
-      [
-        parsed.verdict,
-        parsed.blockerCount,
-        parsed.suggestionCount,
-        parsed.shouldFixCount,
-        filePath,
-        sqlNow(),
-        sessionId,
-        roundNumber,
-      ],
-    )
+    const meta = raw as {
+      schema_version?: number
+      verdict?: string
+      reviewers?: Array<{
+        type?: string
+        instance?: number
+        severity_high?: number
+        severity_medium?: number
+        severity_low?: number
+        severity_info?: number
+        findings?: Array<{
+          title?: string
+          category?: string
+          severity?: string
+          file_path?: string
+          line_start?: number
+          line_end?: number
+          summary?: string
+          flagged_by?: string[]
+        }>
+      }>
+    }
 
-    // Recount blockers from actual findings (the LLM text in final.md may be inaccurate)
-    const actualBlockers = queryScalar(
-      this.db,
-      `SELECT COUNT(*) FROM review_findings rf
-       JOIN reviewer_outputs ro ON rf.reviewer_output_id = ro.id
-       WHERE ro.round_id = (SELECT id FROM review_rounds WHERE session_id = ? AND round_number = ?)
-         AND rf.is_blocker = 1`,
-      [sessionId, roundNumber],
-    ) as number | null
-    if (actualBlockers !== null && actualBlockers !== parsed.blockerCount) {
+    if (meta.schema_version !== 1 || !meta.verdict || !Array.isArray(meta.reviewers)) {
+      console.error(`[FilesystemSync] Invalid round-meta.json at ${filePath}`)
+      return
+    }
+
+    // Compute derived counts from findings
+    const allFindings = meta.reviewers.flatMap((r) => r.findings ?? [])
+    const blockerCount = allFindings.filter((f) => f.category === 'blocker').length
+    const shouldFixCount = allFindings.filter((f) => f.category === 'should_fix').length
+    const suggestionCount = allFindings.filter((f) => f.category === 'suggestion').length
+    const reviewerCount = meta.reviewers.length
+    const totalFindingCount = allFindings.length
+
+    // ── Begin transaction for atomic multi-step mutation ──
+    this.db.run('BEGIN TRANSACTION')
+    try {
+      // Upsert review_rounds with orchestrator data
       this.db.run(
-        'UPDATE review_rounds SET blocker_count = ? WHERE session_id = ? AND round_number = ?',
-        [actualBlockers, sessionId, roundNumber],
+        `UPDATE review_rounds
+         SET verdict = ?, blocker_count = ?, suggestion_count = ?, should_fix_count = ?,
+             reviewer_count = ?, total_finding_count = ?, source = 'orchestrator', parsed_at = ?
+         WHERE session_id = ? AND round_number = ?`,
+        [
+          meta.verdict,
+          blockerCount,
+          suggestionCount,
+          shouldFixCount,
+          reviewerCount,
+          totalFindingCount,
+          sqlNow(),
+          sessionId,
+          roundNumber,
+        ],
       )
+
+      // Get round ID for child rows
+      const roundRow = queryFirst(
+        this.db,
+        'SELECT id FROM review_rounds WHERE session_id = ? AND round_number = ?',
+        [sessionId, roundNumber],
+      )
+      const roundId = roundRow?.['id'] as number | undefined
+      if (!roundId) {
+        this.db.run('COMMIT')
+        return
+      }
+
+      // Derive the round directory for constructing reviewer .md file paths
+      const roundDir = dirname(filePath)
+
+      // Process each reviewer
+      for (const reviewer of meta.reviewers) {
+        const reviewerType = reviewer.type ?? 'unknown'
+        const instanceNumber = reviewer.instance ?? 1
+        const findings = reviewer.findings ?? []
+
+        // Use the reviewer's .md file path (not the round-meta.json path)
+        const reviewerMdPath = join(roundDir, 'reviews', `${reviewerType}-${instanceNumber}.md`)
+
+        // Upsert reviewer_output
+        this.db.run(
+          `INSERT OR REPLACE INTO reviewer_outputs (round_id, reviewer_type, instance_number, file_path, finding_count, parsed_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [roundId, reviewerType, instanceNumber, reviewerMdPath, findings.length, sqlNow()],
+        )
+
+        const outputRow = queryFirst(
+          this.db,
+          'SELECT id FROM reviewer_outputs WHERE round_id = ? AND reviewer_type = ? AND instance_number = ?',
+          [roundId, reviewerType, instanceNumber],
+        )
+        const outputId = outputRow?.['id'] as number | undefined
+        if (!outputId) continue
+
+        // Stash user_finding_progress before delete (CASCADE will destroy it)
+        const stashedFindingProgress = new Map<string, { status: string; updatedAt: string | null }>()
+        const findingProgressResult = this.db.exec(
+          `SELECT rf.title, rf.severity, rf.file_path, ufp.status, ufp.updated_at
+           FROM user_finding_progress ufp
+           JOIN review_findings rf ON rf.id = ufp.finding_id
+           WHERE rf.reviewer_output_id = ?`,
+          [outputId],
+        )
+        if (findingProgressResult[0]) {
+          for (const row of findingProgressResult[0].values) {
+            const key = `${row[0] as string}|${row[1] as string}|${row[2] as string}`
+            stashedFindingProgress.set(key, {
+              status: row[3] as string,
+              updatedAt: row[4] as string | null,
+            })
+          }
+        }
+
+        // Delete existing findings for this output (replacing with orchestrator data)
+        this.db.run('DELETE FROM review_findings WHERE reviewer_output_id = ?', [outputId])
+
+        // Insert findings from structured data
+        for (const finding of findings) {
+          this.db.run(
+            `INSERT INTO review_findings (reviewer_output_id, title, severity, file_path, line_start, line_end, summary, is_blocker, parsed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              outputId,
+              finding.title ?? '',
+              finding.severity ?? 'info',
+              finding.file_path ?? null,
+              finding.line_start ?? null,
+              finding.line_end ?? null,
+              finding.summary ?? null,
+              finding.category === 'blocker' ? 1 : 0,
+              sqlNow(),
+            ],
+          )
+
+          // Restore stashed user progress for this finding
+          const key = `${finding.title ?? ''}|${finding.severity ?? 'info'}|${finding.file_path ?? ''}`
+          const stashed = stashedFindingProgress.get(key)
+          if (stashed) {
+            const newFindingRow = queryFirst(
+              this.db,
+              'SELECT id FROM review_findings WHERE reviewer_output_id = ? AND title = ? AND severity = ? AND file_path IS ?',
+              [outputId, finding.title ?? '', finding.severity ?? 'info', finding.file_path ?? null],
+            )
+            if (newFindingRow) {
+              this.db.run(
+                `INSERT OR REPLACE INTO user_finding_progress (finding_id, status, updated_at)
+                 VALUES (?, ?, ?)`,
+                [newFindingRow['id'] as number, stashed.status, stashed.updatedAt],
+              )
+            }
+          }
+        }
+      }
+
+      this.db.run('COMMIT')
+    } catch (err) {
+      this.db.run('ROLLBACK')
+      console.error(`[FilesystemSync] Error in processRoundMeta for ${filePath}:`, err)
+      return
+    }
+
+    // Emit socket events
+    this.io?.to(`session:${sessionId}`).emit('round:updated', {
+      sessionId,
+      roundNumber,
+      verdict: meta.verdict,
+      blockerCount,
+      shouldFixCount,
+      suggestionCount,
+      reviewerCount,
+      totalFindingCount,
+      source: 'orchestrator',
+    })
+  }
+
+  // ── 6.2b: Map-meta.json Integration ──
+
+  private processMapMeta(
+    sessionId: string,
+    runNumber: number,
+    filePath: string,
+  ): void {
+    // Ensure map_run row exists
+    this.db.run(
+      `INSERT OR IGNORE INTO map_runs (session_id, run_number)
+       VALUES (?, ?)`,
+      [sessionId, runNumber],
+    )
+
+    // Check mtime + source latch
+    const existingRun = queryFirst(
+      this.db,
+      'SELECT id, parsed_at, source FROM map_runs WHERE session_id = ? AND run_number = ?',
+      [sessionId, runNumber],
+    )
+    if (existingRun?.['source'] === 'orchestrator' && this.shouldSkip(filePath, existingRun['parsed_at'] ?? null)) return
+
+    let raw: unknown
+    try {
+      raw = JSON.parse(readFileSync(filePath, 'utf-8'))
+    } catch {
+      console.error(`[FilesystemSync] Failed to parse ${filePath}`)
+      return
+    }
+
+    const meta = raw as {
+      schema_version?: number
+      sections?: Array<{
+        section_number?: number
+        title?: string
+        description?: string
+        files?: Array<{
+          file_path?: string
+          role?: string
+          lines_added?: number
+          lines_deleted?: number
+        }>
+      }>
+      dependencies?: Array<{
+        from_section?: number
+        from_title?: string
+        to_section?: number
+        to_title?: string
+        relationship?: string
+      }>
+    }
+
+    if (meta.schema_version !== 1 || !Array.isArray(meta.sections)) {
+      console.error(`[FilesystemSync] Invalid map-meta.json at ${filePath}`)
+      return
+    }
+
+    // Compute derived counts
+    const sectionCount = meta.sections.length
+    const fileCount = meta.sections.reduce((sum, s) => sum + (s.files?.length ?? 0), 0)
+
+    // ── Begin transaction for atomic multi-step mutation ──
+    this.db.run('BEGIN TRANSACTION')
+    try {
+      // Update map_runs with orchestrator data
+      this.db.run(
+        `UPDATE map_runs
+         SET file_count = ?, section_count = ?, source = 'orchestrator', parsed_at = ?
+         WHERE session_id = ? AND run_number = ?`,
+        [fileCount, sectionCount, sqlNow(), sessionId, runNumber],
+      )
+
+      // Get map_run ID
+      const runRow = queryFirst(
+        this.db,
+        'SELECT id FROM map_runs WHERE session_id = ? AND run_number = ?',
+        [sessionId, runNumber],
+      )
+      const mapRunId = runRow?.['id'] as number | undefined
+      if (!mapRunId) {
+        this.db.run('COMMIT')
+        return
+      }
+
+      // Stash user progress before delete (cascade will destroy it)
+      const stashedFileProgress = new Map<string, { isReviewed: number; reviewedAt: string | null }>()
+      const progressResult = this.db.exec(
+        `SELECT mf.file_path, ufp.is_reviewed, ufp.reviewed_at
+         FROM user_file_progress ufp
+         JOIN map_files mf ON mf.id = ufp.map_file_id
+         JOIN map_sections ms ON ms.id = mf.section_id
+         WHERE ms.map_run_id = ?`,
+        [mapRunId],
+      )
+      if (progressResult[0]) {
+        for (const row of progressResult[0].values) {
+          const fp = row[0] as string
+          stashedFileProgress.set(fp, {
+            isReviewed: row[1] as number,
+            reviewedAt: row[2] as string | null,
+          })
+        }
+      }
+
+      // Clean old sections/files for this run
+      const oldSections = this.db.exec(
+        'SELECT id FROM map_sections WHERE map_run_id = ?',
+        [mapRunId],
+      )
+      if (oldSections[0]) {
+        for (const row of oldSections[0].values) {
+          this.db.run('DELETE FROM map_files WHERE section_id = ?', [row[0] as number])
+        }
+      }
+      this.db.run('DELETE FROM map_sections WHERE map_run_id = ?', [mapRunId])
+
+      // Insert sections and files from structured data
+      for (const section of meta.sections) {
+        const sectionNumber = section.section_number ?? 0
+        const title = section.title ?? 'Untitled'
+        const description = section.description ?? null
+        const files = section.files ?? []
+
+        this.db.run(
+          `INSERT OR REPLACE INTO map_sections (map_run_id, section_number, title, description, file_count, display_order)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [mapRunId, sectionNumber, title, description, files.length, sectionNumber],
+        )
+
+        const sectionRow = queryFirst(
+          this.db,
+          'SELECT id FROM map_sections WHERE map_run_id = ? AND section_number = ?',
+          [mapRunId, sectionNumber],
+        )
+        const sectionId = sectionRow?.['id'] as number | undefined
+        if (!sectionId) continue
+
+        for (let fi = 0; fi < files.length; fi++) {
+          const file = files[fi]
+          if (!file) continue
+          this.db.run(
+            `INSERT OR REPLACE INTO map_files (section_id, file_path, role, lines_added, lines_deleted, display_order)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [sectionId, file.file_path ?? '', file.role ?? null, file.lines_added ?? 0, file.lines_deleted ?? 0, fi],
+          )
+
+          // Restore stashed user progress for this file
+          const stashed = stashedFileProgress.get(file.file_path ?? '')
+          if (stashed) {
+            const newFileRow = queryFirst(
+              this.db,
+              'SELECT id FROM map_files WHERE section_id = ? AND file_path = ?',
+              [sectionId, file.file_path ?? ''],
+            )
+            if (newFileRow) {
+              this.db.run(
+                `INSERT OR REPLACE INTO user_file_progress (map_file_id, is_reviewed, reviewed_at)
+                 VALUES (?, ?, ?)`,
+                [newFileRow['id'] as number, stashed.isReviewed, stashed.reviewedAt],
+              )
+            }
+          }
+        }
+      }
+
+      this.db.run('COMMIT')
+    } catch (err) {
+      this.db.run('ROLLBACK')
+      console.error(`[FilesystemSync] Error in processMapMeta for ${filePath}:`, err)
+      return
+    }
+
+    // Emit socket events
+    this.io?.to(`session:${sessionId}`).emit('map:updated', {
+      sessionId,
+      runNumber,
+      fileCount,
+      sectionCount,
+      source: 'orchestrator',
+    })
+  }
+
+  // ── 6.4: Final.md Integration ──
+
+  private processFinalMd(
+    sessionId: string,
+    roundNumber: number,
+    filePath: string,
+  ): void {
+    // Ensure review_round exists
+    this.db.run(
+      `INSERT OR IGNORE INTO review_rounds (session_id, round_number)
+       VALUES (?, ?)`,
+      [sessionId, roundNumber],
+    )
+
+    // Check if orchestrator already populated this round
+    const existingRound = queryFirst(
+      this.db,
+      'SELECT parsed_at, source FROM review_rounds WHERE session_id = ? AND round_number = ?',
+      [sessionId, roundNumber],
+    )
+
+    const isOrchestratorSource = existingRound?.['source'] === 'orchestrator'
+
+    // Read the file content once — needed for both paths (markdown storage)
+    if (!isOrchestratorSource && existingRound && this.shouldSkip(filePath, existingRound['parsed_at'] ?? null)) return
+    const content = readFileSync(filePath, 'utf-8')
+
+    if (isOrchestratorSource) {
+      // Orchestrator-first path: only store final_md_path and raw markdown, skip count parsing
+      this.db.run(
+        `UPDATE review_rounds SET final_md_path = ?, parsed_at = ?
+         WHERE session_id = ? AND round_number = ?`,
+        [filePath, sqlNow(), sessionId, roundNumber],
+      )
+    } else {
+      // Fallback parser path: no orchestrator data, parse markdown for counts
+      const parsed = parseFinalMd(content)
+
+      this.db.run(
+        `UPDATE review_rounds SET verdict = ?, blocker_count = ?, suggestion_count = ?, should_fix_count = ?, final_md_path = ?, parsed_at = ?, source = 'parser'
+         WHERE session_id = ? AND round_number = ?`,
+        [
+          parsed.verdict,
+          parsed.blockerCount,
+          parsed.suggestionCount,
+          parsed.shouldFixCount,
+          filePath,
+          sqlNow(),
+          sessionId,
+          roundNumber,
+        ],
+      )
+
+      // Recount blockers from actual findings (the LLM text in final.md may be inaccurate)
+      const actualBlockers = queryScalar(
+        this.db,
+        `SELECT COUNT(*) FROM review_findings rf
+         JOIN reviewer_outputs ro ON rf.reviewer_output_id = ro.id
+         WHERE ro.round_id = (SELECT id FROM review_rounds WHERE session_id = ? AND round_number = ?)
+           AND rf.is_blocker = 1`,
+        [sessionId, roundNumber],
+      ) as number | null
+      if (actualBlockers !== null && actualBlockers !== parsed.blockerCount) {
+        this.db.run(
+          'UPDATE review_rounds SET blocker_count = ? WHERE session_id = ? AND round_number = ?',
+          [actualBlockers, sessionId, roundNumber],
+        )
+      }
     }
 
     // Safety net: if final.md exists but the session is stuck at an earlier phase,
@@ -756,7 +1194,7 @@ export class FilesystemSync {
   }
 
   private handleFileChange(filePath: string): void {
-    if (!filePath.endsWith('.md')) return
+    if (!filePath.endsWith('.md') && !filePath.endsWith('.json')) return
 
     // Debounce: wait 100ms after last change
     const existing = this.debounceTimers.get(filePath)
@@ -800,6 +1238,14 @@ export class FilesystemSync {
       return
     }
 
+    // rounds/round-N/round-meta.json (orchestrator-first structured data)
+    const roundMetaMatch = relFromSessions.match(/rounds\/round-(\d+)\/round-meta\.json$/)
+    if (roundMetaMatch) {
+      const roundNumber = parseInt(roundMetaMatch[1] ?? '0', 10)
+      this.processRoundMeta(sessionId, roundNumber, filePath)
+      return
+    }
+
     // rounds/round-N/final.md
     const finalMatch = relFromSessions.match(/rounds\/round-(\d+)\/final\.md$/)
     if (finalMatch) {
@@ -821,6 +1267,14 @@ export class FilesystemSync {
     if (discourseMatch) {
       const roundNumber = parseInt(discourseMatch[1] ?? '0', 10)
       this.processGenericArtifact(sessionId, 'discourse', filePath, roundNumber)
+      return
+    }
+
+    // map/runs/run-N/map-meta.json (orchestrator-first structured data)
+    const mapMetaMatch = relFromSessions.match(/map\/runs\/run-(\d+)\/map-meta\.json$/)
+    if (mapMetaMatch) {
+      const runNumber = parseInt(mapMetaMatch[1] ?? '0', 10)
+      this.processMapMeta(sessionId, runNumber, filePath)
       return
     }
 
