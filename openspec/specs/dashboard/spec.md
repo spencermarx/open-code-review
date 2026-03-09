@@ -383,6 +383,37 @@ The dashboard server SHALL run a FilesystemSync service that parses markdown art
 - **WHEN** a full sync runs multiple times
 - **THEN** the resulting SQLite state SHALL be identical each time
 
+#### Scenario: Source latch for orchestrator data
+
+- **GIVEN** a `round-meta.json` or `map-meta.json` has been processed by the CLI (source = 'orchestrator')
+- **WHEN** FilesystemSync encounters the corresponding markdown artifact
+- **THEN** it SHALL skip re-parsing structured data (findings, sections, files)
+- **AND** it SHALL still store the raw markdown content in `markdown_artifacts` for display
+- **AND** user progress (`user_file_progress`, `user_finding_progress`) SHALL be preserved
+
+#### Scenario: Process round-meta.json
+
+- **GIVEN** a `round-meta.json` file exists in a round directory
+- **WHEN** FilesystemSync processes the session
+- **THEN** it SHALL parse the JSON, validate `schema_version`, and populate `review_rounds`, `reviewer_outputs`, and `review_findings` tables
+- **AND** existing user progress SHALL be stashed and restored after re-import
+- **AND** `source` SHALL be set to `'orchestrator'`
+
+#### Scenario: Process map-meta.json
+
+- **GIVEN** a `map-meta.json` file exists in a map run directory
+- **WHEN** FilesystemSync processes the session
+- **THEN** it SHALL parse the JSON, validate `schema_version`, and populate `map_runs`, `map_sections`, and `map_files` tables
+- **AND** existing user progress SHALL be stashed and restored after re-import
+- **AND** `source` SHALL be set to `'orchestrator'`
+
+#### Scenario: Structured files processed before markdown
+
+- **GIVEN** both `round-meta.json` and `final.md` exist in a round directory
+- **WHEN** FilesystemSync processes the round
+- **THEN** `round-meta.json` SHALL be processed BEFORE `final.md`
+- **AND** similarly, `map-meta.json` SHALL be processed BEFORE `map.md`
+
 ---
 
 ### Requirement: Zero Native Dependencies
@@ -775,6 +806,33 @@ The session detail Review tab SHALL display triage status badges next to each re
 
 ---
 
+### Requirement: Round Detail Page Status Dropdown
+
+The review round detail page SHALL include an inline triage status dropdown next to the round title, allowing users to update triage status without navigating back to the reviews table.
+
+#### Scenario: Status dropdown display
+
+- **GIVEN** the user is viewing a round detail page (`/sessions/:id/rounds/:round`)
+- **WHEN** the page loads
+- **THEN** a `<select>` dropdown SHALL appear next to the "Round N" title
+- **AND** the dropdown SHALL show the current triage status (defaulting to `needs_review` if no status is set)
+- **AND** the available options SHALL be: Needs Review, In Progress, Changes Made, Acknowledged, Dismissed
+
+#### Scenario: Update status from round detail
+
+- **GIVEN** the round detail page is displayed
+- **WHEN** the user selects a new status from the dropdown
+- **THEN** the client SHALL call `useUpdateRoundStatus()` mutation which sends `PATCH /api/rounds/:id/progress` with the new status
+- **AND** the dropdown SHALL reflect the new status immediately (optimistic update via React Query)
+
+#### Scenario: Consistency with reviews table
+
+- **GIVEN** the user updates status on the round detail page
+- **WHEN** the user navigates back to the reviews table
+- **THEN** the reviews table SHALL show the updated status for that round
+
+---
+
 ### Requirement: Enriched Review API Responses
 
 All review-related API endpoints SHALL include the round's triage progress in responses.
@@ -945,7 +1003,7 @@ The dashboard SHALL provide an "Ask the Team" chat feature that allows users to 
 
 ### Requirement: Address Feedback Popover
 
-The dashboard SHALL provide a capability-aware "Address Feedback" action on review round pages that allows users to initiate feedback processing.
+The dashboard SHALL provide a capability-aware "Address Feedback" action on review round pages that supports both in-dashboard execution and clipboard-based terminal workflows.
 
 #### Scenario: Button visibility
 
@@ -954,11 +1012,21 @@ The dashboard SHALL provide a capability-aware "Address Feedback" action on revi
 - **THEN** the "Address Feedback" button SHALL be visible
 - **AND** when `final.md` does not exist, the button SHALL be hidden
 
-#### Scenario: AI CLI available (run mode)
+#### Scenario: AI CLI available (run mode) — dual actions
 
 - **GIVEN** `aiCli.active` is truthy (an AI CLI adapter is detected)
 - **WHEN** the user clicks "Address Feedback"
-- **THEN** a popover SHALL appear showing: the review path, an optional notes textarea, a command preview (`ocr address <path> [--requirements <notes>]`), a security warning about AI execution, and a two-step confirmation flow (Run then Confirm)
+- **THEN** the popover SHALL display TWO action buttons side by side:
+  1. **"Run in Dashboard"** — spawns the command via Socket.IO `command:run` and navigates to `/commands` (existing behavior, with two-step confirmation flow)
+  2. **"Copy to Terminal"** — copies the `/ocr:address <path>` slash command (with optional notes) to the clipboard
+- **AND** the command preview SHALL show the slash command format (e.g., `/ocr:address .ocr/sessions/.../final.md`)
+- **AND** the "Copy to Terminal" button SHALL show a "Copied!" confirmation that auto-dismisses after 2 seconds
+
+#### Scenario: Copy to Terminal with notes
+
+- **GIVEN** the user has entered text in the notes textarea
+- **WHEN** the user clicks "Copy to Terminal"
+- **THEN** the copied text SHALL include the slash command path followed by `NOTES:` and the trimmed notes text on a new line
 
 #### Scenario: AI CLI unavailable (copy mode)
 
@@ -970,7 +1038,7 @@ The dashboard SHALL provide a capability-aware "Address Feedback" action on revi
 #### Scenario: Command execution
 
 - **GIVEN** the popover is in run mode and the user has entered optional notes
-- **WHEN** the user clicks "Run" and then "Confirm"
+- **WHEN** the user clicks "Run in Dashboard" and then "Confirm"
 - **THEN** the client SHALL emit a `command:run` Socket.IO event with the built command string
 - **AND** the client SHALL navigate to `/commands` to show the execution output
 
@@ -1033,4 +1101,34 @@ The dashboard server SHALL poll the SQLite database for external changes (writes
 - **THEN** Database Sync Watcher SHALL handle SQLite-originated changes (from `ocr state` CLI commands)
 - **AND** FilesystemSync SHALL handle filesystem-originated changes (markdown artifacts in `.ocr/sessions/`)
 - **AND** the two watchers SHALL NOT conflict or duplicate event emissions for the same logical change
+
+### Requirement: DbSyncWatcher Completion Event Processing
+
+The dashboard's `DbSyncWatcher` SHALL process `round_completed` and `map_completed` orchestration events from the CLI's SQLite database to populate artifact tables in real time.
+
+#### Scenario: Round completed event
+
+- **GIVEN** the dashboard is running and watching the CLI's database
+- **WHEN** a `round_completed` event is detected in `orchestration_events`
+- **THEN** the `DbSyncWatcher` SHALL:
+  - Parse the event's metadata JSON
+  - Check the source latch on the corresponding `review_rounds` row (skip if already `'orchestrator'`)
+  - Insert or update the `review_rounds` row with derived counts and `source = 'orchestrator'`
+  - Emit a `review:updated` Socket.IO event
+
+#### Scenario: Map completed event
+
+- **GIVEN** the dashboard is running and watching the CLI's database
+- **WHEN** a `map_completed` event is detected in `orchestration_events`
+- **THEN** the `DbSyncWatcher` SHALL:
+  - Parse the event's metadata JSON
+  - Check the source latch on the corresponding `map_runs` row (skip if already `'orchestrator'`)
+  - Insert or update the `map_runs` row with derived counts and `source = 'orchestrator'`
+  - Emit a `map:updated` Socket.IO event
+
+#### Scenario: Idempotent event processing
+
+- **GIVEN** the same completion event is processed multiple times
+- **WHEN** the source latch shows `'orchestrator'` already set
+- **THEN** the event SHALL be skipped without error
 

@@ -640,3 +640,180 @@ The dashboard code SHALL NOT be loaded unless the user runs `ocr dashboard`. Com
 
 ---
 
+### Requirement: OCR State Round-Complete Command
+
+The `ocr state round-complete` CLI subcommand SHALL accept structured review round data, validate it, optionally write `round-meta.json`, and record a `round_completed` orchestration event.
+
+#### Scenario: Stdin mode (recommended)
+
+- **GIVEN** a review round has completed
+- **WHEN** the orchestrator pipes structured JSON to `ocr state round-complete --stdin`
+- **THEN** the CLI SHALL:
+  - Parse and validate the JSON against the `RoundMeta` schema (`schema_version`, `verdict`, `reviewers` array with findings)
+  - Derive finding counts from the findings array (never trust self-reported counts)
+  - Write `round-meta.json` to the correct session round directory (`{session_dir}/rounds/round-{n}/round-meta.json`)
+  - Insert a `round_completed` event into `orchestration_events` with metadata containing derived counts and `source: "orchestrator"`
+  - Return the session ID, round number, and written file path
+
+#### Scenario: File mode
+
+- **GIVEN** a `round-meta.json` file already exists on disk
+- **WHEN** the user runs `ocr state round-complete --file <path>`
+- **THEN** the CLI SHALL read and validate the file, record the orchestration event, but NOT write the file (it already exists)
+- **AND** the returned result SHALL have `metaPath` as undefined
+
+#### Scenario: Auto-detect session and round
+
+- **GIVEN** neither `--session-id` nor `--round` is provided
+- **WHEN** `ocr state round-complete` runs
+- **THEN** the CLI SHALL auto-detect the active session and use its `current_round`
+
+#### Scenario: Invalid schema
+
+- **GIVEN** the piped JSON has `schema_version` other than 1 or is missing required fields
+- **WHEN** `ocr state round-complete --stdin` processes the input
+- **THEN** the CLI SHALL throw a validation error with a descriptive message
+
+#### Scenario: Mutual exclusion
+
+- **WHEN** neither `--file` nor `--stdin` is provided, or both are provided
+- **THEN** the CLI SHALL exit with an error explaining that exactly one source is required
+
+---
+
+### Requirement: OCR State Map-Complete Command
+
+The `ocr state map-complete` CLI subcommand SHALL accept structured map data, validate it, optionally write `map-meta.json`, and record a `map_completed` orchestration event. This command is parallel to `round-complete` for map workflows.
+
+#### Scenario: Stdin mode (recommended)
+
+- **GIVEN** a map run has completed
+- **WHEN** the orchestrator pipes structured JSON to `ocr state map-complete --stdin`
+- **THEN** the CLI SHALL:
+  - Parse and validate the JSON against the `MapMeta` schema (`schema_version`, `sections` array with files, optional `dependencies` array)
+  - Derive section and file counts from the sections array
+  - Write `map-meta.json` to the correct session map run directory (`{session_dir}/map/runs/run-{n}/map-meta.json`)
+  - Insert a `map_completed` event into `orchestration_events` with metadata containing derived counts and `source: "orchestrator"`
+  - Return the session ID, map run number, and written file path
+
+#### Scenario: File mode
+
+- **GIVEN** a `map-meta.json` file already exists on disk
+- **WHEN** the user runs `ocr state map-complete --file <path>`
+- **THEN** the CLI SHALL read and validate the file, record the orchestration event, but NOT write the file
+- **AND** the returned result SHALL have `metaPath` as undefined
+
+#### Scenario: Auto-detect session and map run
+
+- **GIVEN** neither `--session-id` nor `--map-run` is provided
+- **WHEN** `ocr state map-complete` runs
+- **THEN** the CLI SHALL auto-detect the active session and use its `current_map_run`
+
+#### Scenario: Invalid schema
+
+- **GIVEN** the piped JSON has invalid `schema_version` or is missing required fields
+- **WHEN** `ocr state map-complete --stdin` processes the input
+- **THEN** the CLI SHALL throw a validation error with a descriptive message
+
+#### Scenario: Mutual exclusion
+
+- **WHEN** neither `--file` nor `--stdin` is provided, or both are provided
+- **THEN** the CLI SHALL exit with an error explaining that exactly one source is required
+
+---
+
+### Requirement: Completion Command Shared Internals
+
+The `round-complete` and `map-complete` subcommands SHALL share common internal helpers to avoid code duplication.
+
+#### Scenario: Shared JSON reading
+
+- **WHEN** either completion command reads input
+- **THEN** both SHALL use the same `readJsonFromSource` helper that handles file-read (with existence check) and stdin-data passthrough
+
+#### Scenario: Shared JSON parsing
+
+- **WHEN** either completion command parses JSON
+- **THEN** both SHALL use the same `parseRawJson` helper with descriptive error labels (file path or "stdin")
+
+#### Scenario: Shared session resolution
+
+- **WHEN** either completion command resolves the target session
+- **THEN** both SHALL use the same `resolveSessionForCompletion` helper that supports explicit `--session-id` or auto-detection of the active session
+
+---
+
+### Requirement: CLI Update Notifier
+
+The CLI SHALL perform a non-blocking background check for newer versions on npm when human-facing commands run, and print a styled notification to stderr after command output completes.
+
+#### Scenario: Update available
+
+- **GIVEN** user runs a human-facing CLI command (`init`, `update`, `doctor`, `dashboard`, or `progress`)
+- **WHEN** the npm registry reports a newer version than the installed version
+- **THEN** after the command output completes, a styled notification SHALL be printed to stderr containing:
+  - The current version and the latest version
+  - A copy-pasteable update command: `npm i -g @open-code-review/cli@latest && ocr update`
+- **AND** the notification SHALL NOT interleave with command stdout/stderr
+
+#### Scenario: Already on latest version
+
+- **GIVEN** the installed version matches or exceeds the latest npm version
+- **WHEN** a human-facing command runs
+- **THEN** no update notification SHALL be printed
+
+#### Scenario: Human-facing command scope
+
+- **GIVEN** the CLI is invoked
+- **WHEN** the subcommand is one of: `init`, `update`, `doctor`, `dashboard`, `progress`
+- **THEN** the update check SHALL fire
+- **AND** when the subcommand is `state` (or any other AI-invoked command), the update check SHALL NOT fire
+
+#### Scenario: Non-blocking execution
+
+- **GIVEN** a human-facing command is invoked
+- **WHEN** the update check fires
+- **THEN** the check SHALL run as a background promise that starts before `parseAsync()` and resolves after command output
+- **AND** a 500ms race timeout SHALL ensure the CLI exits promptly even if the check is slow
+- **AND** `program.parse()` SHALL be replaced with `await program.parseAsync()` to properly await async action handlers
+
+#### Scenario: Result caching
+
+- **GIVEN** a successful registry fetch
+- **WHEN** the result is obtained
+- **THEN** the version SHALL be cached at `~/.ocr/update-check.json` with a timestamp
+- **AND** subsequent checks within a 4-hour TTL SHALL use the cached version without fetching
+
+#### Scenario: Cache expired
+
+- **GIVEN** the cached result is older than 4 hours
+- **WHEN** a human-facing command runs
+- **THEN** a fresh fetch SHALL be made to the npm registry
+- **AND** the cache SHALL be updated with the new result
+
+#### Scenario: CI environment suppression
+
+- **GIVEN** the `CI` environment variable is set
+- **WHEN** a human-facing command runs
+- **THEN** the update check SHALL be skipped entirely (no fetch, no cache read)
+
+#### Scenario: Explicit suppression
+
+- **GIVEN** the `OCR_NO_UPDATE_CHECK` environment variable is set
+- **WHEN** a human-facing command runs
+- **THEN** the update check SHALL be skipped entirely
+
+#### Scenario: Network error resilience
+
+- **GIVEN** the npm registry fetch fails (timeout, DNS error, network unreachable)
+- **WHEN** the check runs
+- **THEN** no notification SHALL be printed
+- **AND** a cache entry with `latestVersion: null` SHALL be written to prevent repeated failed fetches within the TTL
+
+#### Scenario: Fetch timeout
+
+- **GIVEN** the registry does not respond within 3 seconds
+- **WHEN** the fetch is in progress
+- **THEN** the fetch SHALL be aborted via `AbortSignal.timeout(3000)`
+- **AND** the check SHALL return null (no notification)
+

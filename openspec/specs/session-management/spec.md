@@ -234,12 +234,15 @@ The system SHALL store discourse and synthesis outputs inside round directories,
 - **WHEN** final review is saved
 - **THEN** the file SHALL be saved to `rounds/round-2/final.md`
 
+#### Scenario: Round metadata output location
+- **GIVEN** the synthesis phase completes for round 1
+- **WHEN** the orchestrator pipes structured data to `ocr state round-complete --stdin`
+- **THEN** the CLI SHALL write `rounds/round-1/round-meta.json` with validated structured review data
+
 #### Scenario: Shared context remains at root
 - **GIVEN** a multi-round session exists
 - **WHEN** context is examined
 - **THEN** `discovered-standards.md`, `requirements.md`, and `context.md` SHALL remain at session root (shared across all rounds)
-
----
 
 ### Requirement: State Reconciliation
 
@@ -317,8 +320,8 @@ The system SHALL store review map artifacts in a dedicated subdirectory within t
 - **GIVEN** a review map workflow completes
 - **WHEN** artifacts are saved
 - **THEN** the `map/runs/run-{n}/` directory SHALL contain:
-  - `map.md` — Final rendered review map
-  - `files.json` — Canonical file list with section assignments (optional)
+  - `map-meta.json` — Structured map data (written by CLI via `ocr state map-complete --stdin`)
+  - `map.md` — Final rendered review map (presentation artifact, written by orchestrator)
 
 #### Scenario: Map coexistence with reviews
 - **GIVEN** a session has both map and review artifacts
@@ -333,7 +336,7 @@ The system SHALL store review map artifacts in a dedicated subdirectory within t
 - **WHEN** user runs `/ocr:map` again on the same session
 - **THEN** the system SHALL:
   - Create `map/runs/run-2/` directory
-  - Update `current_map_run` to 2 in `state.json`
+  - Update `current_map_run` to 2 in SQLite
   - Preserve all `run-1/` artifacts unchanged
 
 #### Scenario: Map run history preservation
