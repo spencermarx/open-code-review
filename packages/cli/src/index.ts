@@ -6,6 +6,7 @@ import { stateCommand } from "./commands/state";
 import { updateCommand } from "./commands/update";
 import { dashboardCommand } from "./commands/dashboard";
 import { doctorCommand } from "./commands/doctor";
+import { reviewersCommand } from "./commands/reviewers";
 import { checkForUpdate, printUpdateNotification } from "./lib/update-check.js";
 
 // Injected at build time by esbuild `define`. Falls back to package.json
@@ -36,6 +37,7 @@ program.addCommand(stateCommand);
 program.addCommand(updateCommand);
 program.addCommand(dashboardCommand);
 program.addCommand(doctorCommand);
+program.addCommand(reviewersCommand);
 
 await program.parseAsync();
 

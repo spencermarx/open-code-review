@@ -11,6 +11,7 @@ import { join, dirname } from "node:path";
 import { createRequire } from "node:module";
 import type { AIToolConfig } from "./config";
 import { ensureGitignore } from "./gitignore.js";
+import type { ReviewersMeta, ReviewerMeta, ReviewerTier } from "./state/types.js";
 
 const require = createRequire(import.meta.url);
 
@@ -166,6 +167,163 @@ function installCommandsForTool(
   }
 }
 
+// ── Built-in reviewer metadata for static generation ──
+
+const BUILTIN_ICON_MAP: Record<string, string> = {
+  architect: "blocks",
+  fullstack: "layers",
+  reliability: "activity",
+  "staff-engineer": "compass",
+  principal: "crown",
+  frontend: "layout",
+  backend: "server",
+  infrastructure: "cloud",
+  performance: "gauge",
+  accessibility: "accessibility",
+  data: "database",
+  devops: "rocket",
+  dx: "terminal",
+  mobile: "smartphone",
+  security: "shield-alert",
+  quality: "sparkles",
+  testing: "test-tubes",
+  ai: "bot",
+  "docs-writer": "file-text",
+};
+
+const HOLISTIC_IDS = new Set(["architect", "fullstack", "reliability", "staff-engineer", "principal"]);
+const SPECIALIST_IDS = new Set([
+  "frontend", "backend", "infrastructure", "performance", "accessibility",
+  "data", "devops", "dx", "mobile", "security", "quality", "testing", "ai", "docs-writer",
+]);
+const PERSONA_IDS = new Set([
+  "martin-fowler", "kent-beck", "john-ousterhout", "anders-hejlsberg",
+  "vladimir-khorikov", "kent-dodds", "tanner-linsley", "kamil-mysliwiec",
+  "sandi-metz", "rich-hickey",
+]);
+
+function classifyTier(id: string): ReviewerTier {
+  if (PERSONA_IDS.has(id)) return "persona";
+  if (HOLISTIC_IDS.has(id)) return "holistic";
+  if (SPECIALIST_IDS.has(id)) return "specialist";
+  return "custom";
+}
+
+function extractReviewerName(content: string): string {
+  const match = content.match(/^#\s+(.+?)(?:\s+—\s+Reviewer|\s+Reviewer)\s*$/m);
+  if (match?.[1]) return match[1];
+  const titleMatch = content.match(/^#\s+(.+)$/m);
+  return titleMatch?.[1]?.replace(/\s*Reviewer\s*$/, "").trim() ?? "Unknown";
+}
+
+function extractReviewerDescription(content: string): string {
+  // First non-heading, non-blockquote paragraph
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(">")) continue;
+    if (trimmed.startsWith("You are a **") || trimmed.startsWith("You are reviewing")) {
+      return trimmed.replace(/\*\*/g, "").replace(/^You are a /, "").replace(/^You are reviewing code through the lens of .*?\.\s*/, "").trim();
+    }
+  }
+  return "";
+}
+
+function extractFocusAreas(content: string): string[] {
+  const areas: string[] = [];
+  const focusMatch = content.match(/## Your Focus Areas\n([\s\S]*?)(?=\n##|\n---|\z)/);
+  if (focusMatch?.[1]) {
+    const bullets = focusMatch[1].match(/- \*\*(.+?)\*\*/g);
+    if (bullets) {
+      for (const b of bullets) {
+        const m = b.match(/- \*\*(.+?)\*\*/);
+        if (m?.[1]) areas.push(m[1]);
+      }
+    }
+  }
+  return areas;
+}
+
+function extractPersonaFields(content: string): { known_for?: string; philosophy?: string } {
+  const knownMatch = content.match(/>\s*\*\*Known for\*\*:\s*(.+)/);
+  const philMatch = content.match(/>\s*\*\*Philosophy\*\*:\s*([\s\S]*?)(?=\n(?!>)|\n\n)/);
+
+  const result: { known_for?: string; philosophy?: string } = {};
+  if (knownMatch?.[1]) result.known_for = knownMatch[1].trim();
+  if (philMatch?.[1]) {
+    result.philosophy = philMatch[1]
+      .split("\n")
+      .map((l) => l.replace(/^>\s*/, "").trim())
+      .join(" ")
+      .trim();
+  }
+  return result;
+}
+
+export function generateReviewersMeta(
+  reviewersDir: string,
+  configPath: string,
+): ReviewersMeta | null {
+  if (!existsSync(reviewersDir)) return null;
+
+  const files = readdirSync(reviewersDir).filter((f) => f.endsWith(".md"));
+  if (files.length === 0) return null;
+
+  // Read default_team from config
+  const defaultTeamIds = new Set<string>();
+  if (existsSync(configPath)) {
+    try {
+      const configContent = readFileSync(configPath, "utf-8");
+      const teamMatch = configContent.match(/default_team:\s*\n((?:\s+\w[\w-]*:\s*\d+\s*(?:#[^\n]*)?\n?)*)/);
+      if (teamMatch?.[1]) {
+        const entries = teamMatch[1].matchAll(/\s+([\w-]+):\s*\d+/g);
+        for (const entry of entries) {
+          if (entry[1]) defaultTeamIds.add(entry[1]);
+        }
+      }
+    } catch {
+      // Ignore config parse errors
+    }
+  }
+
+  const reviewers: ReviewerMeta[] = [];
+  for (const file of files) {
+    const id = file.replace(/\.md$/, "");
+    try {
+      const content = readFileSync(join(reviewersDir, file), "utf-8");
+      const tier = classifyTier(id);
+      const isBuiltin = HOLISTIC_IDS.has(id) || SPECIALIST_IDS.has(id) || PERSONA_IDS.has(id);
+
+      const reviewer: ReviewerMeta = {
+        id,
+        name: extractReviewerName(content),
+        tier,
+        icon: BUILTIN_ICON_MAP[id] ?? (tier === "persona" ? "brain" : "user"),
+        description: extractReviewerDescription(content),
+        focus_areas: extractFocusAreas(content),
+        is_default: defaultTeamIds.has(id),
+        is_builtin: isBuiltin,
+      };
+
+      if (tier === "persona") {
+        const persona = extractPersonaFields(content);
+        if (persona.known_for) reviewer.known_for = persona.known_for;
+        if (persona.philosophy) reviewer.philosophy = persona.philosophy;
+      }
+
+      reviewers.push(reviewer);
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  return {
+    schema_version: 1,
+    generated_at: new Date().toISOString(),
+    reviewers,
+  };
+}
+
 export function installForTool(
   tool: AIToolConfig,
   targetDir: string,
@@ -264,6 +422,17 @@ export function installForTool(
         warnings.push(`Could not restore reviewer ${file}: ${msg}`);
       }
     }
+  }
+
+  // Generate reviewers-meta.json for dashboard (if not already present or if reviewers changed)
+  const metaPath = join(ocrDir, "reviewers-meta.json");
+  try {
+    const meta = generateReviewersMeta(reviewersDir, configPath);
+    if (meta) {
+      writeFileSync(metaPath, JSON.stringify(meta, null, 2) + "\n");
+    }
+  } catch {
+    // Non-fatal — user can run /ocr:sync-reviewers manually
   }
 
   // Install commands using tool-specific strategy

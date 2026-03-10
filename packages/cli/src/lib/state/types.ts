@@ -157,6 +157,31 @@ export type MapCompleteResult = {
   metaPath?: string;
 };
 
+// ── Reviewers Meta (structured reviewer catalog for dashboard) ──
+
+export type ReviewerTier = "holistic" | "specialist" | "persona" | "custom";
+
+export type ReviewerMeta = {
+  id: string;
+  name: string;
+  tier: ReviewerTier;
+  icon: string;
+  description: string;
+  focus_areas: string[];
+  is_default: boolean;
+  is_builtin: boolean;
+  known_for?: string;
+  philosophy?: string;
+};
+
+export type ReviewersMeta = {
+  schema_version: number;
+  generated_at: string;
+  reviewers: ReviewerMeta[];
+};
+
+// ── Show Result ──
+
 export type ShowResult = {
   session: {
     id: string;
