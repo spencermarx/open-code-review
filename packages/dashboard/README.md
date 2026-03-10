@@ -33,7 +33,7 @@ ocr dashboard --no-open        # Don't auto-open browser
 - **Team page** — Browse all 28 reviewer personas grouped by tier (Generalists, Specialists, Famous Engineers, Custom). View full prompts with focus areas and persona details. Create new reviewers or sync metadata directly from the dashboard.
 
 <p align="center">
-  <img src="../../assets/ocr-tool-famous-engineer-reviewers.png" alt="Famous Engineer reviewer personas on the Team page" width="700" />
+  <img src="../../assets/ocr-tool-manage-reviewers-team.png" alt="OCR Team page for managing reviewer personas" width="700" />
 </p>
 
 - **Review detail** — Read individual reviewer findings, discourse, and final synthesis with rendered markdown

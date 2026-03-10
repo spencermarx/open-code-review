@@ -155,6 +155,10 @@ Two posting modes from the review round page:
 
 The **Team** page lets you browse all 28 reviewer personas grouped by tier (Generalists, Specialists, Famous Engineers, Custom). View full prompts, focus areas, and persona details. Create new reviewers or sync metadata — all from the dashboard.
 
+<p align="center">
+  <img src="assets/ocr-tool-manage-reviewers-team.png" alt="OCR Team page for managing reviewer personas" width="700" />
+</p>
+
 ### Address Feedback
 
 After reviewing findings, address them directly. Copy a portable AI prompt into any coding tool, or — with Claude Code or OpenCode detected — run an agent directly from the dashboard to corroborate, validate, and implement changes.
