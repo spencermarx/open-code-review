@@ -114,30 +114,31 @@ function enrichSession(db: Database, session: SessionRow): EnrichedSession {
   const hasReview = session.workflow_type === 'review' || session.current_round > 0 || rounds.length > 0
   const hasMap = session.workflow_type === 'map' || session.current_map_run > 1 || mapRuns.length > 0
 
-  // For the primary workflow (matching workflow_type), use the CLI's authoritative phase_number.
-  // For the secondary workflow, derive from artifacts.
+  // Use the higher of the CLI's authoritative phase_number and the artifact-derived
+  // phase. The CLI may be ahead (mid-transition) or behind (crashed, pre-orchestrator
+  // sessions, imported sessions). Taking the max handles both cases correctly.
   let reviewPhaseNumber = 0
   let reviewPhase = ''
   if (hasReview) {
+    const derived = deriveReviewPhase(db, session.id)
     if (session.workflow_type === 'review') {
-      reviewPhaseNumber = session.phase_number
-      reviewPhase = session.current_phase
+      reviewPhaseNumber = Math.max(session.phase_number, derived)
     } else {
-      reviewPhaseNumber = deriveReviewPhase(db, session.id)
-      reviewPhase = REVIEW_PHASE_NAMES[reviewPhaseNumber - 1] ?? 'context'
+      reviewPhaseNumber = derived
     }
+    reviewPhase = REVIEW_PHASE_NAMES[reviewPhaseNumber - 1] ?? 'context'
   }
 
   let mapPhaseNumber = 0
   let mapPhase = ''
   if (hasMap) {
+    const derived = deriveMapPhase(db, session.id)
     if (session.workflow_type === 'map') {
-      mapPhaseNumber = session.phase_number
-      mapPhase = session.current_phase
+      mapPhaseNumber = Math.max(session.phase_number, derived)
     } else {
-      mapPhaseNumber = deriveMapPhase(db, session.id)
-      mapPhase = MAP_PHASE_NAMES[mapPhaseNumber - 1] ?? 'map-context'
+      mapPhaseNumber = derived
     }
+    mapPhase = MAP_PHASE_NAMES[mapPhaseNumber - 1] ?? 'map-context'
   }
 
   // Latest review verdict from the most recent completed round

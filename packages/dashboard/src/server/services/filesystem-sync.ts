@@ -475,10 +475,10 @@ export class FilesystemSync {
     // but crashed or was cancelled before calling `ocr state transition`.
     const session = queryFirst(
       this.db,
-      'SELECT current_phase, workflow_type FROM sessions WHERE id = ?',
+      'SELECT current_phase, phase_number, workflow_type FROM sessions WHERE id = ?',
       [sessionId],
     )
-    if (session && session['workflow_type'] === 'map' && session['current_phase'] !== 'complete') {
+    if (session && session['workflow_type'] === 'map' && (session['current_phase'] !== 'complete' || (session['phase_number'] as number) < 6)) {
       this.db.run(
         `UPDATE sessions SET current_phase = 'complete', phase_number = 6, status = 'closed', updated_at = datetime('now')
          WHERE id = ?`,
@@ -1106,7 +1106,7 @@ export class FilesystemSync {
       'SELECT current_phase, phase_number, status FROM sessions WHERE id = ?',
       [sessionId],
     )
-    if (session && session['current_phase'] !== 'complete') {
+    if (session && (session['current_phase'] !== 'complete' || (session['phase_number'] as number) < 8)) {
       this.db.run(
         `UPDATE sessions SET current_phase = 'complete', phase_number = 8, status = 'closed', updated_at = datetime('now')
          WHERE id = ?`,
