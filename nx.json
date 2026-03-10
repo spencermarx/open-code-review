@@ -19,6 +19,9 @@
     "test": {
       "inputs": ["default", "^production"],
       "cache": true
+    },
+    "nx-release-publish": {
+      "dependsOn": ["build"]
     }
   },
   "release": {

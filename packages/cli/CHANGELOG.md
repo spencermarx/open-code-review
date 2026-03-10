@@ -1,3 +1,14 @@
+## 1.8.3 (2026-03-10)
+
+### 🩹 Fixes
+
+- **cli:** fix `ocr --version` reporting stale version — bundle was not rebuilt before 1.8.1 publish
+
+### ❤️ Thank You
+
+- Spencer Marx
+- claude-flow @agentic-org
+
 ## 1.8.1 (2026-03-10)
 
 ### 🩹 Fixes

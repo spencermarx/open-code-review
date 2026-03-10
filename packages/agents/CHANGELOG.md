@@ -1,3 +1,7 @@
+## 1.8.3 (2026-03-10)
+
+This version has no agents-specific changes. Bumped for version alignment.
+
 ## 1.8.1 (2026-03-10)
 
 ### 🩹 Fixes
