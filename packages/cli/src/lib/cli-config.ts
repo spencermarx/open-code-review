@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import chalk from "chalk";
 import type { AIToolId } from "./config";
 
 /**
@@ -81,4 +82,56 @@ export function setConfiguredToolIds(
     ...existing,
     configuredTools: toolIds,
   });
+}
+
+// ── Version stamping ──
+
+/**
+ * Write the running CLI version into .ocr/cli-config.json.
+ * Called after successful `ocr init` and `ocr update`.
+ */
+export function stampCliVersion(targetDir: string, version: string): boolean {
+  const existing = loadCliConfig(targetDir) ?? { configuredTools: [] };
+  return saveCliConfig(targetDir, { ...existing, cliVersion: version });
+}
+
+// ── Local artifact drift detection ──
+
+export type VersionDrift = {
+  storedVersion: string;
+  runningVersion: string;
+};
+
+/**
+ * Compare the CLI version stamped in .ocr/cli-config.json against the
+ * currently running CLI version. Returns drift info when they differ,
+ * or null when up-to-date or when no stamp exists (first-time users).
+ */
+export function checkLocalArtifactVersion(
+  targetDir: string,
+  runningVersion: string,
+): VersionDrift | null {
+  const config = loadCliConfig(targetDir);
+  if (!config?.cliVersion) return null; // no stamp yet — don't nag
+  if (config.cliVersion === runningVersion) return null;
+  return { storedVersion: config.cliVersion, runningVersion };
+}
+
+/**
+ * Print a styled one-line hint to stderr when local artifacts are stale.
+ */
+export function printLocalVersionHint(drift: VersionDrift): void {
+  const msg =
+    chalk.yellow("  Local .ocr/ files were installed with ") +
+    chalk.dim(`v${drift.storedVersion}`) +
+    chalk.yellow(" but you're running ") +
+    chalk.green(`v${drift.runningVersion}`) +
+    chalk.yellow(".");
+
+  const hint =
+    chalk.dim("  Run ") +
+    chalk.bold("ocr update") +
+    chalk.dim(" to refresh local assets.");
+
+  process.stderr.write(`\n${msg}\n${hint}\n\n`);
 }
