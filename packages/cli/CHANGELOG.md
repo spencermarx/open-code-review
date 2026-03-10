@@ -1,3 +1,18 @@
+## 1.8.4 (2026-03-10)
+
+### 🚀 Features
+
+- **cli:** add `synthesis_counts` to `round-meta.json` schema — deduplicated post-synthesis counts preferred over derived per-reviewer counts
+
+### 🧪 Tests
+
+- **cli:** add `synthesis_counts` preference and fallback tests for `computeRoundCounts`
+
+### ❤️ Thank You
+
+- Spencer Marx
+- claude-flow @agentic-org
+
 ## 1.8.3 (2026-03-10)
 
 ### 🩹 Fixes

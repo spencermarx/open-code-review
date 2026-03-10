@@ -1,3 +1,14 @@
+## 1.8.4 (2026-03-10)
+
+### 🚀 Features
+
+- **agents:** update orchestrator instructions to require `synthesis_counts` in round-complete JSON for accurate dashboard display
+
+### ❤️ Thank You
+
+- Spencer Marx
+- claude-flow @agentic-org
+
 ## 1.8.3 (2026-03-10)
 
 This version has no agents-specific changes. Bumped for version alignment.

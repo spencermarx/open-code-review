@@ -77,10 +77,24 @@ export type RoundMetaReviewer = {
   findings: RoundMetaFinding[];
 };
 
+/**
+ * Explicit post-synthesis counts set by the orchestrator.
+ * These reflect the deduplicated, final counts from `final.md` and take
+ * precedence over the per-reviewer derived counts (which double-count
+ * findings flagged by multiple reviewers).
+ */
+export type SynthesisCounts = {
+  blockers: number;
+  should_fix: number;
+  suggestions: number;
+};
+
 export type RoundMeta = {
   schema_version: number;
   verdict: string;
   reviewers: RoundMetaReviewer[];
+  /** Post-synthesis counts matching final.md. Preferred over derived counts. */
+  synthesis_counts?: SynthesisCounts;
 };
 
 export type RoundCompleteParams =

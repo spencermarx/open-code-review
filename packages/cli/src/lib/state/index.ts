@@ -34,6 +34,7 @@ import type {
   RoundCompleteResult,
   RoundMeta,
   RoundMetaFinding,
+  SynthesisCounts,
   MapCompleteParams,
   MapCompleteResult,
   MapMeta,
@@ -48,6 +49,7 @@ export type {
   RoundCompleteResult,
   RoundMeta,
   RoundMetaFinding,
+  SynthesisCounts,
   FindingCategory,
   FindingSeverity,
   WorkflowType,
@@ -446,12 +448,37 @@ function validateRoundMeta(meta: unknown): RoundMeta {
     }
   }
 
+  // Validate optional synthesis_counts
+  if (obj.synthesis_counts !== undefined) {
+    if (!obj.synthesis_counts || typeof obj.synthesis_counts !== "object") {
+      throw new Error("synthesis_counts must be an object");
+    }
+    const sc = obj.synthesis_counts as Record<string, unknown>;
+    if (typeof sc.blockers !== "number" || sc.blockers < 0) {
+      throw new Error("synthesis_counts.blockers must be a non-negative number");
+    }
+    if (typeof sc.should_fix !== "number" || sc.should_fix < 0) {
+      throw new Error("synthesis_counts.should_fix must be a non-negative number");
+    }
+    if (typeof sc.suggestions !== "number" || sc.suggestions < 0) {
+      throw new Error("synthesis_counts.suggestions must be a non-negative number");
+    }
+  }
+
   return meta as RoundMeta;
 }
 
 /**
- * Compute derived counts from the findings array in a RoundMeta.
- * Counts are NEVER self-reported — always derived from the data.
+ * Compute counts for a RoundMeta.
+ *
+ * When `synthesis_counts` is present, those values are preferred because they
+ * reflect the **deduplicated, post-synthesis** totals matching `final.md`.
+ * The per-reviewer findings array can contain duplicates (the same issue
+ * flagged by multiple reviewers), so derived counts may exceed the actual
+ * number of unique items in the synthesis.
+ *
+ * `reviewerCount` and `totalFindingCount` are always derived from the data
+ * (they aren't affected by deduplication).
  *
  * Note: `style` findings are intentionally included only in `totalFindingCount`
  * and do not have a separate named counter. The dashboard displays them as part
@@ -469,10 +496,13 @@ export function computeRoundCounts(meta: RoundMeta): {
     allFindings.push(...reviewer.findings);
   }
 
+  // Prefer explicit synthesis counts (deduplicated) over derived counts
+  const sc = meta.synthesis_counts;
+
   return {
-    blockerCount: allFindings.filter((f) => f.category === "blocker").length,
-    shouldFixCount: allFindings.filter((f) => f.category === "should_fix").length,
-    suggestionCount: allFindings.filter((f) => f.category === "suggestion").length,
+    blockerCount: sc ? sc.blockers : allFindings.filter((f) => f.category === "blocker").length,
+    shouldFixCount: sc ? sc.should_fix : allFindings.filter((f) => f.category === "should_fix").length,
+    suggestionCount: sc ? sc.suggestions : allFindings.filter((f) => f.category === "suggestion").length,
     reviewerCount: meta.reviewers.length,
     totalFindingCount: allFindings.length,
   };

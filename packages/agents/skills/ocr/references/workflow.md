@@ -649,11 +649,18 @@ See `references/discourse.md` for detailed instructions.
 
    > **CRITICAL — Category reflects synthesis, not original reviewer tags**: The `category` field on each finding must match the final synthesized classification — NOT the category the individual reviewer originally used. If discourse or synthesis promoted a `should_fix` to `blocker` (or demoted a `blocker` to `should_fix`), the JSON you pipe here MUST use the **promoted/demoted category**. The dashboard derives all counts from these categories. If they don't match `final.md`, the dashboard will show wrong numbers.
 
+   > **CRITICAL — `synthesis_counts` must match `final.md`**: The `synthesis_counts` object contains the **deduplicated** counts of items in each section of `final.md`. Multiple reviewers often flag the same issue independently, so the per-reviewer findings array will have more entries than `final.md` lists. Count the actual numbered items under each section heading in your synthesized review (`## Blockers`, `## Should Fix`, `## Suggestions`) and set those counts here. The dashboard uses `synthesis_counts` when present, falling back to derived counts only for older reviews.
+
    ```bash
    cat <<'JSON' | ocr state round-complete --stdin
    {
      "schema_version": 1,
      "verdict": "REQUEST CHANGES",
+     "synthesis_counts": {
+       "blockers": 1,
+       "should_fix": 3,
+       "suggestions": 5
+     },
      "reviewers": [
        {
          "type": "principal",
@@ -681,10 +688,12 @@ See `references/discourse.md` for detailed instructions.
    ```
 
    The CLI will:
-   1. Validate the JSON schema (schema_version, verdict, reviewers, findings)
+   1. Validate the JSON schema (schema_version, verdict, synthesis_counts, reviewers, findings)
    2. Write `round-meta.json` to `{session_dir}/rounds/round-{n}/round-meta.json`
-   3. Compute derived counts from the findings array (never self-reported)
+   3. Use `synthesis_counts` for dashboard display (falls back to derived counts if absent)
    4. Record a `round_completed` orchestration event in SQLite
+
+   **`synthesis_counts`**: Count the actual numbered items (`### 1.`, `### 2.`, etc.) under each section of `final.md`. This is the **deduplicated** count after merging cross-reviewer duplicates.
 
    **Finding categories**: `"blocker"` | `"should_fix"` | `"suggestion"` | `"style"`
    **Finding severity**: `"critical"` | `"high"` | `"medium"` | `"low"` | `"info"`
