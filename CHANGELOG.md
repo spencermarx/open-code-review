@@ -1,3 +1,20 @@
+## 1.8.0 (2026-03-10)
+
+### 🚀 Features
+
+- **cli:** add local artifact version drift detection — warns when `.ocr/` files were installed by an older CLI version and suggests `ocr update` ([5520d50](https://github.com/spencermarx/open-code-review/commit/5520d50))
+- **cli:** extract shared `CLI_VERSION` module for consistent version access across commands ([5520d50](https://github.com/spencermarx/open-code-review/commit/5520d50))
+- **dashboard:** clean up server startup logs — aligned labels, tilde-shortened paths, removed noisy socket/auth banner ([5520d50](https://github.com/spencermarx/open-code-review/commit/5520d50))
+
+### 📖 Docs
+
+- add Team page screenshot to root and dashboard READMEs ([71720a4](https://github.com/spencermarx/open-code-review/commit/71720a4))
+
+### ❤️ Thank You
+
+- Spencer Marx
+- claude-flow @agentic-org
+
 ## 1.7.0 (2026-03-10)
 
 ### 🚀 Features
