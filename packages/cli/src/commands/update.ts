@@ -12,7 +12,8 @@ import {
 import { injectIntoProjectFiles } from "../lib/injector.js";
 import { ensureGitignore } from "../lib/gitignore.js";
 import { requireOcrSetup } from "../lib/guards.js";
-import { getConfiguredToolIds } from "../lib/cli-config.js";
+import { getConfiguredToolIds, stampCliVersion } from "../lib/cli-config.js";
+import { CLI_VERSION } from "../lib/version.js";
 
 type UpdateOptions = {
   commands?: boolean;
@@ -216,6 +217,8 @@ export const updateCommand = new Command("update")
     if (options.dryRun) {
       console.log(chalk.dim("  Run without --dry-run to apply changes."));
     } else {
+      // Stamp the running CLI version so drift detection knows artifacts are current
+      stampCliVersion(targetDir, CLI_VERSION);
       console.log(chalk.green("  ✓ Update complete"));
     }
     console.log();

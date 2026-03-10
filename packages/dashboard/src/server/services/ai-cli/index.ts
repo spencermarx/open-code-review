@@ -81,18 +81,18 @@ export class AiCliService {
     }
 
     // Log detection results
-    for (const entry of this.entries) {
-      const { adapter, detection } = entry
-      if (detection.found) {
-        console.log(`  AI CLI: ${adapter.name} v${detection.version ?? '?'} detected`)
-      }
+    const detected = this.entries
+      .filter((e) => e.detection.found)
+      .map((e) => `${e.adapter.name} v${e.detection.version ?? '?'}`)
+    if (detected.length > 0) {
+      console.log(`  AI CLI detected:   ${detected.join(', ')}`)
     }
     if (this.preference === 'off') {
-      console.log('  AI CLI: Disabled via config (ai_cli: off) — dashboard will run in read-only mode')
+      console.log('  AI CLI active:     off (read-only mode)')
     } else if (this.activeAdapter) {
-      console.log(`  AI CLI: Using ${this.activeAdapter.name} (preference: ${this.preference})`)
+      console.log(`  AI CLI active:     ${this.activeAdapter.name} (${this.preference})`)
     } else {
-      console.log('  AI CLI: No supported AI CLI found — dashboard will run in read-only mode')
+      console.log('  AI CLI active:     none (read-only mode)')
     }
   }
 

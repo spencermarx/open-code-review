@@ -35,7 +35,15 @@ import { registerChatHandlers, cleanupAllChats } from './socket/chat-handler.js'
 import { registerPostHandlers, cleanupAllPostGenerations } from './socket/post-handler.js'
 import { flushSave } from './routes/progress.js'
 
+import { homedir } from 'node:os'
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+/** Shorten an absolute path for display (replace homedir with ~). */
+function shortenPath(p: string): string {
+  const home = homedir()
+  return p.startsWith(home) ? '~' + p.slice(home.length) : p
+}
 
 // ── Bearer token authentication ──
 // Generate a cryptographically random token at startup.
@@ -204,7 +212,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
           process.kill(pid, 'SIGTERM')
         }
         killedCount++
-        console.log(`Killed orphaned process (PID ${pid})`)
 
         // Escalate to SIGKILL after 2 seconds for stubborn processes
         setTimeout(() => {
@@ -222,7 +229,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     }
 
     if (killedCount > 0) {
-      console.log(`Killed ${killedCount} orphaned child process(es)`)
+      console.log(`  Cleaned up ${killedCount} orphaned process(es)`)
     }
   }
 
@@ -243,7 +250,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
        WHERE finished_at IS NULL OR exit_code IS NULL`
     )
     saveDb(db, ocrDir)
-    console.log(`Cleaned up ${staleCount} stale command execution(s)`)
+    console.log(`  Cleaned up ${staleCount} stale command(s)`)
   }
 
   // ── API Routes ──
@@ -304,14 +311,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   // ── Socket.IO ──
 
   io.on('connection', (socket) => {
-    console.log('Client connected:', socket.id)
     registerSocketHandlers(io, socket)
     registerCommandHandlers(io, socket, db, ocrDir, aiCliService)
     registerChatHandlers(io, socket, db, ocrDir, aiCliService)
     registerPostHandlers(io, socket, db, ocrDir, aiCliService)
-    socket.on('disconnect', () => {
-      console.log('Client disconnected:', socket.id)
-    })
   })
 
   // ── DB sync watcher ──
@@ -324,7 +327,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   })
   await dbSyncWatcher.init()
   dbSyncWatcher.startWatching()
-  console.log(`Watching DB: ${dbFilePath}`)
+  console.log(`  Watching DB:       ${shortenPath(dbFilePath)}`)
 
   // Register global save hooks so every saveDb() call automatically
   // merges CLI changes before writing and marks its own write.
@@ -342,7 +345,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   await fsSync.fullScan()
   saveDb(db, ocrDir)
   fsSync.startWatching()
-  console.log(`Watching sessions: ${sessionsDir}`)
+  console.log(`  Watching sessions: ${shortenPath(sessionsDir)}`)
 
   // ── Reviewers meta watcher ──
   const stopReviewersWatch = watchReviewersMeta(ocrDir, io)
@@ -363,14 +366,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     })
 
     httpServer.listen(port, '127.0.0.1', () => {
-      console.log(`Dashboard server running on http://localhost:${port}`)
-      console.log(`OCR directory: ${ocrDir}`)
-      console.log('')
-      console.log('='.repeat(60))
-      console.log('  AUTH TOKEN (bearer token for API / Socket.IO):')
-      console.log(`  ${AUTH_TOKEN.slice(0, 8)}...[redacted]`)
-      console.log('='.repeat(60))
-      console.log('')
+      console.log(`  Server:            http://localhost:${port}`)
+      console.log(`  OCR directory:     ${shortenPath(ocrDir)}`)
+      console.log()
+      console.log(`  Auth token:        ${AUTH_TOKEN.slice(0, 8)}...[redacted]`)
+      console.log()
       resolve()
     })
   })

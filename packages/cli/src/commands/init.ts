@@ -15,7 +15,8 @@ import {
 } from "../lib/installer.js";
 import { injectIntoProjectFiles } from "../lib/injector.js";
 import { printBanner } from "../lib/banner.js";
-import { setConfiguredToolIds } from "../lib/cli-config.js";
+import { setConfiguredToolIds, stampCliVersion } from "../lib/cli-config.js";
+import { CLI_VERSION } from "../lib/version.js";
 import {
   checkDependencies,
   printDepChecks,
@@ -113,9 +114,10 @@ export const initCommand = new Command("init")
         console.log(`  ${chalk.green("✓")} ${result.tool.name}`);
       }
 
-      // Save configured tools to CLI config for future commands
+      // Save configured tools and stamp CLI version for drift detection
       const successfulToolIds = successful.map((r) => r.tool.id);
       setConfiguredToolIds(targetDir, successfulToolIds);
+      stampCliVersion(targetDir, CLI_VERSION);
     }
 
     if (failed.length > 0) {
