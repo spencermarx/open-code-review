@@ -19,6 +19,34 @@ import { AiCliService, formatToolDetail, type NormalizedEvent } from '../service
 import { resolveLocalCli } from './cli-resolver.js'
 import { cleanEnv } from './env.js'
 
+/** Split a command string into tokens, respecting single and double quotes. */
+function shellSplit(str: string): string[] {
+  const tokens: string[] = []
+  let current = ''
+  let quote: string | null = null
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i]!
+    if (quote) {
+      if (ch === quote) {
+        quote = null
+      } else {
+        current += ch
+      }
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    } else if (/\s/.test(ch)) {
+      if (current) {
+        tokens.push(current)
+        current = ''
+      }
+    } else {
+      current += ch
+    }
+  }
+  if (current) tokens.push(current)
+  return tokens
+}
+
 // ── Types ──
 
 type CommandRunPayload = {
@@ -44,7 +72,7 @@ const ALLOWED_COMMANDS = new Set([
 ])
 
 /** AI workflow commands — spawned via the AI CLI adapter strategy. */
-const AI_COMMANDS = new Set(['map', 'review', 'translate-review-to-single-human', 'address'])
+const AI_COMMANDS = new Set(['map', 'review', 'translate-review-to-single-human', 'address', 'create-reviewer', 'sync-reviewers'])
 
 // ── State ──
 
@@ -121,7 +149,7 @@ export function registerCommandHandlers(
 
       // Parse the command string — strip leading "ocr " if present
       const normalized = command.replace(/^ocr\s+/, '')
-      const parts = normalized.split(/\s+/)
+      const parts = shellSplit(normalized)
       const baseCommand = parts[0] ?? ''
       const subArgs = parts.slice(1)
 
@@ -335,39 +363,74 @@ function spawnAiCommand(
     return
   }
 
-  // 2. Parse subArgs for target, --fresh, --requirements
-  let target = 'staged changes'
-  let requirements = ''
-  const options: string[] = []
-  let i = 0
-  while (i < subArgs.length) {
-    const arg = subArgs[i] ?? ''
-    if (arg === '--fresh') {
-      options.push('--fresh')
-      i++
-    } else if (arg === '--requirements' && i + 1 < subArgs.length) {
-      // Consume all remaining args as the requirements value
-      // (supports both file paths and multi-word natural language)
-      requirements = subArgs.slice(i + 1).join(' ')
-      break
-    } else if (!arg.startsWith('--')) {
-      target = arg
-      i++
-    } else {
-      i++
-    }
-  }
+  // 2. Parse subArgs — command-specific
+  const promptLines: string[] = []
 
-  // 3. Build prompt
-  const optionsStr = options.length > 0 ? options.join(' ') : 'none'
-  const promptLines = [
-    `Follow the instructions below to run the OCR ${baseCommand} workflow.`,
-    '',
-    `Target: ${target}`,
-    `Options: ${optionsStr}`,
-  ]
-  if (requirements) {
-    promptLines.push(`Requirements: ${requirements}`)
+  if (baseCommand === 'create-reviewer' || baseCommand === 'sync-reviewers') {
+    // Pass raw args through to the AI prompt (name, --focus, etc.)
+    const argsStr = subArgs.length > 0 ? subArgs.join(' ') : ''
+    promptLines.push(
+      `Follow the instructions below to run the OCR ${baseCommand} workflow.`,
+      '',
+      `Arguments: ${argsStr || 'none'}`,
+    )
+  } else {
+    // Review/map arg parsing: target, --fresh, --requirements, --team, --reviewer
+    let target = 'staged changes'
+    let requirements = ''
+    let team = ''
+    const reviewerDescriptions: { description: string; count: number }[] = []
+    const options: string[] = []
+    let i = 0
+    while (i < subArgs.length) {
+      const arg = subArgs[i] ?? ''
+      if (arg === '--fresh') {
+        options.push('--fresh')
+        i++
+      } else if (arg === '--requirements' && i + 1 < subArgs.length) {
+        requirements = subArgs.slice(i + 1).join(' ')
+        break
+      } else if (arg === '--team' && i + 1 < subArgs.length) {
+        team = subArgs[i + 1] ?? ''
+        i += 2
+      } else if (arg === '--reviewer' && i + 1 < subArgs.length) {
+        const raw = subArgs[i + 1] ?? ''
+        // Support count prefix format: 2:"description"
+        const countMatch = raw.match(/^(\d+):(.+)$/)
+        if (countMatch) {
+          reviewerDescriptions.push({ description: countMatch[2]!, count: parseInt(countMatch[1]!, 10) })
+        } else {
+          reviewerDescriptions.push({ description: raw, count: 1 })
+        }
+        i += 2
+      } else if (!arg.startsWith('--')) {
+        target = arg
+        i++
+      } else {
+        i++
+      }
+    }
+
+    const optionsStr = options.length > 0 ? options.join(' ') : 'none'
+    promptLines.push(
+      `Follow the instructions below to run the OCR ${baseCommand} workflow.`,
+      '',
+      `Target: ${target}`,
+      `Options: ${optionsStr}`,
+    )
+    if (team) {
+      promptLines.push(`Team: ${team}`)
+    }
+    for (const { description, count } of reviewerDescriptions) {
+      if (count > 1) {
+        promptLines.push(`Reviewer (x${count}): ${description}`)
+      } else {
+        promptLines.push(`Reviewer: ${description}`)
+      }
+    }
+    if (requirements) {
+      promptLines.push(`Requirements: ${requirements}`)
+    }
   }
 
   // Resolve the local CLI so the spawned AI uses the correct version.
