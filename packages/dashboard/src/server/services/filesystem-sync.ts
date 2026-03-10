@@ -696,11 +696,12 @@ export class FilesystemSync {
       return
     }
 
-    // Compute derived counts from findings
+    // Compute counts — prefer explicit synthesis_counts (deduplicated) over derived
     const allFindings = meta.reviewers.flatMap((r) => r.findings ?? [])
-    const blockerCount = allFindings.filter((f) => f.category === 'blocker').length
-    const shouldFixCount = allFindings.filter((f) => f.category === 'should_fix').length
-    const suggestionCount = allFindings.filter((f) => f.category === 'suggestion').length
+    const sc = meta.synthesis_counts as { blockers?: number; should_fix?: number; suggestions?: number } | undefined
+    const blockerCount = sc?.blockers ?? allFindings.filter((f) => f.category === 'blocker').length
+    const shouldFixCount = sc?.should_fix ?? allFindings.filter((f) => f.category === 'should_fix').length
+    const suggestionCount = sc?.suggestions ?? allFindings.filter((f) => f.category === 'suggestion').length
     const reviewerCount = meta.reviewers.length
     const totalFindingCount = allFindings.length
 
