@@ -1,3 +1,46 @@
+## 1.7.0 (2026-03-10)
+
+### 🚀 Features
+
+- **agents:** expand reviewer library to 28 personas across four tiers ([991c4dc](https://github.com/spencermarx/open-code-review/commit/991c4dc))
+- **agents:** add create-reviewer and sync-reviewers commands ([79fd570](https://github.com/spencermarx/open-code-review/commit/79fd570))
+- **agents:** update review workflow for `--reviewer` ephemeral support ([5f99872](https://github.com/spencermarx/open-code-review/commit/5f99872))
+- **cli:** add reviewer metadata generation and sync command ([b591694](https://github.com/spencermarx/open-code-review/commit/b591694))
+- **dashboard:** add Team page for browsing and creating reviewers ([f146dbf](https://github.com/spencermarx/open-code-review/commit/f146dbf))
+- **dashboard:** add reviewer selection with ephemeral support to command palette ([f6f8d44](https://github.com/spencermarx/open-code-review/commit/f6f8d44))
+
+### 🩹 Fixes
+
+- **dashboard:** forward `--team` and `--reviewer` flags to AI workflow ([c9a172d](https://github.com/spencermarx/open-code-review/commit/c9a172d))
+
+### ❤️ Thank You
+
+- Spencer Marx
+- claude-flow @agentic-org
+
+## 1.6.0 (2026-03-09)
+
+### 🚀 Features
+
+- **cli:** add orchestrator completion state management ([ee7a969](https://github.com/spencermarx/open-code-review/commit/ee7a969))
+- **cli:** add non-blocking update check notifier ([0df5e58](https://github.com/spencermarx/open-code-review/commit/0df5e58))
+- **dashboard:** integrate orchestrator-first metadata pipeline ([025a05b](https://github.com/spencermarx/open-code-review/commit/025a05b))
+- **dashboard:** add address feedback popover and round triage ([0731fc7](https://github.com/spencermarx/open-code-review/commit/0731fc7))
+
+### 🧪 Tests
+
+- **cli:** add orchestrator completion state tests ([7aa73e5](https://github.com/spencermarx/open-code-review/commit/7aa73e5))
+- **dashboard:** add orchestrator metadata and final-parser tests ([07e6a81](https://github.com/spencermarx/open-code-review/commit/07e6a81))
+
+### 🏗️ Build
+
+- **cli:** add db subpath export to esbuild config ([61171e5](https://github.com/spencermarx/open-code-review/commit/61171e5))
+
+### ❤️ Thank You
+
+- Spencer Marx
+- claude-flow @agentic-org
+
 ## 1.5.1 (2026-03-06)
 
 ### 🚀 Features
