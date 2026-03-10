@@ -685,6 +685,32 @@ describe("computeRoundCounts", () => {
     expect(counts.suggestionCount).toBe(1);
     expect(counts.totalFindingCount).toBe(2);
   });
+
+  it("prefers synthesis_counts over derived counts when present", () => {
+    const meta = makeRoundMeta({
+      synthesis_counts: { blockers: 0, should_fix: 3, suggestions: 5 },
+    });
+    const counts = computeRoundCounts(meta);
+
+    // synthesis_counts override derived values
+    expect(counts.blockerCount).toBe(0);
+    expect(counts.shouldFixCount).toBe(3);
+    expect(counts.suggestionCount).toBe(5);
+    // reviewer/total counts are always derived
+    expect(counts.reviewerCount).toBe(2);
+    expect(counts.totalFindingCount).toBe(5);
+  });
+
+  it("falls back to derived counts when synthesis_counts is absent", () => {
+    const meta = makeRoundMeta();
+    expect(meta.synthesis_counts).toBeUndefined();
+    const counts = computeRoundCounts(meta);
+
+    // Should use derived counts (same as first test)
+    expect(counts.blockerCount).toBe(1);
+    expect(counts.shouldFixCount).toBe(2);
+    expect(counts.suggestionCount).toBe(1);
+  });
 });
 
 describe("stateRoundComplete", () => {
