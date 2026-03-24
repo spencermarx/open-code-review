@@ -157,11 +157,12 @@ git push --follow-tags
 
 The `nx release` command:
 1. **Bumps versions** based on conventional commits (feat → minor, fix → patch)
-2. **Updates CHANGELOGs** in each package and root
-3. **Creates a git commit** with message `chore(release): {version}`
-4. **Tags the release** (e.g., `v1.0.4`)
-5. **Publishes to npm** (`@open-code-review/cli`, `@open-code-review/agents`)
-6. **Creates a GitHub Release** with changelog notes
+2. **Syncs derived manifests** — the agents package uses custom [Nx VersionActions](packages/agents/release/version-actions.ts) to automatically update `plugin.json` and `SKILL.md` frontmatter with the new version
+3. **Updates CHANGELOGs** in each package and root
+4. **Creates a git commit** with message `chore(release): {version}`
+5. **Tags the release** (e.g., `v1.0.4`)
+6. **Publishes to npm** (`@open-code-review/cli`, `@open-code-review/agents`)
+7. **Creates a GitHub Release** with changelog notes
 
 ### Prerequisites
 
