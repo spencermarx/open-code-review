@@ -10,7 +10,7 @@ compatibility: |
   environments. Requires git. Optional: gh CLI for GitHub integration.
 metadata:
   author: spencermarx
-  version: "1.0.0"
+  version: "1.8.4"
   repository: https://github.com/spencermarx/open-code-review
 ---
 
