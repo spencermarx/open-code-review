@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Discussions
+    url: https://github.com/spencermarx/open-code-review/discussions
+    about: Ask questions, share ideas, or get help with Open Code Review
