@@ -1,8 +1,8 @@
 import { join } from 'node:path';
-import { updateJson, type Tree } from '@nx/devkit';
-import type { ProjectGraph } from '@nx/devkit';
-import type { AfterAllProjectsVersioned, VersionActions } from 'nx/release';
+import type { VersionActions } from 'nx/release';
 import type { NxReleaseVersionConfiguration } from 'nx/src/config/nx-json';
+import type { ProjectGraph } from 'nx/src/config/project-graph';
+import type { Tree } from 'nx/src/generators/tree';
 
 // Re-export afterAllProjectsVersioned from @nx/js so lock-file updates still work
 export { afterAllProjectsVersioned } from '@nx/js/src/release/version-actions';
@@ -109,10 +109,10 @@ export default class AgentsVersionActions implements VersionActions {
     // Sync plugin.json
     const pluginJsonPath = join(projectRoot, '.claude-plugin', 'plugin.json');
     if (tree.exists(pluginJsonPath)) {
-      updateJson(tree, pluginJsonPath, (json) => {
-        json.version = newVersion;
-        return json;
-      });
+      const raw = tree.read(pluginJsonPath, 'utf-8')!;
+      const json = JSON.parse(raw) as Record<string, unknown>;
+      json.version = newVersion;
+      tree.write(pluginJsonPath, JSON.stringify(json, null, 2) + '\n');
       logMessages.push(
         `✍️  New version ${newVersion} written to ${pluginJsonPath}`,
       );
