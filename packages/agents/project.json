@@ -3,5 +3,10 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/agents",
   "projectType": "library",
-  "tags": ["scope:agents", "type:assets"]
+  "tags": ["scope:agents", "type:assets"],
+  "release": {
+    "version": {
+      "versionActions": "./packages/agents/release/version-actions.ts"
+    }
+  }
 }

@@ -5,7 +5,8 @@
   "type": "module",
   "files": [
     "skills",
-    "commands"
+    "commands",
+    ".claude-plugin"
   ],
   "keywords": [
     "code-review",

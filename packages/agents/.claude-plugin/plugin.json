@@ -1,7 +1,7 @@
 {
   "name": "ocr",
   "description": "Shift code review quality gates left with customizable multi-agent review. Define your reviewer team composition, run parallel reviews with redundancy, and let reviewers debate findings before synthesis. Works with specs, proposals, and project standards.",
-  "version": "1.0.0",
+  "version": "1.8.4",
   "author": {
     "name": "Spencer Marx",
     "email": "spencer@aclarify.com"

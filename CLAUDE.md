@@ -37,3 +37,8 @@ Use `.ocr/skills/SKILL.md` to learn:
 Keep this managed block so 'ocr init' can refresh the instructions.
 
 <!-- OCR:END -->
+
+# Code Conventions
+
+- **TypeScript only**: Do not create raw `.js` or `.mjs` files unless they serve a config purpose (e.g., `vite.config.mjs`, `eslint.config.mjs`). All project code, scripts, and utilities must be written in TypeScript.
+- **Nx-native automation**: Release process automation must use Nx extension points (e.g., `VersionActions`, `preVersionCommand`), not npm lifecycle scripts or standalone scripts.

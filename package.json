@@ -22,6 +22,7 @@
     "lint:cli": "nx lint cli"
   },
   "devDependencies": {
+    "@nx/devkit": "^22.0.0",
     "@nx/esbuild": "^22.0.0",
     "@nx/js": "^22.0.0",
     "@swc-node/register": "^1.11.1",
