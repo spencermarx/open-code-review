@@ -27,6 +27,8 @@ import {
   resolveActiveSession,
 } from "../lib/state/index.js";
 import type { WorkflowType, ReviewPhase, MapPhase, RoundCompleteResult, MapCompleteResult } from "../lib/state/types.js";
+import { replayCommandLog } from "../lib/db/command-log.js";
+import { getDb, saveDatabase } from "../lib/db/index.js";
 
 // ── Helpers ──
 
@@ -286,6 +288,18 @@ const syncSubcommand = new Command("sync")
     try {
       const synced = await stateSync(ocrDir);
       console.log(`Synced ${synced} session${synced !== 1 ? "s" : ""} from filesystem.`);
+
+      // Recover command history from JSONL backup if DB was recreated
+      const db = await getDb(ocrDir);
+      const countResult = db.exec("SELECT COUNT(*) as c FROM command_executions");
+      const totalCmds = (countResult[0]?.values[0]?.[0] as number) ?? 0;
+      if (totalCmds === 0) {
+        const recovered = replayCommandLog(db, ocrDir);
+        if (recovered > 0) {
+          saveDatabase(db, join(ocrDir, "data", "ocr.db"));
+          console.log(`Recovered ${recovered} command${recovered !== 1 ? "s" : ""} from backup log.`);
+        }
+      }
     } catch (error) {
       console.error(
         chalk.red(

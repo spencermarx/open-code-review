@@ -39,6 +39,21 @@ export { runMigrations, MIGRATIONS } from "./migrations.js";
 
 export { resultToRows, resultToRow } from "./result-mapper.js";
 
+export {
+  cacheDir,
+  generateCommandUid,
+  commandLogPath,
+  appendCommandLog,
+  readCommandLog,
+  replayCommandLog,
+} from "./command-log.js";
+
+export type {
+  CommandLogEntry,
+  CommandLogEvent,
+  CommandLogWriter,
+} from "./command-log.js";
+
 // ── Connection cache ──
 
 const connections = new Map<string, Database>();
@@ -114,7 +129,7 @@ export function saveDatabase(db: Database, dbPath: string): void {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  const tmpPath = dbPath + ".tmp";
+  const tmpPath = `${dbPath}.${process.pid}.tmp`;
   writeFileSync(tmpPath, Buffer.from(data));
   renameSync(tmpPath, dbPath);
 }
