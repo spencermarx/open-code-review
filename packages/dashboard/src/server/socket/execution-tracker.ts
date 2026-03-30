@@ -10,6 +10,11 @@
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Database } from 'sql.js'
 import { saveDb } from '../db.js'
+import {
+  generateCommandUid,
+  appendCommandLog,
+  type CommandLogEntry,
+} from '@open-code-review/cli/db'
 
 export type TrackedExecution = {
   executionId: number
@@ -35,14 +40,29 @@ export function startTrackedExecution(
   args: string[] = [],
 ): TrackedExecution {
   const startedAt = new Date().toISOString()
+  const uid = generateCommandUid()
+  const argsJson = JSON.stringify(args)
 
   db.run(
-    `INSERT INTO command_executions (command, args, started_at)
-     VALUES (?, ?, ?)`,
-    [command, JSON.stringify(args), startedAt],
+    `INSERT INTO command_executions (uid, command, args, started_at)
+     VALUES (?, ?, ?, ?)`,
+    [uid, command, argsJson, startedAt],
   )
   const idResult = db.exec('SELECT last_insert_rowid() as id')
   const executionId = (idResult[0]?.values[0]?.[0] as number) ?? 0
+
+  // Best-effort JSONL backup
+  const baseLogEntry: Omit<CommandLogEntry, 'event' | 'exit_code' | 'finished_at'> = {
+    v: 1,
+    uid,
+    db_id: executionId,
+    command,
+    args: argsJson,
+    started_at: startedAt,
+    is_detached: 0,
+    writer: 'dashboard',
+  }
+  appendCommandLog(ocrDir, { ...baseLogEntry, event: 'start', exit_code: null, finished_at: null })
 
   io.emit('command:started', {
     execution_id: executionId,
@@ -52,6 +72,7 @@ export function startTrackedExecution(
   })
 
   let outputBuffer = ''
+  let trackedIsDetached = 0
 
   return {
     executionId,
@@ -62,9 +83,10 @@ export function startTrackedExecution(
     },
 
     setPid(pid: number, isDetached: boolean) {
+      trackedIsDetached = isDetached ? 1 : 0
       db.run(
         'UPDATE command_executions SET pid = ?, is_detached = ? WHERE id = ?',
-        [pid, isDetached ? 1 : 0, executionId],
+        [pid, trackedIsDetached, executionId],
       )
     },
 
@@ -79,6 +101,15 @@ export function startTrackedExecution(
         [exitCode, finishedAt, outputBuffer, executionId],
       )
       saveDb(db, ocrDir)
+
+      // Best-effort JSONL backup
+      appendCommandLog(ocrDir, {
+        ...baseLogEntry,
+        is_detached: trackedIsDetached,
+        event: exitCode === -2 ? 'cancel' : 'finish',
+        exit_code: exitCode,
+        finished_at: finishedAt,
+      })
 
       io.emit('command:finished', {
         execution_id: executionId,

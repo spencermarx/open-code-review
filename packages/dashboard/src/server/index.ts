@@ -34,6 +34,7 @@ import { registerCommandHandlers } from './socket/command-runner.js'
 import { registerChatHandlers, cleanupAllChats } from './socket/chat-handler.js'
 import { registerPostHandlers, cleanupAllPostGenerations } from './socket/post-handler.js'
 import { flushSave } from './routes/progress.js'
+import { replayCommandLog } from '@open-code-review/cli/db'
 
 import { homedir } from 'node:os'
 
@@ -174,6 +175,19 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   }
 
   writeFileSync(pidFilePath, String(process.pid), { mode: 0o600 })
+
+  // ── Command history recovery from JSONL backup ──
+  // If the DB was recreated (command_executions is empty) but a JSONL backup
+  // exists, replay it to restore command history.
+  const cmdCountResult = db.exec('SELECT COUNT(*) as c FROM command_executions')
+  const totalCmds = (cmdCountResult[0]?.values[0]?.[0] as number) ?? 0
+  if (totalCmds === 0) {
+    const recovered = replayCommandLog(db, ocrDir)
+    if (recovered > 0) {
+      saveDb(db, ocrDir)
+      console.log(`  Recovered ${recovered} command(s) from JSONL backup`)
+    }
+  }
 
   // ── Kill orphaned child processes ──
   // Before marking stale rows, check if any unfinished commands have PIDs
@@ -352,35 +366,62 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   // ── Start server ──
 
-  await new Promise<void>((resolve, reject) => {
-    httpServer.once('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        reject(new Error(
-          `Port ${port} is already in use. Either stop the other process ` +
-          `(lsof -ti:${port} | xargs kill) or choose a different port ` +
-          `(PORT=${port + 1} pnpm dev:server).`
-        ))
-      } else {
-        reject(err)
-      }
-    })
+  const MAX_PORT_ATTEMPTS = 10
+  let actualPort = port
 
-    httpServer.listen(port, '127.0.0.1', () => {
-      console.log(`  Server:            http://localhost:${port}`)
-      console.log(`  OCR directory:     ${shortenPath(ocrDir)}`)
-      console.log()
-      console.log(`  Auth token:        ${AUTH_TOKEN.slice(0, 8)}...[redacted]`)
-      console.log()
-      resolve()
-    })
-  })
+  for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (err: Error) => reject(err)
+        httpServer.once('error', onError)
+
+        httpServer.listen(actualPort, '127.0.0.1', () => {
+          httpServer.removeListener('error', onError)
+          resolve()
+        })
+      })
+      break // Success
+    } catch (err) {
+      const nodeErr = err as NodeJS.ErrnoException
+      if (nodeErr.code === 'EADDRINUSE') {
+        httpServer.close()
+
+        if (attempt < MAX_PORT_ATTEMPTS - 1) {
+          console.log(`  Port ${actualPort} in use, trying ${actualPort + 1}...`)
+          actualPort++
+        } else {
+          throw new Error(
+            `Could not find an available port (tried ${port}–${actualPort}). ` +
+            `Stop other processes or set PORT explicitly.`
+          )
+        }
+      } else {
+        throw err
+      }
+    }
+  }
+
+  if (actualPort !== port) {
+    console.log(`  Note: using port ${actualPort} (${port} was in use)`)
+  }
+
+  // Write actual port so the Vite dev proxy can discover it.
+  // In dev mode, Vite starts after the server (sleep 2) and reads this file.
+  const portFilePath = join(dataDir, 'server-port')
+  writeFileSync(portFilePath, String(actualPort), { mode: 0o600 })
+
+  console.log(`  Server:            http://localhost:${actualPort}`)
+  console.log(`  OCR directory:     ${shortenPath(ocrDir)}`)
+  console.log()
+  console.log(`  Auth token:        ${AUTH_TOKEN.slice(0, 8)}...[redacted]`)
+  console.log()
 
   // ── Browser auto-open (when called with open: true) ──
 
   if (options.open) {
     try {
       const { default: openBrowser } = await import('open')
-      await openBrowser(`http://localhost:${port}`)
+      await openBrowser(`http://localhost:${actualPort}`)
     } catch {
       // Non-fatal — user can open the URL manually
     }
@@ -391,8 +432,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   const shutdown = (): void => {
     console.log('Shutting down dashboard server...')
 
-    // Remove PID tracking file
+    // Remove PID and port tracking files
     try { unlinkSync(pidFilePath) } catch { /* ignore */ }
+    try { unlinkSync(portFilePath) } catch { /* ignore */ }
 
     // Kill all child processes tracked in the database.
     // This is more robust than the in-memory Maps (which are lost on hot-reload).
