@@ -46,6 +46,12 @@ function shortenPath(p: string): string {
   return p.startsWith(home) ? '~' + p.slice(home.length) : p
 }
 
+/** Match any localhost origin (any port) for dev CORS. Accepts `localhost` and `127.0.0.1`. */
+function isLocalhostOrigin(origin: string | undefined): boolean {
+  if (!origin) return false
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+}
+
 // ── Bearer token authentication ──
 // Generate a cryptographically random token at startup.
 // All API and Socket.IO requests must present this token.
@@ -53,13 +59,12 @@ const AUTH_TOKEN = randomBytes(32).toString('hex')
 
 const app = express()
 const httpServer = createServer(app)
-/** Match any localhost origin (any port) for dev CORS. */
-const isLocalhostOrigin = (origin: string): boolean =>
-  /^https?:\/\/localhost(:\d+)?$/.test(origin)
 
 const io = new SocketIOServer(httpServer, {
   cors: {
     origin: process.env.NODE_ENV !== 'production'
+      // Allow any localhost origin (dynamic ports) and no-origin requests
+      // (curl, Postman, CLI socket clients). Bearer token is the real gate.
       ? (origin, cb) => cb(null, !origin || isLocalhostOrigin(origin))
       : false,
   },
