@@ -41,10 +41,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': `http://localhost:${serverPort}`,
-      '/auth': `http://localhost:${serverPort}`,
+      '/api': `http://127.0.0.1:${serverPort}`,
+      '/auth': `http://127.0.0.1:${serverPort}`,
       '/socket.io': {
-        target: `http://localhost:${serverPort}`,
+        target: `http://127.0.0.1:${serverPort}`,
         ws: true,
       },
     },
