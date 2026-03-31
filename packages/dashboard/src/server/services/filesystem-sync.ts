@@ -231,10 +231,13 @@ export class FilesystemSync {
       currentMapRun = Math.max(1, runDirs.length)
     }
 
-    // Derive phase/status from filesystem artifacts
+    // Derive phase/status from filesystem artifacts.
+    // Default to 'closed' — backfilled sessions are historical artifacts.
+    // Only sessions with incomplete workflows might be active, but those
+    // are created by stateInit, not filesystem discovery.
     let phase = 'context'
     let phaseNumber = 1
-    let status: 'active' | 'closed' = 'active'
+    let status: 'active' | 'closed' = 'closed'
 
     if (workflowType === 'review' && hasRoundsDir) {
       const roundDir = join(sessionDir, 'rounds', `round-${currentRound}`)
@@ -289,6 +292,10 @@ export class FilesystemSync {
         [currentRound, currentMapRun, sessionId],
       )
     } else {
+      // Skip empty sessions — directories with no parseable artifacts are
+      // ghost sessions with nothing to show in the dashboard.
+      if (!this.hasArtifacts(sessionDir)) return
+
       this.db.run(
         `INSERT INTO sessions (id, branch, workflow_type, current_phase, phase_number, current_round, current_map_run, session_dir, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -298,6 +305,25 @@ export class FilesystemSync {
     }
 
     this.onSync?.()
+  }
+
+  // ── Artifact Check ──
+
+  /** Returns true if the session directory contains at least one .md or .json file. */
+  private hasArtifacts(sessionDir: string): boolean {
+    const check = (dir: string): boolean => {
+      try {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (entry.isDirectory()) {
+            if (check(join(dir, entry.name))) return true
+          } else if (/\.(md|json)$/.test(entry.name)) {
+            return true
+          }
+        }
+      } catch { /* permission error — treat as empty */ }
+      return false
+    }
+    return check(sessionDir)
   }
 
   // ── Mtime Skip Check ──
@@ -671,6 +697,11 @@ export class FilesystemSync {
     const meta = raw as {
       schema_version?: number
       verdict?: string
+      synthesis_counts?: {
+        blockers?: number
+        should_fix?: number
+        suggestions?: number
+      }
       reviewers?: Array<{
         type?: string
         instance?: number
@@ -698,7 +729,7 @@ export class FilesystemSync {
 
     // Compute counts — prefer explicit synthesis_counts (deduplicated) over derived
     const allFindings = meta.reviewers.flatMap((r) => r.findings ?? [])
-    const sc = meta.synthesis_counts as { blockers?: number; should_fix?: number; suggestions?: number } | undefined
+    const sc = meta.synthesis_counts
     const blockerCount = sc?.blockers ?? allFindings.filter((f) => f.category === 'blocker').length
     const shouldFixCount = sc?.should_fix ?? allFindings.filter((f) => f.category === 'should_fix').length
     const suggestionCount = sc?.suggestions ?? allFindings.filter((f) => f.category === 'suggestion').length

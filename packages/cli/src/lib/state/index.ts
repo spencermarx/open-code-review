@@ -64,6 +64,24 @@ export type {
   MapMetaDependency,
 } from "./types.js";
 
+// ── Helpers ──
+
+/** Returns true if the directory contains at least one .md or .json file (recursively). */
+function hasArtifacts(dir: string): boolean {
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (hasArtifacts(join(dir, entry.name))) return true;
+      } else if (/\.(md|json)$/.test(entry.name)) {
+        return true;
+      }
+    }
+  } catch {
+    // Permission error or similar — treat as empty
+  }
+  return false;
+}
+
 /**
  * Initialize a session in SQLite.
  *
@@ -737,6 +755,13 @@ export async function stateSync(ocrDir: string): Promise<number> {
       continue;
     }
 
+    // Skip empty sessions — directories with no parseable artifacts (no .md
+    // or .json files) are ghost sessions from before structured state management.
+    // Registering them creates dashboard noise with no reviewable content.
+    if (!hasArtifacts(dirPath)) {
+      continue;
+    }
+
     // Derive workflow type from filesystem artifacts
     const hasRoundsDir = existsSync(join(dirPath, "rounds"));
     const hasMapDir = existsSync(join(dirPath, "map"));
@@ -746,21 +771,55 @@ export async function stateSync(ocrDir: string): Promise<number> {
     const branchMatch = dirName.match(/^\d{4}-\d{2}-\d{2}-(.+)$/);
     const branch = branchMatch?.[1] ?? dirName;
 
+    // Determine completion phase from filesystem artifacts.
+    // Sessions with a final.md (review) or map.md (map) in their latest
+    // round/run are complete.
+    let inferredPhase = "context";
+
+    if (workflowType === "review") {
+      const roundsDir = join(dirPath, "rounds");
+      if (existsSync(roundsDir)) {
+        const roundDirs = readdirSync(roundsDir)
+          .filter((d) => /^round-\d+$/.test(d))
+          .sort((a, b) => parseInt(a.split("-")[1]!) - parseInt(b.split("-")[1]!));
+        const latestRound = roundDirs[roundDirs.length - 1];
+        if (latestRound && existsSync(join(roundsDir, latestRound, "final.md"))) {
+          inferredPhase = "complete";
+        }
+      }
+    } else if (workflowType === "map") {
+      const runsDir = join(dirPath, "map", "runs");
+      if (existsSync(runsDir)) {
+        const runDirs = readdirSync(runsDir)
+          .filter((d) => /^run-\d+$/.test(d))
+          .sort((a, b) => parseInt(a.split("-")[1]!) - parseInt(b.split("-")[1]!));
+        const latestRun = runDirs[runDirs.length - 1];
+        if (latestRun && existsSync(join(runsDir, latestRun, "map.md"))) {
+          inferredPhase = "complete";
+        }
+      }
+    }
+
     insertSession(db, {
       id: dirName,
       branch,
       workflow_type: workflowType,
-      current_phase: "context",
+      current_phase: inferredPhase,
       phase_number: 1,
       current_round: 1,
       current_map_run: 1,
       session_dir: dirPath,
     });
 
+    // Backfilled sessions are always marked closed — they are filesystem
+    // artifacts, not actively running workflows. Active sessions are
+    // created by stateInit, not by filesystem backfill.
+    updateSession(db, dirName, { status: "closed" });
+
     insertEvent(db, {
       session_id: dirName,
       event_type: "session_synced",
-      phase: "context",
+      phase: inferredPhase,
       phase_number: 1,
       metadata: JSON.stringify({ source: "filesystem_backfill" }),
     });

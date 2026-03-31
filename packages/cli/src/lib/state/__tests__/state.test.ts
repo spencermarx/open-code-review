@@ -453,7 +453,9 @@ describe("stateSync", () => {
   it("backfills sessions from filesystem into SQLite", async () => {
     // Create a session dir with filesystem artifacts but no SQLite row
     const dir = join(sessionsDir, "2026-03-04-feat-legacy");
-    mkdirSync(join(dir, "rounds", "round-1", "reviews"), { recursive: true });
+    const reviewsDir = join(dir, "rounds", "round-1", "reviews");
+    mkdirSync(reviewsDir, { recursive: true });
+    writeFileSync(join(reviewsDir, "principal-1.md"), "# Review\n");
 
     const synced = await stateSync(ocrDir);
     expect(synced).toBe(1);
@@ -463,6 +465,7 @@ describe("stateSync", () => {
     expect(result).not.toBeNull();
     expect(result?.session.branch).toBe("feat-legacy");
     expect(result?.session.workflow_type).toBe("review");
+    expect(result?.session.status).toBe("closed");
   });
 
   it("skips sessions that already exist in SQLite", async () => {
@@ -479,21 +482,19 @@ describe("stateSync", () => {
     expect(synced).toBe(0);
   });
 
-  it("syncs directories without review or map artifacts as review", async () => {
+  it("skips empty directories with no artifacts", async () => {
     const dir = join(sessionsDir, "empty-dir");
     mkdirSync(dir, { recursive: true });
 
     const synced = await stateSync(ocrDir);
-    expect(synced).toBe(1);
-
-    const result = await stateShow(ocrDir, "empty-dir");
-    expect(result).not.toBeNull();
-    expect(result?.session.workflow_type).toBe("review");
+    expect(synced).toBe(0);
   });
 
   it("detects map workflow from filesystem structure", async () => {
     const dir = join(sessionsDir, "2026-03-04-feat-map-test");
-    mkdirSync(join(dir, "map", "runs", "run-1"), { recursive: true });
+    const runDir = join(dir, "map", "runs", "run-1");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, "topology.md"), "# Topology\n");
 
     const synced = await stateSync(ocrDir);
     expect(synced).toBe(1);
@@ -505,6 +506,7 @@ describe("stateSync", () => {
   it("inserts a session_synced event for backfilled sessions", async () => {
     const dir = join(sessionsDir, "synced-events");
     mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "context.md"), "# Context\n");
 
     await stateSync(ocrDir);
 
@@ -520,6 +522,7 @@ describe("stateSync", () => {
     for (let i = 1; i <= 3; i++) {
       const dir = join(sessionsDir, `multi-sync-${i}`);
       mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "context.md"), "# Context\n");
     }
 
     const synced = await stateSync(ocrDir);

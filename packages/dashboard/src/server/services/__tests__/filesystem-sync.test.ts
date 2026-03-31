@@ -55,6 +55,7 @@ describe('FilesystemSync', () => {
       const sessionId = '2026-01-01-main'
       const sessionDir = join(sessionsDir, sessionId)
       mkdirSync(sessionDir, { recursive: true })
+      writeFileSync(join(sessionDir, 'context.md'), '# Context\n')
 
       const sync = new FilesystemSync(db, sessionsDir)
       await sync.fullScan()
@@ -270,7 +271,9 @@ API updates.
     it('detects map workflow from filesystem structure', async () => {
       const sessionId = '2026-01-01-map-detect'
       const sessionDir = join(sessionsDir, sessionId)
-      mkdirSync(join(sessionDir, 'map', 'runs', 'run-1'), { recursive: true })
+      const runDir = join(sessionDir, 'map', 'runs', 'run-1')
+      mkdirSync(runDir, { recursive: true })
+      writeFileSync(join(runDir, 'topology.md'), '# Topology\n')
 
       const sync = new FilesystemSync(db, sessionsDir)
       await sync.fullScan()
