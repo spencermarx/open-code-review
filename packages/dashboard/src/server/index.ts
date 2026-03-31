@@ -53,10 +53,14 @@ const AUTH_TOKEN = randomBytes(32).toString('hex')
 
 const app = express()
 const httpServer = createServer(app)
+/** Match any localhost origin (any port) for dev CORS. */
+const isLocalhostOrigin = (origin: string): boolean =>
+  /^https?:\/\/localhost(:\d+)?$/.test(origin)
+
 const io = new SocketIOServer(httpServer, {
   cors: {
     origin: process.env.NODE_ENV !== 'production'
-      ? ['http://localhost:5173', 'http://localhost:4173']
+      ? (origin, cb) => cb(null, !origin || isLocalhostOrigin(origin))
       : false,
   },
   maxHttpBufferSize: 1e6, // 1 MB — explicit default; review if large payloads are needed
@@ -69,8 +73,7 @@ app.use(express.json())
 if (process.env.NODE_ENV !== 'production') {
   app.use((_req, res, next) => {
     const origin = _req.headers.origin
-    const allowed = ['http://localhost:5173', 'http://localhost:4173']
-    if (origin && allowed.includes(origin)) {
+    if (origin && isLocalhostOrigin(origin)) {
       res.header('Access-Control-Allow-Origin', origin)
     }
     res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
@@ -111,8 +114,7 @@ io.use((socket, next) => {
 if (process.env.NODE_ENV !== 'production') {
   app.get('/auth/token', (req, res) => {
     const origin = req.headers.origin
-    const allowed = ['http://localhost:5173', 'http://localhost:4173']
-    if (origin && !allowed.includes(origin)) {
+    if (origin && !isLocalhostOrigin(origin)) {
       res.status(403).json({ error: 'Forbidden: invalid origin' })
       return
     }
