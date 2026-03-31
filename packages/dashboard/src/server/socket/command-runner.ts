@@ -18,6 +18,11 @@ import { saveDb } from '../db.js'
 import { AiCliService, formatToolDetail, type NormalizedEvent } from '../services/ai-cli/index.js'
 import { resolveLocalCli } from './cli-resolver.js'
 import { cleanEnv } from './env.js'
+import {
+  generateCommandUid,
+  appendCommandLog,
+  type CommandLogEntry,
+} from '@open-code-review/cli/db'
 
 /** Split a command string into tokens, respecting single and double quotes. */
 function shellSplit(str: string): string[] {
@@ -81,6 +86,8 @@ const MAX_CONCURRENT = 3
 type ProcessEntry = {
   process: ChildProcess | null
   executionId: number
+  uid: string
+  argsJson: string
   outputBuffer: string
   commandStr: string
   startedAt: string
@@ -184,21 +191,40 @@ export function registerCommandHandlers(
 
       // Insert execution record
       const startedAt = new Date().toISOString()
+      const uid = generateCommandUid()
+      const argsJson = JSON.stringify(subArgs)
       db.run(
-        `INSERT INTO command_executions (command, args, started_at)
-         VALUES (?, ?, ?)`,
-        [command, JSON.stringify(subArgs), startedAt]
+        `INSERT INTO command_executions (uid, command, args, started_at)
+         VALUES (?, ?, ?, ?)`,
+        [uid, command, argsJson, startedAt]
       )
       const idResult = db.exec('SELECT last_insert_rowid() as id')
       const executionId = (idResult[0]?.values[0]?.[0] as number) ?? 0
 
+      // Best-effort JSONL backup
+      appendCommandLog(ocrDir, {
+        v: 1,
+        uid,
+        db_id: executionId,
+        command,
+        args: argsJson,
+        exit_code: null,
+        started_at: startedAt,
+        finished_at: null,
+        is_detached: AI_COMMANDS.has(baseCommand) ? 1 : 0,
+        event: 'start',
+        writer: 'dashboard',
+      })
+
       const isAi = AI_COMMANDS.has(baseCommand)
       const entry: ProcessEntry = {
         process: null,
-        executionId: executionId,
+        executionId,
+        uid,
+        argsJson,
         outputBuffer: '',
         commandStr: command,
-        startedAt: startedAt,
+        startedAt,
         detached: isAi,
         cancelled: false,
       }
@@ -597,6 +623,7 @@ function finishExecution(
   output: string
 ): void {
   const finishedAt = new Date().toISOString()
+  const entry = activeCommands.get(executionId)
 
   db.run(
     `UPDATE command_executions
@@ -605,6 +632,23 @@ function finishExecution(
     [code, finishedAt, output, executionId]
   )
   saveDb(db, ocrDir)
+
+  // Best-effort JSONL backup
+  if (entry?.uid) {
+    appendCommandLog(ocrDir, {
+      v: 1,
+      uid: entry.uid,
+      db_id: executionId,
+      command: entry.commandStr,
+      args: entry.argsJson ?? null,
+      exit_code: code,
+      started_at: entry.startedAt,
+      finished_at: finishedAt,
+      is_detached: entry.detached ? 1 : 0,
+      event: code === -2 ? 'cancel' : 'finish',
+      writer: 'dashboard',
+    })
+  }
 
   io.emit('command:finished', {
     execution_id: executionId,

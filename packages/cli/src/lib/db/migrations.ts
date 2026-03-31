@@ -252,6 +252,14 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE map_runs ADD COLUMN section_count INTEGER DEFAULT 0;
     `,
   },
+  {
+    version: 9,
+    description: "Add uid column to command_executions for JSONL-backed recovery",
+    sql: `
+      ALTER TABLE command_executions ADD COLUMN uid TEXT;
+      CREATE UNIQUE INDEX idx_command_executions_uid ON command_executions(uid);
+    `,
+  },
 ];
 
 /**

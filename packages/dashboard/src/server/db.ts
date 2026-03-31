@@ -183,6 +183,7 @@ export type NoteRow = {
 
 export type CommandExecutionRow = {
   id: number
+  uid: string | null
   command: string
   args: string | null
   pid: number | null
@@ -298,7 +299,7 @@ export function saveDb(db: Database, ocrDir: string): void {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
-  const tmpPath = dbPath + '.tmp'
+  const tmpPath = `${dbPath}.${process.pid}.tmp`
   writeFileSync(tmpPath, Buffer.from(data))
   renameSync(tmpPath, dbPath)
   postSaveHook?.()
