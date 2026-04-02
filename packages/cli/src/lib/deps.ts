@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import chalk from "chalk";
+import { execBinary } from "@open-code-review/platform";
 
 // ── Types ──
 
@@ -99,7 +99,7 @@ function parseVersion(output: string): string | undefined {
 
 function checkBinary(spec: DepSpec): DepCheck {
   try {
-    const output = execFileSync(spec.binary, ["--version"], {
+    const output = execBinary(spec.binary, ["--version"], {
       encoding: "utf-8",
       timeout: 5000,
       stdio: ["ignore", "pipe", "pipe"],

@@ -14,6 +14,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import chalk from "chalk";
+import { importModule } from "@open-code-review/platform";
 import { requireOcrSetup } from "../lib/guards.js";
 import { ensureDatabase, closeAllDatabases } from "../lib/db/index.js";
 
@@ -88,7 +89,7 @@ export const dashboardCommand = new Command("dashboard")
       // Dynamically import the dashboard server and call startServer().
       // This is the ONLY place where dashboard code is loaded.
       try {
-        const { startServer } = await import(serverPath);
+        const { startServer } = await importModule<{ startServer: (opts: { port: number; open: boolean }) => Promise<void> }>(serverPath);
         await startServer({ port, open: options.open });
       } catch (err) {
         console.error(chalk.red("Error: Failed to start dashboard server."));
