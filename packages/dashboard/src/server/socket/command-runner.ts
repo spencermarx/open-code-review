@@ -9,7 +9,8 @@
  * - AI workflow commands (map, review): spawned via the AI CLI adapter strategy
  */
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import { type ChildProcess } from 'node:child_process'
+import { spawnBinary } from '@open-code-review/platform'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Server as SocketIOServer, Socket } from 'socket.io'
@@ -315,11 +316,11 @@ function spawnCliCommand(
   const localCli = resolveLocalCli()
   const repoRoot = dirname(ocrDir)
   const proc = localCli
-    ? spawn('node', [localCli, baseCommand, ...subArgs], {
+    ? spawnBinary('node', [localCli, baseCommand, ...subArgs], {
         cwd: repoRoot,
         env: cleanEnv(),
       })
-    : spawn('ocr', [baseCommand, ...subArgs], {
+    : spawnBinary('ocr', [baseCommand, ...subArgs], {
         cwd: repoRoot,
         env: cleanEnv(),
       })

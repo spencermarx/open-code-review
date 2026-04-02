@@ -4,7 +4,7 @@
 
 import { Router } from 'express'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { execBinary } from '@open-code-review/platform'
 import { join, dirname, basename } from 'node:path'
 import type { AiCliService } from '../services/ai-cli/index.js'
 
@@ -59,7 +59,7 @@ function resolveIde(ocrDir: string): IdeType {
 
 function detectGitBranch(cwd: string): string | null {
   try {
-    return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    return execBinary('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd,
       timeout: 3000,
       encoding: 'utf-8',

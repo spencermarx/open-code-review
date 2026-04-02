@@ -15,7 +15,7 @@
  * - Tool names are lowercase (bash, read, write) — normalized to PascalCase for formatToolDetail
  */
 
-import { execFileSync, spawn } from 'node:child_process'
+import { execBinary, spawnBinary } from '@open-code-review/platform'
 import type {
   AiCliAdapter,
   DetectionResult,
@@ -38,7 +38,7 @@ export class OpenCodeAdapter implements AiCliAdapter {
 
   detect(): DetectionResult {
     try {
-      const output = execFileSync('opencode', ['--version'], {
+      const output = execBinary('opencode', ['--version'], {
         encoding: 'utf-8',
         timeout: 5000,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -77,7 +77,7 @@ export class OpenCodeAdapter implements AiCliAdapter {
 
     // OpenCode does not support --max-turns; agents run to completion.
     // stdin is not needed — the prompt is passed as a positional argument.
-    const proc = spawn('opencode', args, {
+    const proc = spawnBinary('opencode', args, {
       cwd: opts.cwd,
       env: cleanEnv(),
       detached: isWorkflow,

@@ -7,6 +7,6 @@
     "types": ["node"],
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "../cli/src/lib/db/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../cli/src/lib/db/**/*.ts", "../shared/platform/src/**/*.ts"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts"]
 }

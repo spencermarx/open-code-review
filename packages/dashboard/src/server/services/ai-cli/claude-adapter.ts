@@ -9,8 +9,7 @@
  * Output: NDJSON with stream_event / content_block_delta / assistant message types.
  */
 
-import { execFileSync } from 'node:child_process'
-import { spawn } from 'node:child_process'
+import { execBinary, spawnBinary } from '@open-code-review/platform'
 import type {
   AiCliAdapter,
   DetectionResult,
@@ -32,7 +31,7 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
 
   detect(): DetectionResult {
     try {
-      const output = execFileSync('claude', ['--version'], {
+      const output = execBinary('claude', ['--version'], {
         encoding: 'utf-8',
         timeout: 5000,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -65,7 +64,7 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
     }
 
     // Spawn claude directly with stdin pipe (no shell needed)
-    const proc = spawn('claude', flags, {
+    const proc = spawnBinary('claude', flags, {
       cwd: opts.cwd,
       env: cleanEnv(),
       detached: isWorkflow,
