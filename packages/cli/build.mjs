@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, cpSync, rmSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { build } from 'esbuild'
 
 const { version } = JSON.parse(readFileSync('package.json', 'utf-8'))
@@ -35,3 +36,9 @@ await build({
   banner: { js: cjsBanner },
   tsconfig: 'tsconfig.json',
 })
+
+// Copy dashboard dist into CLI dist (cross-platform, replaces Unix-only cp -r)
+const dashboardSrc = resolve('..', 'dashboard', 'dist')
+const dashboardDest = resolve('dist', 'dashboard')
+rmSync(dashboardDest, { recursive: true, force: true })
+cpSync(dashboardSrc, dashboardDest, { recursive: true })

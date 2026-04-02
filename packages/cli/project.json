@@ -15,20 +15,8 @@
         "cwd": "{projectRoot}"
       }
     },
-    "build:copy-dashboard": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["build:bundle"],
-      "options": {
-        "commands": [
-          "rm -rf packages/cli/dist/dashboard",
-          "cp -r packages/dashboard/dist packages/cli/dist/dashboard"
-        ],
-        "parallel": false,
-        "cwd": "{workspaceRoot}"
-      }
-    },
     "build": {
-      "dependsOn": ["build:bundle", "build:copy-dashboard"]
+      "dependsOn": ["build:bundle"]
     },
     "dev": {
       "executor": "nx:run-commands",
@@ -66,10 +54,10 @@
       }
     },
     "test": {
-      "executor": "nx:run-commands",
+      "executor": "@nx/vitest:test",
+      "outputs": ["{workspaceRoot}/coverage/packages/cli"],
       "options": {
-        "command": "vitest run",
-        "cwd": "{projectRoot}"
+        "config": "packages/cli/vitest.config.ts"
       }
     }
   }
