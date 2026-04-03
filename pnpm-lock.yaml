@@ -64,9 +64,6 @@ importers:
       '@open-code-review/agents':
         specifier: workspace:*
         version: link:../agents
-      '@open-code-review/platform':
-        specifier: workspace:*
-        version: link:../shared/platform
       chalk:
         specifier: ^5.4.1
         version: 5.6.2
@@ -89,6 +86,9 @@ importers:
         specifier: ^1.14.1
         version: 1.14.1
     devDependencies:
+      '@open-code-review/platform':
+        specifier: workspace:*
+        version: link:../shared/platform
       '@types/sql.js':
         specifier: ^1.4.9
         version: 1.4.9
