@@ -87,6 +87,8 @@ importers:
         specifier: ^1.4.9
         version: 1.4.9
 
+  packages/cli-e2e: {}
+
   packages/dashboard:
     dependencies:
       '@tanstack/react-query':
@@ -192,6 +194,8 @@ importers:
       vitest:
         specifier: ^3
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
+
+  packages/dashboard-e2e: {}
 
   packages/shared/platform: {}
 
