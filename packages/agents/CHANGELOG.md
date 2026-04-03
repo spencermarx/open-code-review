@@ -1,3 +1,14 @@
+## 1.10.3 (2026-04-03)
+
+### 🩹 Fixes
+
+- **cli:** move @open-code-review/platform to devDependencies ([a5fa8b5](https://github.com/spencermarx/open-code-review/commit/a5fa8b5))
+
+### ❤️ Thank You
+
+- claude-flow @agentic-org
+- Spencer Marx
+
 ## 1.10.2 (2026-04-03)
 
 This was a version bump only for agents to align it with other projects, there were no code changes.
