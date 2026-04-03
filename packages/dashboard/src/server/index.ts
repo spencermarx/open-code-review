@@ -91,6 +91,11 @@ if (process.env.NODE_ENV !== 'production') {
   })
 }
 
+// ── Health check (available without auth, before DB init) ──
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok' })
+})
+
 // ── Bearer token middleware for /api/* routes ──
 app.use('/api', (req, res, next) => {
   const authHeader = req.headers.authorization
@@ -126,12 +131,6 @@ if (process.env.NODE_ENV !== 'production') {
     res.json({ token: AUTH_TOKEN })
   })
 }
-
-// ── Health check (available before DB init) ──
-
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok' })
-})
 
 // ── Server startup ──
 
