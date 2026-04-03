@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { writeFileSync, mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, it, expect, afterAll } from "vitest";
-import { importModule, execBinary } from "../index.js";
+import { importModule, execBinary, execBinaryAsync } from "../index.js";
 
 /**
  * Behavioral tests for platform utilities.
@@ -66,6 +66,24 @@ describe("execBinary", () => {
         timeout: 2000,
       }),
     ).toThrow();
+  });
+});
+
+describe("execBinaryAsync", () => {
+  it("executes a binary and resolves with its stdout", async () => {
+    const { stdout } = await execBinaryAsync("node", ["-e", "console.log('async')"], {
+      encoding: "utf-8",
+    });
+    expect(stdout.trim()).toBe("async");
+  });
+
+  it("rejects when the binary does not exist", async () => {
+    await expect(
+      execBinaryAsync("nonexistent-binary-xyz", ["--version"], {
+        encoding: "utf-8",
+        timeout: 2000,
+      }),
+    ).rejects.toThrow();
   });
 });
 

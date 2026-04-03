@@ -101,11 +101,23 @@ describe("Dashboard smoke tests", () => {
       const early = startServerEarly({ stalePort: 9999 });
 
       try {
-        // Wait just long enough for the server's synchronous init to run.
-        // The port file deletion is synchronous and happens before DB open.
-        await new Promise((r) => setTimeout(r, 500));
+        // Poll until the stale port value is gone (deleted or replaced).
+        // The server deletes the port file synchronously at the start of
+        // initialization, before any async work.
+        const deadline = Date.now() + 5_000;
+        while (Date.now() < deadline) {
+          if (existsSync(early.portFilePath)) {
+            const value = parseInt(
+              readFileSync(early.portFilePath, "utf-8").trim(),
+              10,
+            );
+            if (value !== 9999) break; // Stale value replaced
+          } else {
+            break; // File deleted
+          }
+          await new Promise((r) => setTimeout(r, 50));
+        }
 
-        // Read the file the way Vite would — during the startup window.
         // The stale value (9999) must NOT be present.
         if (existsSync(early.portFilePath)) {
           const value = parseInt(

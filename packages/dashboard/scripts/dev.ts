@@ -8,7 +8,7 @@
  * PORT env var so the proxy always targets the right address.
  */
 
-import { spawn } from "node:child_process";
+import { spawnBinary } from "@open-code-review/platform";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 
@@ -65,9 +65,8 @@ async function main(): Promise<void> {
   const startTime = Date.now();
 
   // Start the server (tsx watch for hot reload)
-  const server = spawn("pnpm", ["dev:server"], {
+  const server = spawnBinary("pnpm", ["dev:server"], {
     stdio: "inherit",
-    shell: true,
   });
 
   // Wait for the server to bind and write its port
@@ -83,14 +82,16 @@ async function main(): Promise<void> {
   console.log(`\n  Vite proxy → http://127.0.0.1:${port}\n`);
 
   // Start Vite with the confirmed port
-  const client = spawn("pnpm", ["dev:client"], {
+  const client = spawnBinary("pnpm", ["dev:client"], {
     stdio: "inherit",
-    shell: true,
     env: { ...process.env, PORT: String(port) },
   });
 
   // Forward exit signals
+  let shuttingDown = false;
   const cleanup = (): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     server.kill();
     client.kill();
   };
