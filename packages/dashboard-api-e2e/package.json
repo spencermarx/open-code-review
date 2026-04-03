@@ -1,0 +1,7 @@
+{
+  "name": "@open-code-review/dashboard-api-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "API-level e2e smoke tests for the OCR dashboard server",
+  "type": "module"
+}

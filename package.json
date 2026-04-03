@@ -22,13 +22,16 @@
     "lint:cli": "nx lint cli",
     "e2e": "nx run-many -t e2e",
     "e2e:cli": "nx e2e cli-e2e",
-    "e2e:dashboard": "nx e2e dashboard-e2e"
+    "e2e:dashboard-api": "nx e2e dashboard-api-e2e",
+    "e2e:dashboard-ui": "nx e2e dashboard-ui-e2e"
   },
   "devDependencies": {
     "@nx/devkit": "^22.0.0",
     "@nx/esbuild": "^22.0.0",
     "@nx/js": "^22.0.0",
+    "@nx/playwright": "^22.6.4",
     "@nx/vitest": "^22.6.4",
+    "@playwright/test": "^1.59.1",
     "@swc-node/register": "^1.11.1",
     "@swc/core": "^1.15.18",
     "@types/node": "^22.10.5",

@@ -1,7 +1,0 @@
-{
-  "name": "@open-code-review/dashboard-e2e",
-  "version": "0.0.0",
-  "private": true,
-  "description": "E2E smoke tests for the OCR dashboard",
-  "type": "module"
-}

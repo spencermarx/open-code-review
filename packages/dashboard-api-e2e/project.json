@@ -1,15 +1,15 @@
 {
-  "name": "dashboard-e2e",
+  "name": "dashboard-api-e2e",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/dashboard-e2e/src",
+  "sourceRoot": "packages/dashboard-api-e2e/src",
   "projectType": "application",
-  "tags": ["scope:dashboard", "type:e2e"],
+  "tags": ["scope:dashboard", "type:e2e", "test:api"],
   "targets": {
     "e2e": {
       "executor": "@nx/vitest:test",
       "dependsOn": ["cli:build"],
       "options": {
-        "config": "packages/dashboard-e2e/vitest.config.ts"
+        "config": "packages/dashboard-api-e2e/vitest.config.ts"
       }
     }
   }
