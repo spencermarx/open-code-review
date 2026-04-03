@@ -17,6 +17,11 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
 
+
+# Code Conventions
+
+See `CLAUDE.md` for canonical code conventions
+
 <!-- OCR:START -->
 # Open Code Review Instructions
 
@@ -37,7 +42,3 @@ Use `.ocr/skills/SKILL.md` to learn:
 Keep this managed block so 'ocr init' can refresh the instructions.
 
 <!-- OCR:END -->
-
-# Code Conventions
-
-See `CLAUDE.md` for canonical code conventions
