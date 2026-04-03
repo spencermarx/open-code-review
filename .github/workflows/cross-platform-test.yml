@@ -17,12 +17,15 @@ on:
         default: false
 
 env:
+  # GitHub requires this to opt into the Node 24 runtime for JavaScript actions.
+  # Without it, actions fall back to Node 20 which may emit deprecation warnings.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   test:
     name: Test on ${{ inputs.os }}
     runs-on: ${{ inputs.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
