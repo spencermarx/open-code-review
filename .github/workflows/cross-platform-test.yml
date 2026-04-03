@@ -1,0 +1,39 @@
+name: Cross-Platform Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: "Target OS"
+        type: choice
+        options:
+          - windows-latest
+          - macos-latest
+          - ubuntu-latest
+        default: windows-latest
+      debug:
+        description: "Open SSH debug session after tests"
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    name: Test on ${{ inputs.os }}
+    runs-on: ${{ inputs.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm nx run-many -t test
+      - run: pnpm nx run-many -t e2e
+
+      - name: Debug Session (SSH)
+        if: ${{ inputs.debug }}
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
