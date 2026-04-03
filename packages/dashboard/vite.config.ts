@@ -6,12 +6,10 @@ import tailwindcss from '@tailwindcss/vite'
 
 /**
  * Discover the server port. Priority:
- * 1. PORT env var (explicit override)
- * 2. `.ocr/data/server-port` file (written by the server on startup)
+ * 1. PORT env var — set by scripts/dev.ts after the server binds,
+ *    guaranteeing the correct port with zero race condition
+ * 2. `.ocr/data/server-port` file — fallback for manual Vite starts
  * 3. Default 4173
- *
- * Walks up from CWD to find `.ocr/` — Vite runs from packages/dashboard/
- * but `.ocr/` lives at the monorepo root.
  */
 function resolveServerPort(): number {
   if (process.env.PORT) return parseInt(process.env.PORT, 10)
