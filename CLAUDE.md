@@ -1,5 +1,5 @@
 <!-- OPENSPEC:START -->
-# OpenSpec Instructions
+## OpenSpec Instructions
 
 These instructions are for AI assistants working in this project.
 
@@ -18,13 +18,13 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 <!-- OPENSPEC:END -->
 
 
-# Code Conventions
+## Code Conventions
 
 - **TypeScript only**: Do not create raw `.js` or `.mjs` files unless they serve a config purpose (e.g., `vite.config.mjs`, `eslint.config.mjs`). All project code, scripts, and utilities must be written in TypeScript.
 - **Nx-native automation**: Release process automation must use Nx extension points (e.g., `VersionActions`, `preVersionCommand`), not npm lifecycle scripts or standalone scripts.
 
 <!-- OCR:START -->
-# Open Code Review Instructions
+## Open Code Review Instructions
 
 These instructions are for AI assistants handling code review in this project.
 
@@ -40,6 +40,6 @@ Use `.ocr/skills/SKILL.md` to learn:
 - Available reviewer personas and their focus areas
 - Session management and output format
 
-Keep this managed block so 'ocr init' can refresh the instructions.
+Keep this managed block so `ocr init` can refresh the instructions.
 
 <!-- OCR:END -->

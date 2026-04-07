@@ -5,7 +5,7 @@ const START_MARKER = "<!-- OCR:START -->";
 const END_MARKER = "<!-- OCR:END -->";
 
 const OCR_INSTRUCTION_BLOCK = `${START_MARKER}
-# Open Code Review Instructions
+## Open Code Review Instructions
 
 These instructions are for AI assistants handling code review in this project.
 
@@ -21,7 +21,7 @@ Use \`.ocr/skills/SKILL.md\` to learn:
 - Available reviewer personas and their focus areas
 - Session management and output format
 
-Keep this managed block so 'ocr init' can refresh the instructions.
+Keep this managed block so \`ocr init\` can refresh the instructions.
 
 ${END_MARKER}`;
 
