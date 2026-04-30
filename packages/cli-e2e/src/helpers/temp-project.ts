@@ -10,6 +10,7 @@ import {
   mkdirSync,
   rmSync,
   realpathSync,
+  writeFileSync,
 } from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -54,4 +55,15 @@ export function createInitializedProject(): TempProject {
   mkdirSync(resolve(project.dir, ".ocr", "sessions"), { recursive: true });
 
   return project;
+}
+
+/**
+ * Write a `default_team` block to the project's `.ocr/config.yaml`.
+ *
+ * Helper for tests that need to verify the three-form schema behavior end
+ * to end — they read the resolved composition back via `ocr team resolve`.
+ */
+export function writeConfigYaml(project: TempProject, yamlBody: string): void {
+  const configPath = resolve(project.dir, ".ocr", "config.yaml");
+  writeFileSync(configPath, yamlBody, "utf-8");
 }

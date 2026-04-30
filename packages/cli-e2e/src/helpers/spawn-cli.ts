@@ -5,7 +5,7 @@
  * cross-platform compatibility (Windows does not honor shebangs).
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { promisify } from "node:util";
@@ -43,8 +43,18 @@ export class CliTimeoutError extends Error {
 
 export async function spawnCli(
   args: string[],
-  options?: { cwd?: string; env?: Record<string, string>; timeout?: number },
+  options?: {
+    cwd?: string;
+    env?: Record<string, string>;
+    timeout?: number;
+    stdin?: string;
+  },
 ): Promise<CliResult> {
+  // Stdin pathway needs `spawn` rather than `execFile` so we can write
+  // to the child's stdin stream after fork.
+  if (options?.stdin !== undefined) {
+    return spawnCliWithStdin(args, options.stdin, options);
+  }
   try {
     const { stdout, stderr } = await execFileAsync(
       "node",
@@ -74,4 +84,44 @@ export async function spawnCli(
       exitCode: typeof e.code === "number" ? e.code : 1,
     };
   }
+}
+
+function spawnCliWithStdin(
+  args: string[],
+  stdin: string,
+  options: { cwd?: string; env?: Record<string, string>; timeout?: number },
+): Promise<CliResult> {
+  return new Promise<CliResult>((resolve, reject) => {
+    const child = spawn("node", [CLI_BIN, ...args], {
+      cwd: options.cwd,
+      env: { ...process.env, ...options.env, NO_COLOR: "1" },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new CliTimeoutError(args, options.timeout ?? 30_000));
+    }, options.timeout ?? 30_000);
+
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      resolve({ stdout, stderr, exitCode: typeof code === "number" ? code : 1 });
+    });
+    child.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+
+    child.stdin?.write(stdin);
+    child.stdin?.end();
+  });
 }
