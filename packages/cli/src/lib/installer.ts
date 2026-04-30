@@ -12,6 +12,7 @@ import { createRequire } from "node:module";
 import type { AIToolConfig } from "./config";
 import { ensureGitignore } from "./gitignore.js";
 import type { ReviewersMeta, ReviewerMeta, ReviewerTier } from "./state/types.js";
+import { parseTeamConfigYaml } from "./team-config.js";
 
 const require = createRequire(import.meta.url);
 
@@ -269,20 +270,19 @@ export function generateReviewersMeta(
   const files = readdirSync(reviewersDir).filter((f) => f.endsWith(".md"));
   if (files.length === 0) return null;
 
-  // Read default_team from config
+  // Read default_team from config via the shared three-form parser.
+  // The parser handles all three schema forms (number / object / array of
+  // instances) and is the single source of truth for `default_team` reads.
   const defaultTeamIds = new Set<string>();
   if (existsSync(configPath)) {
     try {
       const configContent = readFileSync(configPath, "utf-8");
-      const teamMatch = configContent.match(/default_team:\s*\n((?:\s+\w[\w-]*:\s*\d+\s*(?:#[^\n]*)?\n?)*)/);
-      if (teamMatch?.[1]) {
-        const entries = teamMatch[1].matchAll(/\s+([\w-]+):\s*\d+/g);
-        for (const entry of entries) {
-          if (entry[1]) defaultTeamIds.add(entry[1]);
-        }
+      const { team } = parseTeamConfigYaml(configContent);
+      for (const inst of team) {
+        defaultTeamIds.add(inst.persona);
       }
     } catch {
-      // Ignore config parse errors
+      // Ignore config parse errors — `is_default` is best-effort metadata.
     }
   }
 
