@@ -19,6 +19,7 @@ import { execBinary, spawnBinary } from '@open-code-review/platform'
 import type {
   AiCliAdapter,
   DetectionResult,
+  ModelDescriptor,
   NormalizedEvent,
   SpawnOptions,
   SpawnResult,
@@ -32,9 +33,26 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+// ── Bundled known-good model list ──
+//
+// OpenCode is provider-agnostic. The bundled fallback covers a few common
+// provider/model identifiers; native enumeration via `opencode models --json`
+// is the preferred path when available.
+const BUNDLED_OPENCODE_MODELS: ModelDescriptor[] = [
+  { id: 'anthropic/claude-opus-4-7', provider: 'anthropic' },
+  { id: 'anthropic/claude-sonnet-4-6', provider: 'anthropic' },
+  { id: 'anthropic/claude-haiku-4-5-20251001', provider: 'anthropic' },
+]
+
 export class OpenCodeAdapter implements AiCliAdapter {
   readonly name = 'OpenCode'
   readonly binary = 'opencode'
+  // OpenCode's `--agent build/plan` flag is the closest analog to a per-task
+  // primitive but does not currently expose per-subagent model overrides.
+  // Configured per-instance models will run uniformly on the parent model
+  // until OpenCode adds per-task model support; OCR surfaces a warning to
+  // the user when this happens.
+  readonly supportsPerTaskModel = false
 
   detect(): DetectionResult {
     try {
@@ -75,6 +93,11 @@ export class OpenCodeAdapter implements AiCliAdapter {
       args.push('--session', opts.resumeSessionId, '--continue')
     }
 
+    // Per-instance model override (vendor-native string, no OCR translation)
+    if (opts.model) {
+      args.push('--model', opts.model)
+    }
+
     // OpenCode does not support --max-turns; agents run to completion.
     // stdin is not needed — the prompt is passed as a positional argument.
     const proc = spawnBinary('opencode', args, {
@@ -85,6 +108,50 @@ export class OpenCodeAdapter implements AiCliAdapter {
     })
 
     return { process: proc, detached: isWorkflow }
+  }
+
+  async listModels(): Promise<ModelDescriptor[]> {
+    // OpenCode has historically exposed model discovery via configuration
+    // rather than a CLI subcommand. Probe defensively for `models --json`
+    // in case a future version adds it; otherwise fall back to the bundled
+    // list. Free-text input is the canonical bypass for users on unusual
+    // provider/model combinations.
+    try {
+      const output = execBinary('opencode', ['models', '--json'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      const parsed: unknown = JSON.parse(output)
+      if (Array.isArray(parsed)) {
+        const models: ModelDescriptor[] = []
+        for (const item of parsed) {
+          if (typeof item === 'string') {
+            models.push({ id: item })
+          } else if (
+            typeof item === 'object' &&
+            item !== null &&
+            'id' in (item as Record<string, unknown>) &&
+            typeof (item as Record<string, unknown>).id === 'string'
+          ) {
+            const obj = item as Record<string, unknown>
+            const desc: ModelDescriptor = { id: obj.id as string }
+            if (typeof obj.displayName === 'string') desc.displayName = obj.displayName
+            if (typeof obj.provider === 'string') desc.provider = obj.provider
+            if (Array.isArray(obj.tags)) {
+              desc.tags = obj.tags.filter((t): t is string => typeof t === 'string')
+            }
+            models.push(desc)
+          }
+        }
+        if (models.length > 0) {
+          return models
+        }
+      }
+    } catch {
+      // Native enumeration unavailable — fall through to bundled list
+    }
+    return BUNDLED_OPENCODE_MODELS
   }
 
   parseLine(line: string): NormalizedEvent[] {

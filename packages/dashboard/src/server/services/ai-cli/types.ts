@@ -36,6 +36,26 @@ export type SpawnOptions = {
   allowedTools?: string[]
   /** Session ID for conversation resume (Claude Code: --resume, OpenCode: TBD) */
   resumeSessionId?: string
+  /**
+   * Resolved model identifier passed verbatim to the underlying CLI's
+   * `--model` flag. Strings are vendor-native — no OCR-coined aliases.
+   * Omit to let the CLI's own default model apply.
+   */
+  model?: string
+}
+
+// ── Model Discovery ──
+
+/**
+ * Describes a single model that an adapter is willing to surface to users.
+ * `id` is the literal string passed to `--model`. Other fields are optional
+ * vendor-supplied hints — OCR does NOT invent tags like "fast" or "strong".
+ */
+export type ModelDescriptor = {
+  id: string
+  displayName?: string
+  provider?: string
+  tags?: string[]
 }
 
 export type SpawnResult = {
@@ -59,12 +79,29 @@ export interface AiCliAdapter {
   readonly name: string
   /** Binary name used for detection and display (e.g., 'claude', 'opencode') */
   readonly binary: string
+  /**
+   * Whether the underlying CLI supports per-task (per-subagent) model
+   * overrides. When `false`, configured per-instance models in OCR's
+   * `default_team` are honored only at the *parent* level — the user is
+   * shown a structured warning and reviewers run on the parent's model.
+   */
+  readonly supportsPerTaskModel: boolean
   /** Check if the binary is available and return version info */
   detect(): DetectionResult
   /** Spawn an AI process with the given options */
   spawn(opts: SpawnOptions): SpawnResult
   /** Parse a single line of structured output into normalized events */
   parseLine(line: string): NormalizedEvent[]
+  /**
+   * Surfaces models the underlying CLI is willing to accept. Must never
+   * throw — implementations should fall back through:
+   *
+   *   1. Native CLI enumeration (`<binary> models --json`, etc.) when available
+   *   2. A small bundled known-good list (best-effort, may go stale)
+   *   3. An empty list — callers are expected to allow free-text input as
+   *      the final escape hatch, never gatekeep against the CLI's own validation
+   */
+  listModels(): Promise<ModelDescriptor[]>
 }
 
 // ── Service Status ──

@@ -16,6 +16,10 @@ import { dirname, join } from 'node:path'
 import type { Server as SocketIOServer, Socket } from 'socket.io'
 import type { Database } from 'sql.js'
 import { saveDb } from '../db.js'
+import {
+  bindVendorSessionIdOpportunistically,
+  getLatestAgentSessionWithVendorId,
+} from '@open-code-review/cli/db'
 import { AiCliService, formatToolDetail, type NormalizedEvent } from '../services/ai-cli/index.js'
 import { resolveLocalCli } from './cli-resolver.js'
 import { cleanEnv } from './env.js'
@@ -190,14 +194,28 @@ export function registerCommandHandlers(
         return
       }
 
-      // Insert execution record
+      // Insert execution record. AI workflow commands (review, map, …)
+      // participate in the agent-session journal — we set `vendor` and seed
+      // `last_heartbeat_at` so the row appears in /api/agent-sessions and
+      // is swept for liveness. Utility commands (state, progress, …) get
+      // a vanilla command_executions row without the journal fields.
       const startedAt = new Date().toISOString()
       const uid = generateCommandUid()
       const argsJson = JSON.stringify(subArgs)
+      const isAiCommand = AI_COMMANDS.has(baseCommand)
+      const adapterBinary = isAiCommand ? aiCliService.getAdapter()?.binary ?? null : null
       db.run(
-        `INSERT INTO command_executions (uid, command, args, started_at)
-         VALUES (?, ?, ?, ?)`,
-        [uid, command, argsJson, startedAt]
+        `INSERT INTO command_executions
+           (uid, command, args, started_at, vendor, last_heartbeat_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          uid,
+          command,
+          argsJson,
+          startedAt,
+          adapterBinary,
+          isAiCommand ? startedAt : null,
+        ],
       )
       const idResult = db.exec('SELECT last_insert_rowid() as id')
       const executionId = (idResult[0]?.values[0]?.[0] as number) ?? 0
@@ -406,6 +424,7 @@ function spawnAiCommand(
     let target = 'staged changes'
     let requirements = ''
     let team = ''
+    let resumeWorkflowId = ''
     const reviewerDescriptions: { description: string; count: number }[] = []
     const options: string[] = []
     let i = 0
@@ -419,6 +438,11 @@ function spawnAiCommand(
         break
       } else if (arg === '--team' && i + 1 < subArgs.length) {
         team = subArgs[i + 1] ?? ''
+        i += 2
+      } else if (arg === '--resume' && i + 1 < subArgs.length) {
+        // Resume the workflow's most recent agent_session by re-attaching
+        // the host CLI's session via SpawnOptions.resumeSessionId.
+        resumeWorkflowId = subArgs[i + 1] ?? ''
         i += 2
       } else if (arg === '--reviewer' && i + 1 < subArgs.length) {
         const raw = subArgs[i + 1] ?? ''
@@ -488,9 +512,39 @@ function spawnAiCommand(
   promptLines.push('', '---', '', commandContent)
   const prompt = promptLines.join('\n')
 
-  // 4. Spawn via adapter
+  // 4. Resolve resume token (if --resume <workflow-id> was supplied)
+  let resumeSessionId: string | undefined
+  if (resumeWorkflowId) {
+    try {
+      const latest = getLatestAgentSessionWithVendorId(db, resumeWorkflowId)
+      if (latest?.vendor_session_id) {
+        resumeSessionId = latest.vendor_session_id
+        io.emit('command:output', {
+          execution_id: executionId,
+          content: `▸ Resuming workflow ${resumeWorkflowId} via captured vendor session id\n`,
+        })
+      } else {
+        io.emit('command:output', {
+          execution_id: executionId,
+          content: `⚠ No vendor session id captured for workflow ${resumeWorkflowId}; starting a fresh conversation.\n`,
+        })
+      }
+    } catch (err) {
+      console.error('Failed to resolve resume token:', err)
+    }
+  }
+
+  // 5a. Spawn via adapter
   const repoRoot = dirname(ocrDir)
-  const { process: proc, detached } = adapter.spawn({ mode: 'workflow', prompt, cwd: repoRoot })
+  const spawnOpts: { mode: 'workflow'; prompt: string; cwd: string; resumeSessionId?: string } = {
+    mode: 'workflow',
+    prompt,
+    cwd: repoRoot,
+  }
+  if (resumeSessionId) {
+    spawnOpts.resumeSessionId = resumeSessionId
+  }
+  const { process: proc, detached } = adapter.spawn(spawnOpts)
   entry.process = proc
   entry.detached = detached
 
@@ -508,7 +562,7 @@ function spawnAiCommand(
     content: `▸ Starting OCR ${baseCommand} workflow...\n`,
   })
 
-  // 5. Parse structured output via adapter
+  // 5b. Parse structured output via adapter
   let lineBuffer = ''
 
   type PendingTool = { name: string; inputJson: string }
@@ -564,6 +618,23 @@ function spawnAiCommand(
           case 'full_text':
             entry.outputBuffer = evt.text
             break
+          case 'session_id': {
+            // Opportunistically bind the vendor session id to the most
+            // recent unbound running agent_sessions row in an active
+            // workflow. Returns null when no candidate exists (e.g. the
+            // Tech Lead's first session_id arrives before any OCR session
+            // has been initialized) — that case is handled by a later
+            // re-emission of the same vendor id once a row exists.
+            try {
+              const bound = bindVendorSessionIdOpportunistically(db, evt.id)
+              if (bound) {
+                saveDb(db, ocrDir)
+              }
+            } catch (err) {
+              console.error('Failed to bind vendor session id:', err)
+            }
+            break
+          }
         }
       }
     }
