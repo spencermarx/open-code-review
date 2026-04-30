@@ -194,6 +194,41 @@ export type ReviewersMeta = {
   reviewers: ReviewerMeta[];
 };
 
+// ── Agent Sessions (per-instance lifecycle journal) ──
+
+export type AgentSessionStatus =
+  | "spawning"
+  | "running"
+  | "done"
+  | "crashed"
+  | "cancelled"
+  | "orphaned";
+
+export type AgentVendor = "claude" | "opencode" | "gemini" | string;
+
+/**
+ * One row in the `agent_sessions` table — a journal entry for an agent-CLI
+ * process the AI declared it spawned on behalf of a workflow.
+ */
+export type AgentSession = {
+  id: string;
+  workflow_id: string;
+  vendor: AgentVendor;
+  vendor_session_id: string | null;
+  persona: string | null;
+  instance_index: number | null;
+  name: string | null;
+  resolved_model: string | null;
+  phase: string | null;
+  status: AgentSessionStatus;
+  pid: number | null;
+  started_at: string;
+  last_heartbeat_at: string;
+  ended_at: string | null;
+  exit_code: number | null;
+  notes: string | null;
+};
+
 // ── Show Result ──
 
 export type ShowResult = {
