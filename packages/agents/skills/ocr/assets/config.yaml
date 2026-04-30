@@ -68,10 +68,47 @@ context_discovery:
 # ─────────────────────────────────────────────────────────────────────────────
 
 default_team:
+  # Form 1 — shorthand. N instances, no model override.
   principal: 2    # Holistic architecture review
   quality: 2      # Code quality and maintainability
   # security: 1   # Auto-added for auth/API/data changes
   # testing: 1    # Auto-added for logic-heavy changes
+
+  # ── Optional advanced forms ──
+  # Form 2 — object: N instances, all sharing the same model.
+  # quality: { count: 2, model: claude-haiku-4-5-20251001 }
+  #
+  # Form 3 — list of instance configs: per-instance model and optional name.
+  # principal:
+  #   - { model: claude-opus-4-7 }
+  #   - { model: claude-sonnet-4-6, name: principal-balanced }
+  #
+  # Mixing forms within a single entry (e.g. count + instances) is rejected
+  # at parse time. Pick one form per persona.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODELS (optional)
+# ─────────────────────────────────────────────────────────────────────────────
+# Define personal aliases for vendor-native model identifiers and an optional
+# workspace-level default. OCR ships zero alias entries — this section is
+# entirely user-owned. Aliases expand once at parse time.
+#
+# models:
+#   aliases:
+#     workhorse: claude-sonnet-4-6
+#     big-brain: claude-opus-4-7
+#   default: claude-sonnet-4-6   # used when an instance has no explicit model
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RUNTIME (optional)
+# ─────────────────────────────────────────────────────────────────────────────
+# Tunables that affect liveness reasoning. Defaults are usually fine.
+#
+# runtime:
+#   agent_heartbeat_seconds: 60   # After this many seconds without an
+#                                  # `ocr session beat` call, a `running`
+#                                  # agent_sessions row is reclassified
+#                                  # `orphaned` on the next sweep.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CODE REVIEW MAP
