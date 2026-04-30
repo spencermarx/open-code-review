@@ -260,6 +260,74 @@ const MIGRATIONS: Migration[] = [
       CREATE UNIQUE INDEX idx_command_executions_uid ON command_executions(uid);
     `,
   },
+  {
+    version: 10,
+    description: "Add agent_sessions journal for per-instance lifecycle tracking",
+    sql: `
+      CREATE TABLE agent_sessions (
+        id TEXT PRIMARY KEY,
+        workflow_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE RESTRICT,
+        vendor TEXT NOT NULL,
+        vendor_session_id TEXT,
+        persona TEXT,
+        instance_index INTEGER,
+        name TEXT,
+        resolved_model TEXT,
+        phase TEXT,
+        status TEXT NOT NULL CHECK(status IN ('spawning', 'running', 'done', 'crashed', 'cancelled', 'orphaned')),
+        pid INTEGER,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_heartbeat_at TEXT NOT NULL DEFAULT (datetime('now')),
+        ended_at TEXT,
+        exit_code INTEGER,
+        notes TEXT
+      );
+      CREATE INDEX idx_agent_sessions_workflow ON agent_sessions(workflow_id);
+      CREATE INDEX idx_agent_sessions_status_heartbeat ON agent_sessions(status, last_heartbeat_at);
+    `,
+  },
+  {
+    version: 11,
+    description:
+      "Unify agent_sessions into command_executions — every spawned process is one execution row",
+    sql: `
+      -- Extend command_executions with the journaling fields previously on agent_sessions.
+      -- A NULL workflow_id is allowed because some commands (e.g. sync-reviewers,
+      -- create-reviewer) don't tie to a review workflow. Existing rows get NULL by default.
+      ALTER TABLE command_executions ADD COLUMN workflow_id TEXT REFERENCES sessions(id) ON DELETE RESTRICT;
+      -- parent_id = the dashboard-spawn that's the "Tech Lead" parent of an AI-spawned
+      -- session-instance row. NULL for top-level dashboard spawns.
+      ALTER TABLE command_executions ADD COLUMN parent_id INTEGER REFERENCES command_executions(id);
+      -- Vendor metadata (claude | opencode | gemini | …). NULL for non-AI commands.
+      ALTER TABLE command_executions ADD COLUMN vendor TEXT;
+      -- The underlying CLI's own session id, captured from stream events.
+      -- Used for resume / handoff. Hidden from users (ocr exposes its own id only).
+      ALTER TABLE command_executions ADD COLUMN vendor_session_id TEXT;
+      -- Persona/instance metadata for AI sub-agents (set when the AI calls
+      -- ocr session start-instance). NULL for the parent dashboard spawn.
+      ALTER TABLE command_executions ADD COLUMN persona TEXT;
+      ALTER TABLE command_executions ADD COLUMN instance_index INTEGER;
+      ALTER TABLE command_executions ADD COLUMN name TEXT;
+      -- Resolved model string passed to --model post-alias-expansion.
+      ALTER TABLE command_executions ADD COLUMN resolved_model TEXT;
+      -- Liveness heartbeat. Bumped on every state event the AI emits.
+      -- Stale rows past the threshold are reclassified to orphaned (exit_code=-3).
+      ALTER TABLE command_executions ADD COLUMN last_heartbeat_at TEXT;
+      -- Free-form annotations (sweep notes, host-CLI capability warnings, etc).
+      ALTER TABLE command_executions ADD COLUMN notes TEXT;
+      CREATE INDEX idx_command_executions_workflow ON command_executions(workflow_id);
+      CREATE INDEX idx_command_executions_parent ON command_executions(parent_id);
+      CREATE INDEX idx_command_executions_heartbeat ON command_executions(last_heartbeat_at);
+
+      -- The agent_sessions table is retired. Phase 1 was a parallel journal that
+      -- this migration consolidates. We drop the table outright — the only existing
+      -- consumers are the cli helpers and tests, which are updated alongside this
+      -- migration. No production deployments have agent_sessions data worth migrating.
+      DROP INDEX IF EXISTS idx_agent_sessions_workflow;
+      DROP INDEX IF EXISTS idx_agent_sessions_status_heartbeat;
+      DROP TABLE IF EXISTS agent_sessions;
+    `,
+  },
 ];
 
 /**
