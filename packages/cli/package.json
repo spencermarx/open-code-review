@@ -18,6 +18,24 @@
       "source": "./src/lib/db/index.ts",
       "import": "./dist/lib/db/index.js",
       "default": "./dist/lib/db/index.js"
+    },
+    "./runtime-config": {
+      "types": "./src/lib/runtime-config.ts",
+      "source": "./src/lib/runtime-config.ts",
+      "import": "./dist/lib/runtime-config.js",
+      "default": "./dist/lib/runtime-config.js"
+    },
+    "./team-config": {
+      "types": "./src/lib/team-config.ts",
+      "source": "./src/lib/team-config.ts",
+      "import": "./dist/lib/team-config.js",
+      "default": "./dist/lib/team-config.js"
+    },
+    "./models": {
+      "types": "./src/lib/models.ts",
+      "source": "./src/lib/models.ts",
+      "import": "./dist/lib/models.js",
+      "default": "./dist/lib/models.js"
     }
   },
   "files": [
@@ -50,7 +68,8 @@
     "log-update": "^7.0.2",
     "ora": "^8.1.1",
     "socket.io": "^4.8",
-    "sql.js": "^1.14.1"
+    "sql.js": "^1.14.1",
+    "yaml": "^2.8.3"
   },
   "publishConfig": {
     "access": "public"

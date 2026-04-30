@@ -23,19 +23,37 @@ await build({
   tsconfig: 'tsconfig.json',
 })
 
-// Shared DB subpath export (used by @open-code-review/dashboard)
-await build({
-  entryPoints: ['src/lib/db/index.ts'],
+// Shared library subpath exports.
+//
+// Each of these is consumed by @open-code-review/dashboard via its
+// own esbuild bundling. Library bundles must NOT carry the `cjsBanner`
+// — the dashboard bundle adds its own banner once at the top, and
+// duplicating the `_cjsReq` declaration via repeated banners across
+// inlined subpath bundles produces a `SyntaxError: Identifier
+// '_cjsReq' has already been declared` at runtime. The library code
+// constructs its own `createRequire` inline (e.g. `db/index.ts`
+// `locateWasm`), so no module-scope `require` is needed here.
+const libraryBundle = (entryPoint, outfile, externals = []) => ({
+  entryPoints: [entryPoint],
   bundle: true,
   platform: 'node',
   format: 'esm',
   target: 'node20',
-  outfile: 'dist/lib/db/index.js',
+  outfile,
   minify: false,
-  external: ['sql.js'],
-  banner: { js: cjsBanner },
+  external: externals,
   tsconfig: 'tsconfig.json',
 })
+
+await build(libraryBundle('src/lib/db/index.ts', 'dist/lib/db/index.js', ['sql.js']))
+await build(libraryBundle('src/lib/runtime-config.ts', 'dist/lib/runtime-config.js'))
+// `yaml` is CommonJS-published, and inlining it via esbuild emits a
+// `require()` call that fails when the consuming dashboard server is
+// loaded in dev mode (tsx watch, no `createRequire` banner). Keeping it
+// external means node's ESM resolver picks the package's own entry point
+// at runtime — works in both dev mode and production-bundled mode.
+await build(libraryBundle('src/lib/team-config.ts', 'dist/lib/team-config.js', ['yaml']))
+await build(libraryBundle('src/lib/models.ts', 'dist/lib/models.js'))
 
 // Copy dashboard dist into CLI dist (cross-platform, replaces Unix-only cp -r)
 const dashboardSrc = resolve('..', 'dashboard', 'dist')
