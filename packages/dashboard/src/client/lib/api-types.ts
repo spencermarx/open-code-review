@@ -97,6 +97,81 @@ export type RoundProgress = {
   updated_at: string
 }
 
+// ── Agent sessions (per-instance lifecycle journal) ──
+
+export type AgentSessionStatus =
+  | 'spawning'
+  | 'running'
+  | 'done'
+  | 'crashed'
+  | 'cancelled'
+  | 'orphaned'
+
+export type AgentSessionRow = {
+  id: string
+  workflow_id: string
+  vendor: string
+  vendor_session_id: string | null
+  persona: string | null
+  instance_index: number | null
+  name: string | null
+  resolved_model: string | null
+  phase: string | null
+  status: AgentSessionStatus
+  pid: number | null
+  started_at: string
+  last_heartbeat_at: string
+  ended_at: string | null
+  exit_code: number | null
+  notes: string | null
+}
+
+export type AgentSessionsResponse = {
+  workflow_id: string
+  agent_sessions: AgentSessionRow[]
+}
+
+// ── Terminal handoff payload (Spec 5) ──
+
+export type HandoffPayload = {
+  workflow_id: string
+  vendor: string | null
+  vendor_session_id: string | null
+  project_dir: string
+  host_binary_available: boolean
+  ocr_command: string
+  vendor_command: string | null
+  fallback: 'fresh-start' | null
+}
+
+// ── Team composition ──
+
+export type ReviewerInstance = {
+  persona: string
+  instance_index: number
+  name: string
+  model: string | null
+}
+
+export type TeamResolvedResponse = {
+  team: ReviewerInstance[]
+}
+
+// ── Model discovery ──
+
+export type ModelDescriptor = {
+  id: string
+  displayName?: string
+  provider?: string
+  tags?: string[]
+}
+
+export type ModelListResponse = {
+  vendor: 'claude' | 'opencode' | null
+  source: 'native' | 'bundled' | null
+  models: ModelDescriptor[]
+}
+
 export type ReviewerOutputDetail = ReviewerOutput & {
   findings: Finding[]
 }
