@@ -8,6 +8,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { dirname, basename } from 'node:path'
 import { watch, type FSWatcher } from 'chokidar'
 import initSqlJs, { type Database } from 'sql.js'
 import type { Server as SocketIOServer } from 'socket.io'
@@ -68,19 +69,41 @@ export class DbSyncWatcher {
       // File may not exist yet
     }
 
-    this.watcher = watch(this.dbFilePath, {
-      // Also watch WAL/SHM files that SQLite may create
+    // Watch the parent directory rather than the file itself.
+    //
+    // The CLI's `saveDatabase` uses the atomic-rename pattern: write to a
+    // temp file (`ocr.db.<pid>.tmp`), then rename over `ocr.db`. When you
+    // watch a single file path, the watch handle is bound to the original
+    // inode — atomic rename replaces the inode and the watcher loses the
+    // file silently on some platforms (notably macOS FSEvents). Watching
+    // the directory and filtering by name catches the rename uniformly
+    // across macOS/Linux/Windows.
+    // Watch the parent directory and filter to events on `ocr.db`.
+    //
+    // Why directory-level: the CLI's `saveDatabase` uses atomic rename
+    // (write to `ocr.db.<pid>.tmp`, rename over `ocr.db`). A single-file
+    // watch binds to the original inode — atomic rename replaces the inode
+    // and the watcher loses the file silently on macOS FSEvents.
+    //
+    // Why polling: chokidar's native FSEvents in macOS tmp directories
+    // (used by e2e harnesses) is unreliable. Polling is platform-uniform
+    // and the cost is one stat per interval over a tiny directory.
+    const watchDir = dirname(this.dbFilePath)
+    const watchedFile = basename(this.dbFilePath)
+    this.watcher = watch(watchDir, {
       persistent: true,
       ignoreInitial: true,
-      awaitWriteFinish: {
-        stabilityThreshold: 200,
-        pollInterval: 50,
-      },
+      depth: 0,
+      usePolling: true,
+      interval: 200,
     })
 
-    this.watcher.on('change', () => {
-      this.debouncedSync()
-    })
+    const onAnyEvent = (path: string) => {
+      if (basename(path) === watchedFile) this.debouncedSync()
+    }
+    this.watcher.on('change', onAnyEvent)
+    this.watcher.on('add', onAnyEvent)
+    this.watcher.on('unlink', onAnyEvent)
   }
 
   /**
@@ -137,6 +160,7 @@ export class DbSyncWatcher {
 
       this.syncSessions(diskDb)
       this.syncEvents(diskDb)
+      this.syncAgentSessions(diskDb)
 
       this.onSync?.()
     } catch (err) {
@@ -279,6 +303,93 @@ export class DbSyncWatcher {
       for (const sessionId of affectedSessions) {
         this.io.to(`session:${sessionId}`).emit('session:events', { session_id: sessionId })
       }
+    }
+  }
+
+  /**
+   * Sync the `command_executions` table from disk → in-memory.
+   *
+   * Migration v11 unified `agent_sessions` into `command_executions`. The
+   * journal fields (`vendor`, `vendor_session_id`, `persona`, `resolved_model`,
+   * `last_heartbeat_at`, `notes`, …) live on the same table. Rows the CLI
+   * writes via `ocr session start-instance` / `bind-vendor-id` / `beat` /
+   * `end-instance` flow through atomic file rename, so the disk file is the
+   * source of truth.
+   *
+   * Strategy: full mirror via `INSERT OR REPLACE` keyed on the integer
+   * primary key. The table is small enough that copying every row each
+   * sync is cheap. Emits `agent_session:updated` with affected workflow ids
+   * so the dashboard's query cache invalidates selectively.
+   */
+  private syncAgentSessions(diskDb: Database): void {
+    const diskRows = resultToRows<Row>(
+      diskDb.exec('SELECT * FROM command_executions'),
+    )
+    if (diskRows.length === 0) return
+
+    const affectedWorkflows = new Set<string>()
+    let changed = 0
+
+    for (const row of diskRows) {
+      const id = col(row, 'id') as number
+      const workflowId = col(row, 'workflow_id') as string | null
+      const heartbeat = col(row, 'last_heartbeat_at') as string | null
+      const finishedAt = col(row, 'finished_at') as string | null
+      const exitCode = col(row, 'exit_code') as number | null
+
+      const existing = this.db.exec(
+        'SELECT last_heartbeat_at, finished_at, exit_code FROM command_executions WHERE id = ?',
+        [id],
+      )
+      const existingRow = existing[0]?.values?.[0]
+      const sameHeartbeat = (existingRow?.[0] ?? null) === heartbeat
+      const sameFinished = (existingRow?.[1] ?? null) === finishedAt
+      const sameExit = (existingRow?.[2] ?? null) === exitCode
+      if (existingRow && sameHeartbeat && sameFinished && sameExit) continue
+
+      this.db.run(
+        `INSERT OR REPLACE INTO command_executions
+           (id, uid, command, args, exit_code, started_at, finished_at, output,
+            pid, is_detached, workflow_id, parent_id, vendor, vendor_session_id,
+            persona, instance_index, name, resolved_model, last_heartbeat_at, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          col(row, 'uid'),
+          col(row, 'command'),
+          col(row, 'args'),
+          exitCode,
+          col(row, 'started_at'),
+          finishedAt,
+          col(row, 'output'),
+          col(row, 'pid'),
+          col(row, 'is_detached'),
+          workflowId,
+          col(row, 'parent_id'),
+          col(row, 'vendor'),
+          col(row, 'vendor_session_id'),
+          col(row, 'persona'),
+          col(row, 'instance_index'),
+          col(row, 'name'),
+          col(row, 'resolved_model'),
+          heartbeat,
+          col(row, 'notes'),
+        ],
+      )
+      // Only emit invalidation for rows that participate in the journal
+      // (i.e. AI-spawned commands with heartbeat). Vanilla utility command
+      // rows still sync (so the history view stays current) but don't
+      // trigger agent_session:updated.
+      if (heartbeat !== null && workflowId) {
+        affectedWorkflows.add(workflowId)
+      }
+      changed++
+    }
+
+    if (changed > 0 && affectedWorkflows.size > 0) {
+      this.io.emit('agent_session:updated', {
+        workflow_ids: Array.from(affectedWorkflows),
+      })
     }
   }
 

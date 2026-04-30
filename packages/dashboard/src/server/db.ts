@@ -192,6 +192,17 @@ export type CommandExecutionRow = {
   started_at: string
   finished_at: string | null
   output: string | null
+  // ── Migration v11 — agent-session journal fields ──
+  workflow_id: string | null
+  parent_id: number | null
+  vendor: string | null
+  vendor_session_id: string | null
+  persona: string | null
+  instance_index: number | null
+  name: string | null
+  resolved_model: string | null
+  last_heartbeat_at: string | null
+  notes: string | null
 }
 
 export type ChatConversationRow = {
