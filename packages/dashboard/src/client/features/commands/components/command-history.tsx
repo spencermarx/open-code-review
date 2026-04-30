@@ -8,17 +8,27 @@ import {
   History,
   RotateCcw,
   Search,
+  Terminal,
   X,
 } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 import { formatDateTime, formatDuration } from '../../../lib/date-utils'
+import { parseUtcDate } from '../../../lib/utils'
 import { useCommandHistory, type CommandHistoryEntry } from '../hooks/use-commands'
+import { TerminalHandoffPanel } from '../../sessions/components/terminal-handoff-panel'
 
 // ── Types ──
 
-type StatusFilter = 'all' | 'success' | 'fail' | 'cancelled' | 'running'
+type StatusFilter = 'all' | 'success' | 'fail' | 'cancelled' | 'running' | 'stalled' | 'orphaned'
 type SortField = 'date' | 'command' | 'duration' | 'status'
 type SortDir = 'asc' | 'desc'
+
+/**
+ * Heartbeat threshold past which a still-running row is considered stalled.
+ * Mirrors the server-side default — kept in sync manually since the dashboard
+ * doesn't currently surface the configured value to the client.
+ */
+const HEARTBEAT_STALE_MS = 60_000
 
 // ── Fuzzy match helper ──
 
@@ -41,9 +51,17 @@ function fuzzyMatch(target: string, query: string): boolean {
 // ── Status helpers ──
 
 function getStatus(entry: CommandHistoryEntry): StatusFilter {
-  if (entry.exit_code === null) return 'running'
+  if (entry.exit_code === null) {
+    // Still in flight — check heartbeat freshness for stalled state.
+    if (entry.last_heartbeat_at) {
+      const age = Date.now() - parseUtcDate(entry.last_heartbeat_at).getTime()
+      if (age > HEARTBEAT_STALE_MS) return 'stalled'
+    }
+    return 'running'
+  }
   if (entry.exit_code === 0) return 'success'
   if (entry.exit_code === -2) return 'cancelled'
+  if (entry.exit_code === -3) return 'orphaned'
   return 'fail'
 }
 
@@ -53,7 +71,29 @@ function statusLabel(s: StatusFilter): string {
     case 'fail': return 'Fail'
     case 'cancelled': return 'Cancelled'
     case 'running': return 'Running'
+    case 'stalled': return 'Stalled'
+    case 'orphaned': return 'Orphaned'
     default: return 'All'
+  }
+}
+
+/** Tailwind classes for the per-status pill in the row. */
+function statusPillClasses(status: StatusFilter): string {
+  switch (status) {
+    case 'success':
+      return 'border-emerald-500/25 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+    case 'cancelled':
+      return 'border-amber-500/25 bg-amber-500/15 text-amber-700 dark:text-amber-400'
+    case 'stalled':
+      return 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+    case 'orphaned':
+      return 'border-zinc-300 bg-zinc-100/50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/30 dark:text-zinc-400'
+    case 'fail':
+      return 'border-red-500/25 bg-red-500/15 text-red-700 dark:text-red-400'
+    case 'running':
+      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+    default:
+      return 'border-zinc-500/25 bg-zinc-500/15 text-zinc-600 dark:text-zinc-400'
   }
 }
 
@@ -72,7 +112,15 @@ function compareEntries(a: CommandHistoryEntry, b: CommandHistoryEntry, field: S
       cmp = (a.duration_ms ?? -1) - (b.duration_ms ?? -1)
       break
     case 'status': {
-      const order: Record<StatusFilter, number> = { running: 0, success: 1, cancelled: 2, fail: 3, all: -1 }
+      const order: Record<StatusFilter, number> = {
+        running: 0,
+        stalled: 1,
+        orphaned: 2,
+        success: 3,
+        cancelled: 4,
+        fail: 5,
+        all: -1,
+      }
       cmp = (order[getStatus(a)] ?? 0) - (order[getStatus(b)] ?? 0)
       break
     }
@@ -84,10 +132,12 @@ function compareEntries(a: CommandHistoryEntry, b: CommandHistoryEntry, field: S
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All' },
+  { value: 'running', label: 'Running' },
+  { value: 'stalled', label: 'Stalled' },
+  { value: 'orphaned', label: 'Orphaned' },
   { value: 'success', label: 'Success' },
   { value: 'fail', label: 'Fail' },
   { value: 'cancelled', label: 'Cancelled' },
-  { value: 'running', label: 'Running' },
 ]
 
 // ── Sub-components ──
@@ -139,14 +189,20 @@ function HistoryItem({
   entry,
   isRunning,
   onRerun,
+  onHandoff,
 }: {
   entry: CommandHistoryEntry
   isRunning: boolean
   onRerun: (command: string) => void
+  onHandoff: (entry: CommandHistoryEntry) => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const status = getStatus(entry)
   const isComplete = entry.exit_code !== null
   const canRerun = isComplete && isRerunnable(entry.command)
+  // "Pick up in terminal" surfaces only when there's actually a vendor session
+  // token bound to this row — otherwise there's nothing to resume.
+  const canHandoff = !!entry.workflow_id && !!entry.vendor_session_id
 
   return (
     <div className="border-b border-zinc-200 last:border-b-0 dark:border-zinc-800">
@@ -170,17 +226,26 @@ function HistoryItem({
         <span
           className={cn(
             'inline-flex shrink-0 items-center rounded-md border px-2 py-0.5 text-xs font-medium',
-            entry.exit_code === 0
-              ? 'border-emerald-500/25 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-              : entry.exit_code === -2
-                ? 'border-amber-500/25 bg-amber-500/15 text-amber-700 dark:text-amber-400'
-                : entry.exit_code !== null
-                  ? 'border-red-500/25 bg-red-500/15 text-red-700 dark:text-red-400'
-                  : 'border-zinc-500/25 bg-zinc-500/15 text-zinc-600 dark:text-zinc-400',
+            statusPillClasses(status),
           )}
         >
-          {statusLabel(getStatus(entry))}
+          {statusLabel(status)}
         </span>
+        {canHandoff && (
+          <button
+            type="button"
+            onClick={() => onHandoff(entry)}
+            title="Pick up in terminal"
+            aria-label="Pick up in terminal"
+            className={cn(
+              'shrink-0 rounded-md p-1.5 text-zinc-400 transition-colors',
+              'hover:bg-zinc-100 hover:text-zinc-700',
+              'dark:hover:bg-zinc-800 dark:hover:text-zinc-200',
+            )}
+          >
+            <Terminal className="h-3.5 w-3.5" />
+          </button>
+        )}
         {canRerun && (
           <button
             type="button"
@@ -199,9 +264,33 @@ function HistoryItem({
         )}
       </div>
       {expanded && (
-        <pre className="max-h-[300px] overflow-y-auto bg-zinc-950 px-4 py-3 font-mono text-sm leading-relaxed text-zinc-300">
-          {entry.output || 'No output recorded.'}
-        </pre>
+        <div>
+          {(entry.vendor || entry.resolved_model) && (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-b border-zinc-100 bg-zinc-50 px-4 py-2 text-[11px] dark:border-zinc-800 dark:bg-zinc-900/50">
+              {entry.vendor && (
+                <>
+                  <dt className="text-zinc-500 dark:text-zinc-500">Vendor</dt>
+                  <dd className="font-mono text-zinc-700 dark:text-zinc-300">{entry.vendor}</dd>
+                </>
+              )}
+              {entry.resolved_model && (
+                <>
+                  <dt className="text-zinc-500 dark:text-zinc-500">Model</dt>
+                  <dd className="font-mono text-zinc-700 dark:text-zinc-300">{entry.resolved_model}</dd>
+                </>
+              )}
+              {entry.workflow_id && (
+                <>
+                  <dt className="text-zinc-500 dark:text-zinc-500">Workflow</dt>
+                  <dd className="font-mono text-zinc-700 dark:text-zinc-300">{entry.workflow_id}</dd>
+                </>
+              )}
+            </dl>
+          )}
+          <pre className="max-h-[300px] overflow-y-auto bg-zinc-950 px-4 py-3 font-mono text-sm leading-relaxed text-zinc-300">
+            {entry.output || 'No output recorded.'}
+          </pre>
+        </div>
       )}
     </div>
   )
@@ -221,6 +310,7 @@ export function CommandHistory({ isRunning, onRerun }: CommandHistoryProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [sortField, setSortField] = useState<SortField>('date')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [handoffWorkflowId, setHandoffWorkflowId] = useState<string | null>(null)
 
   const toggleSort = (field: SortField) => {
     if (field === sortField) {
@@ -256,7 +346,15 @@ export function CommandHistory({ isRunning, onRerun }: CommandHistoryProps) {
   // Count by status for the chip badges
   const statusCounts = useMemo(() => {
     if (!history) return {} as Record<StatusFilter, number>
-    const counts: Record<string, number> = { all: history.length, success: 0, fail: 0, cancelled: 0, running: 0 }
+    const counts: Record<string, number> = {
+      all: history.length,
+      success: 0,
+      fail: 0,
+      cancelled: 0,
+      running: 0,
+      stalled: 0,
+      orphaned: 0,
+    }
     for (const e of history) counts[getStatus(e)]!++
     return counts as Record<StatusFilter, number>
   }, [history])
@@ -370,8 +468,25 @@ export function CommandHistory({ isRunning, onRerun }: CommandHistoryProps) {
         </div>
       ) : (
         filtered.map((entry) => (
-          <HistoryItem key={entry.id} entry={entry} isRunning={isRunning} onRerun={onRerun} />
+          <HistoryItem
+            key={entry.id}
+            entry={entry}
+            isRunning={isRunning}
+            onRerun={onRerun}
+            onHandoff={(e) => {
+              if (e.workflow_id) setHandoffWorkflowId(e.workflow_id)
+            }}
+          />
         ))
+      )}
+
+      {/* Terminal handoff modal — opens when "Pick up in terminal" is clicked
+          on a row with a captured vendor session id. */}
+      {handoffWorkflowId && (
+        <TerminalHandoffPanel
+          workflowId={handoffWorkflowId}
+          onClose={() => setHandoffWorkflowId(null)}
+        />
       )}
     </div>
   )
