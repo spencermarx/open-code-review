@@ -94,10 +94,7 @@ export function parseCommandString(raw: string): ParsedCommand | null {
       i++
     } else if (token === '--team' && i + 1 < parts.length) {
       const teamStr = parts[i + 1] ?? ''
-      team = teamStr.split(',').map((entry) => {
-        const [id = '', countStr] = entry.split(':')
-        return { id, count: parseInt(countStr ?? '1', 10) || 1 }
-      }).filter((s) => s.id.length > 0)
+      team = parseTeamArg(teamStr)
       i += 2
     } else if (token === '--requirements' && i + 1 < parts.length) {
       // Consume remaining tokens as requirements (must be last)
@@ -107,10 +104,7 @@ export function parseCommandString(raw: string): ParsedCommand | null {
       if (teamIdx >= 0) {
         params['requirements'] = remaining.slice(0, teamIdx).join(' ')
         const teamStr = remaining[teamIdx + 1] ?? ''
-        team = teamStr.split(',').map((entry) => {
-          const [id = '', countStr] = entry.split(':')
-          return { id, count: parseInt(countStr ?? '1', 10) || 1 }
-        }).filter((s) => s.id.length > 0)
+        team = parseTeamArg(teamStr)
       } else {
         params['requirements'] = remaining.join(' ')
       }
@@ -136,16 +130,102 @@ export function parseCommandString(raw: string): ParsedCommand | null {
 
 // ── Helpers ──
 
+/**
+ * Parse the value of a `--team` arg back into a `ReviewerSelection[]` for
+ * re-run prefill. Accepts both shorthand (`principal:2,quality:1`) and the
+ * JSON `ReviewerInstance[]` shape produced by `serializeTeam` when models
+ * are customized.
+ */
+function parseTeamArg(raw: string): ReviewerSelection[] {
+  const trimmed = raw.trim()
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed) as Array<{
+        persona?: unknown
+        instance_index?: unknown
+        model?: unknown
+      }>
+      const grouped = new Map<string, { count: number; models: (string | null)[] }>()
+      for (const entry of parsed) {
+        if (typeof entry.persona !== 'string') continue
+        const idx =
+          typeof entry.instance_index === 'number' ? entry.instance_index : 1
+        const model =
+          typeof entry.model === 'string' ? entry.model : null
+        const existing = grouped.get(entry.persona) ?? { count: 0, models: [] }
+        existing.count = Math.max(existing.count, idx)
+        existing.models[idx - 1] = model
+        grouped.set(entry.persona, existing)
+      }
+      return Array.from(grouped, ([id, { count, models }]) => {
+        const arr: (string | null)[] = []
+        for (let i = 0; i < count; i++) arr.push(models[i] ?? null)
+        return arr.some((m) => m !== null)
+          ? { id, count, models: arr }
+          : { id, count }
+      })
+    } catch {
+      // Fall through to shorthand parser below
+    }
+  }
+  return trimmed
+    .split(',')
+    .map((entry) => {
+      const [id = '', countStr] = entry.split(':')
+      return { id, count: parseInt(countStr ?? '1', 10) || 1 }
+    })
+    .filter((s) => s.id.length > 0)
+}
+
+/**
+ * Serialize the user's library-reviewer selection for the `--team` flag.
+ *
+ * Two output forms:
+ *   - **Shorthand** `principal:2,quality:1` — emitted when no selection
+ *     carries per-instance model overrides. Backwards-compatible with
+ *     command-runner's pre-existing `--team` parser.
+ *   - **JSON ReviewerInstance[]** — emitted when at least one selection has
+ *     a `models` array. The AI workflow consumes this via
+ *     `ocr team resolve --session-override <json>`.
+ */
 function serializeTeam(selection: ReviewerSelection[]): string {
-  return selection
-    .filter((s) => !s.description)
-    .map((s) => `${s.id}:${s.count}`)
-    .join(',')
+  const library = selection.filter((s) => !s.description)
+  const hasModels = library.some(
+    (s) => s.models && s.models.length === s.count && s.models.some((m) => m !== null),
+  )
+  if (!hasModels) {
+    return library.map((s) => `${s.id}:${s.count}`).join(',')
+  }
+  // Expand into ReviewerInstance[] JSON
+  const instances: Array<{
+    persona: string
+    instance_index: number
+    name: string
+    model: string | null
+  }> = []
+  for (const s of library) {
+    for (let i = 0; i < s.count; i++) {
+      instances.push({
+        persona: s.id,
+        instance_index: i + 1,
+        name: `${s.id}-${i + 1}`,
+        model: s.models?.[i] ?? null,
+      })
+    }
+  }
+  return JSON.stringify(instances)
 }
 
 function selectionsEqual(a: ReviewerSelection[], b: ReviewerSelection[]): boolean {
   // Ephemeral entries always make selections "different" from defaults
   if (a.some((s) => s.description) || b.some((s) => s.description)) return false
+  // Per-instance model overrides also count as differences from the default
+  if (
+    a.some((s) => s.models?.some((m) => m !== null)) ||
+    b.some((s) => s.models?.some((m) => m !== null))
+  ) {
+    return false
+  }
   if (a.length !== b.length) return false
   const mapA = new Map(a.map((s) => [s.id, s.count]))
   for (const s of b) {

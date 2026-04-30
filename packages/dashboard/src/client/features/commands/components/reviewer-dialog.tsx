@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
+  Settings2,
   X,
   ChevronDown,
   ChevronRight,
@@ -16,8 +17,14 @@ import {
   groupByTier,
 } from "../../../lib/reviewer-utils";
 import { ReviewerIcon } from "./reviewer-icon";
+import { useAvailableModels } from "../hooks/use-team";
+import { useAiCli } from "../../../hooks/use-ai-cli";
+import { ModelSelect, type ModelSelectOption } from "../../../components/ui/model-select";
 import type { ReviewerMeta, ReviewerTier } from "../hooks/use-reviewers";
 import type { ReviewerSelection } from "./reviewer-defaults";
+
+const DEFAULT_LABEL = "(default model)";
+const DEFAULT_DETAIL = "Use the host CLI's default";
 
 // ── Props ──
 
@@ -56,19 +63,54 @@ export function ReviewerDialog({
   const [ephemeralDraft, setEphemeralDraft] = useState("");
   const ephemeralTextareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Per-reviewer Advanced state — models[i] is the override for instance i.
+  // Absent key = no overrides; present with all-null = explicit "no override".
+  const [models, setModels] = useState<Map<string, (string | null)[]>>(
+    new Map(),
+  );
+  const [advancedOpen, setAdvancedOpen] = useState<Set<string>>(new Set());
+
+  const { activeCli } = useAiCli();
+  const { data: modelList, isLoading: modelsLoading } = useAvailableModels(
+    activeCli ?? undefined,
+  );
+  const modelOptions: ModelSelectOption[] = useMemo(() => {
+    const opts: ModelSelectOption[] = [
+      { id: "", label: DEFAULT_LABEL, detail: DEFAULT_DETAIL },
+    ];
+    if (modelList?.models) {
+      for (const m of modelList.models) {
+        opts.push({
+          id: m.id,
+          // Friendly name primary; raw model id as the mono detail line.
+          label: m.displayName ?? m.id,
+          detail: m.displayName ? m.id : undefined,
+        });
+      }
+    }
+    return opts;
+  }, [modelList]);
+  const modelListEmpty = !modelsLoading && (modelList?.models?.length ?? 0) === 0;
+
   // Sync selection from props when dialog opens
   useEffect(() => {
     if (open) {
       const map = new Map<string, number>();
+      const modelMap = new Map<string, (string | null)[]>();
       const entries: EphemeralEntry[] = [];
       for (const s of initialSelection) {
         if (s.description) {
           entries.push({ description: s.description, count: s.count });
         } else {
           map.set(s.id, s.count);
+          if (s.models && s.models.length === s.count) {
+            modelMap.set(s.id, s.models);
+          }
         }
       }
       setSelection(map);
+      setModels(modelMap);
+      setAdvancedOpen(new Set());
       setEphemeralEntries(entries);
       setSearch("");
       setExpandedHelp(null);
@@ -107,6 +149,19 @@ export function ReviewerDialog({
       }
       return next;
     });
+    // Drop any model overrides + close Advanced when deselecting
+    setModels((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+    setAdvancedOpen((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }
 
   function setCount(id: string, count: number) {
@@ -114,6 +169,60 @@ export function ReviewerDialog({
     setSelection((prev) => {
       const next = new Map(prev);
       next.set(id, clamped);
+      return next;
+    });
+    // Resize the models array to match — preserve existing entries, fill new with null.
+    setModels((prev) => {
+      const existing = prev.get(id);
+      if (!existing) return prev;
+      const next = new Map(prev);
+      const resized: (string | null)[] = [];
+      for (let i = 0; i < clamped; i++) resized.push(existing[i] ?? null);
+      next.set(id, resized);
+      return next;
+    });
+  }
+
+  function toggleAdvanced(id: string) {
+    setAdvancedOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    // Initialize models array on first open so the dropdowns have something to render
+    setModels((prev) => {
+      if (prev.has(id)) return prev;
+      const count = selection.get(id) ?? 1;
+      const next = new Map(prev);
+      next.set(id, Array(count).fill(null));
+      return next;
+    });
+  }
+
+  function setUniformModel(id: string, model: string | null) {
+    setModels((prev) => {
+      const next = new Map(prev);
+      const count = selection.get(id) ?? 1;
+      next.set(id, Array(count).fill(model));
+      return next;
+    });
+  }
+
+  function setInstanceModel(
+    id: string,
+    instanceIndex: number,
+    model: string | null,
+  ) {
+    setModels((prev) => {
+      const existing = prev.get(id);
+      const count = selection.get(id) ?? 1;
+      const arr = existing
+        ? [...existing]
+        : (Array(count).fill(null) as (string | null)[]);
+      arr[instanceIndex] = model;
+      const next = new Map(prev);
+      next.set(id, arr);
       return next;
     });
   }
@@ -152,7 +261,15 @@ export function ReviewerDialog({
   function handleApply() {
     const result: ReviewerSelection[] = [];
     for (const [id, count] of selection) {
-      result.push({ id, count });
+      const modelOverrides = models.get(id);
+      // Only emit `models` when the user actually customized it — i.e. the
+      // array exists AND at least one entry is non-null. An all-null array
+      // would be functionally equivalent to omitting the field; we drop it.
+      const customized =
+        modelOverrides &&
+        modelOverrides.length === count &&
+        modelOverrides.some((m) => m !== null);
+      result.push(customized ? { id, count, models: modelOverrides } : { id, count });
     }
     // Append ephemeral selections
     ephemeralEntries.forEach((entry, idx) => {
@@ -329,6 +446,30 @@ export function ReviewerDialog({
                               </div>
                             )}
 
+                            {/* Advanced (per-instance models) toggle (only when selected) */}
+                            {isSelected && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleAdvanced(r.id);
+                                }}
+                                aria-expanded={advancedOpen.has(r.id)}
+                                aria-label="Advanced model overrides"
+                                title="Advanced — model overrides for this run"
+                                className={cn(
+                                  "shrink-0 rounded p-1 transition-colors",
+                                  advancedOpen.has(r.id)
+                                    ? "bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50 dark:text-indigo-400"
+                                    : models.get(r.id)?.some((m) => m !== null)
+                                      ? "text-indigo-500 dark:text-indigo-400"
+                                      : "text-zinc-300 hover:text-zinc-500 dark:text-zinc-600 dark:hover:text-zinc-400",
+                                )}
+                              >
+                                <Settings2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+
                             {/* Help button */}
                             <button
                               type="button"
@@ -346,6 +487,19 @@ export function ReviewerDialog({
                               <HelpCircle className="h-3.5 w-3.5" />
                             </button>
                           </div>
+
+                          {/* Advanced (per-instance model overrides) */}
+                          {isSelected && advancedOpen.has(r.id) && (
+                            <AdvancedModelSection
+                              count={count}
+                              models={models.get(r.id) ?? Array(count).fill(null)}
+                              modelOptions={modelOptions}
+                              freeText={modelListEmpty}
+                              personaName={r.id}
+                              onUniformChange={(m) => setUniformModel(r.id, m)}
+                              onInstanceChange={(idx, m) => setInstanceModel(r.id, idx, m)}
+                            />
+                          )}
 
                           {/* Help popover (expanded below card) */}
                           {helpOpen && (
@@ -570,3 +724,123 @@ export function ReviewerDialog({
     </div>
   );
 }
+
+// ── Advanced model section (per-card disclosure) ──
+
+type AdvancedModelSectionProps = {
+  count: number;
+  models: (string | null)[];
+  modelOptions: ModelSelectOption[];
+  freeText: boolean;
+  personaName: string;
+  onUniformChange: (model: string | null) => void;
+  onInstanceChange: (instanceIndex: number, model: string | null) => void;
+};
+
+/**
+ * Per-reviewer Advanced disclosure rendered below the card row when the
+ * user clicks the gear icon. Surfaces a single model dropdown for count=1
+ * and a "Same model | Per reviewer" toggle for count>1. Selections become
+ * `--team` JSON overrides on Apply.
+ */
+function AdvancedModelSection({
+  count,
+  models,
+  modelOptions,
+  freeText,
+  personaName,
+  onUniformChange,
+  onInstanceChange,
+}: AdvancedModelSectionProps) {
+  const uniqueModels = new Set(models);
+  const isUniform = uniqueModels.size <= 1;
+  const [mode, setMode] = useState<"uniform" | "per-instance">(
+    isUniform ? "uniform" : "per-instance",
+  );
+
+  useEffect(() => {
+    if (!isUniform && mode === "uniform") setMode("per-instance");
+  }, [isUniform, mode]);
+
+  const sharedModel = models[0] ?? null;
+
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="ml-10 mt-1 space-y-2 rounded-lg border border-zinc-100 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-800/30"
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          Model override (this run)
+        </span>
+        {count > 1 && (
+          <div className="inline-flex items-center gap-0.5 rounded-md border border-zinc-200 p-0.5 dark:border-zinc-700">
+            <button
+              type="button"
+              onClick={() => {
+                setMode("uniform");
+                if (!isUniform) onUniformChange(sharedModel);
+              }}
+              aria-pressed={mode === "uniform" && isUniform}
+              className={cn(
+                "rounded px-2 py-0.5 text-[10px] font-medium transition",
+                mode === "uniform" && isUniform
+                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200",
+              )}
+            >
+              Same model
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("per-instance")}
+              aria-pressed={mode === "per-instance" || !isUniform}
+              className={cn(
+                "rounded px-2 py-0.5 text-[10px] font-medium transition",
+                mode === "per-instance" || !isUniform
+                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200",
+              )}
+            >
+              Per reviewer
+            </button>
+          </div>
+        )}
+      </div>
+
+      {(mode === "uniform" && isUniform) || count === 1 ? (
+        <ModelSelect
+          value={sharedModel ?? ""}
+          options={modelOptions}
+          freeText={freeText}
+          ariaLabel={`Model for ${personaName}`}
+          onChange={(v) => onUniformChange(v || null)}
+        />
+      ) : (
+        <div className="space-y-1">
+          {Array.from({ length: count }, (_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="w-28 shrink-0 truncate text-[11px] text-zinc-500">
+                {personaName}-{i + 1}
+              </span>
+              <ModelSelect
+                value={models[i] ?? ""}
+                options={modelOptions}
+                freeText={freeText}
+                ariaLabel={`Model for ${personaName}-${i + 1}`}
+                onChange={(v) => onInstanceChange(i, v || null)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {freeText && (
+        <p className="text-[10px] text-zinc-500 dark:text-zinc-500">
+          Your AI CLI didn't return a model list. Type any model id it accepts.
+        </p>
+      )}
+    </div>
+  );
+}
+

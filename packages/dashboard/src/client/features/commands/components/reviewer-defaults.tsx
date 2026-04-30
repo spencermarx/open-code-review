@@ -8,6 +8,13 @@ export type ReviewerSelection = {
   count: number
   /** When present, this is an ephemeral reviewer (description-only, not persisted). */
   description?: string
+  /**
+   * Optional per-instance model overrides for this run. Length must equal `count`.
+   * Each entry is either a vendor-native model id or `null` (no override; let
+   * the host CLI's default apply). Omitted entirely when the user hasn't
+   * customized models — disk default applies.
+   */
+  models?: (string | null)[]
 }
 
 type ReviewerDefaultsProps = {
