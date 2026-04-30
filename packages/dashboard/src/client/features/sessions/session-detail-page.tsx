@@ -2,10 +2,13 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, GitBranch, Clock, FileSearch, Map } from 'lucide-react'
 import { useSession } from './hooks/use-sessions'
+import { useAgentSessions, classifyLiveness } from './hooks/use-agent-sessions'
 import { useSocketEvent } from '../../providers/socket-provider'
 import { StatusBadge } from '../../components/ui/status-badge'
 import { PhaseTimeline, type Phase } from '../../components/ui/phase-timeline'
 import { SessionTabs } from './components/session-tabs'
+import { LivenessHeader } from './components/liveness-header'
+import { ResumeCard } from './components/resume-card'
 import { fetchApi, parseUtcDate } from '../../lib/utils'
 import { formatDate } from '../../lib/date-utils'
 import type { OrchestrationEvent } from '../../lib/api-types'
@@ -85,6 +88,16 @@ export function SessionDetailPage() {
     enabled: !!id,
   })
 
+  const agentSessionsQuery = useAgentSessions(id ?? undefined)
+  const liveness = agentSessionsQuery.data
+    ? classifyLiveness(agentSessionsQuery.data.agent_sessions)
+    : null
+  const showResume =
+    liveness != null &&
+    (liveness.status === 'stalled' ||
+      liveness.status === 'orphaned' ||
+      (session?.status === 'closed' && liveness.status !== 'idle'))
+
   // Refresh events when the DB sync watcher detects new orchestration_events
   useSocketEvent('session:events', () => {
     queryClient.invalidateQueries({ queryKey: ['sessions', id, 'events'] })
@@ -123,6 +136,17 @@ export function SessionDetailPage() {
         <ArrowLeft className="h-4 w-4" />
         Back to sessions
       </Link>
+
+      {/* Liveness header (Spec 2) — self-hides when there are no agent_sessions or status is idle */}
+      {id && <LivenessHeader workflowId={id} />}
+
+      {/* Resume affordance (Spec 3) — surfaced for stalled / orphaned / completed-resumable workflows */}
+      {id && showResume && (
+        <ResumeCard
+          workflowId={id}
+          variant={session?.status === 'closed' ? 'completed' : 'paused'}
+        />
+      )}
 
       {/* Session Header */}
       <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
