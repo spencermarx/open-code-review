@@ -843,3 +843,4 @@ describe("ocr review --resume", () => {
     expect(result.stderr).toMatch(/no vendor session id/i);
   });
 });
+
