@@ -1,9 +1,52 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { Square, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { MoreHorizontal, Square, Sparkles, Users } from 'lucide-react'
 import { cn } from '../../../lib/utils'
+import type { StreamEvent } from '../../../lib/api-types'
+import { EventStreamRenderer } from './event-stream/event-stream-renderer'
+
+/**
+ * Parses an `ocr review --team <json> --requirements ...` command into a
+ * friendly summary suitable for the workflow header. Returns the verb
+ * (e.g. "review") and a structured reviewer-count chip.
+ *
+ * Hides the avalanche of `--team [{...},{...}]` JSON noise that was
+ * previously dumped into the header — the raw command is always one
+ * click away via the "Raw" toggle.
+ */
+function parseCommandSummary(command: string | null): {
+  verb: string
+  reviewerCount: number | null
+} {
+  if (!command) return { verb: 'workflow', reviewerCount: null }
+  const cleaned = command.replace(/^ocr\s+/, '')
+  const verb = cleaned.split(/\s+/)[0] ?? 'workflow'
+  // Try to extract --team <json>. The team arg may include nested
+  // braces; we stop at the next `--flag` or end of string.
+  const teamMatch = cleaned.match(/--team\s+(\[[\s\S]*?\])(?=\s+--|\s*$)/)
+  let reviewerCount: number | null = null
+  if (teamMatch?.[1]) {
+    try {
+      const team = JSON.parse(teamMatch[1])
+      if (Array.isArray(team)) reviewerCount = team.length
+    } catch {
+      // Malformed JSON — leave count null, the user just sees the verb.
+    }
+  }
+  return { verb, reviewerCount }
+}
 
 type WorkflowOutputProps = {
+  /**
+   * Legacy human-readable summary stream — used when `events` is empty
+   * (utility commands, executions before the events feature).
+   */
   output: string
+  /**
+   * Typed event stream from the AI CLI adapter. When non-empty, renders
+   * via the new timeline. When empty, falls through to the legacy
+   * line-parser path.
+   */
+  events?: StreamEvent[]
   isRunning: boolean
   exitCode: number | null
   commandName: string | null
@@ -20,6 +63,7 @@ type WorkflowOutputProps = {
  */
 export function WorkflowOutput({
   output,
+  events,
   isRunning,
   exitCode,
   commandName,
@@ -27,18 +71,27 @@ export function WorkflowOutput({
   bare,
 }: WorkflowOutputProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [showRaw, setShowRaw] = useState(false)
 
-  // Auto-scroll to bottom on new output
+  // Auto-scroll the legacy output viewer to bottom on new output.
+  // The timeline renderer manages its own sticky-scroll behavior.
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [output])
 
-  // Parse output into typed line segments
+  // Parse output into typed line segments (legacy view only)
   const segments = useMemo(() => parseOutput(output), [output])
 
-  const showPanel = output.length > 0 || isRunning
+  const showPanel = output.length > 0 || (events && events.length > 0) || isRunning
+  const hasTimeline = !!events && events.length > 0
+
+  // Friendly command summary: verb + reviewer count chip. Replaces the
+  // previous "Running ocr review --team [{...long JSON...}] --requirements ..."
+  // dump that wrapped to two lines and read like a debug log. Raw view
+  // is one click away.
+  const summary = useMemo(() => parseCommandSummary(commandName), [commandName])
 
   if (!showPanel) return null
 
@@ -46,24 +99,31 @@ export function WorkflowOutput({
     <div className={cn(!bare && 'overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800')}>
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {isRunning ? (
             <>
-              <span className="relative flex h-2 w-2">
+              <span className="relative flex h-2 w-2 shrink-0">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-500" />
               </span>
-              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
-                Running {commandName ?? 'workflow'}...
+              <span className="truncate text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                Running <span className="capitalize">{summary.verb}</span>
               </span>
             </>
           ) : (
             <>
-              <Sparkles className="h-3.5 w-3.5 text-zinc-400" />
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
               <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                Workflow Output
+                <span className="capitalize">{summary.verb}</span> output
               </span>
             </>
+          )}
+          {summary.reviewerCount != null && summary.reviewerCount > 0 && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400">
+              <Users className="h-2.5 w-2.5" aria-hidden />
+              {summary.reviewerCount} reviewer
+              {summary.reviewerCount === 1 ? '' : 's'}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -95,10 +155,40 @@ export function WorkflowOutput({
               {exitCode === 0 ? 'Complete' : exitCode === -2 ? 'Cancelled' : `Exit: ${exitCode}`}
             </span>
           )}
+          {hasTimeline && (
+            <button
+              type="button"
+              onClick={() => setShowRaw((v) => !v)}
+              className={cn(
+                'flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors',
+                'border-zinc-300 text-zinc-500 hover:bg-zinc-100',
+                'dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800',
+              )}
+              title={showRaw ? 'Show timeline' : 'Show raw output'}
+            >
+              <MoreHorizontal aria-hidden className="h-3 w-3" />
+              {showRaw ? 'Timeline' : 'Raw'}
+            </button>
+          )}
         </div>
       </div>
 
       {/* Output body */}
+      {hasTimeline && !showRaw ? (
+        // `flex flex-col` plus a definite max-height creates a concrete
+        // height envelope for the renderer's inner scroll container to
+        // fill via flex-1. Without flex here, the renderer's overflow
+        // would never activate because every parent height is content-
+        // driven up to max-h, and the inner h-full chain has nothing to
+        // resolve to.
+        <div className="flex max-h-[600px] min-h-[120px] flex-col bg-white dark:bg-zinc-950">
+          <EventStreamRenderer
+            events={events!}
+            isRunning={isRunning}
+            className="min-h-0 flex-1"
+          />
+        </div>
+      ) : (
       <div
         ref={scrollRef}
         className="max-h-[600px] min-h-[120px] overflow-y-auto bg-white px-5 py-4 dark:bg-zinc-950"
@@ -165,6 +255,7 @@ export function WorkflowOutput({
           <span className="inline-block h-4 w-0.5 animate-pulse bg-indigo-500" />
         )}
       </div>
+      )}
     </div>
   )
 }

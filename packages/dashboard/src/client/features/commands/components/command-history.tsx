@@ -14,8 +14,13 @@ import {
 import { cn } from '../../../lib/utils'
 import { formatDateTime, formatDuration } from '../../../lib/date-utils'
 import { parseUtcDate } from '../../../lib/utils'
-import { useCommandHistory, type CommandHistoryEntry } from '../hooks/use-commands'
+import {
+  useCommandEvents,
+  useCommandHistory,
+  type CommandHistoryEntry,
+} from '../hooks/use-commands'
 import { TerminalHandoffPanel } from '../../sessions/components/terminal-handoff-panel'
+import { EventStreamRenderer } from './event-stream/event-stream-renderer'
 
 // ── Types ──
 
@@ -185,6 +190,45 @@ function isRerunnable(command: string): boolean {
   return RERUNNABLE_COMMANDS.has(base)
 }
 
+/**
+ * History entry ids are the `command_executions.id` integer surfaced as a
+ * string by the API. Returns null for malformed ids.
+ */
+function parseExecutionId(id: string): number | null {
+  const n = parseInt(id, 10)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+/**
+ * Tiny pill button for the Raw / Timeline view toggle inside an expanded
+ * history row. Two states (active/inactive); active gets the dark fill.
+ */
+function ViewToggleButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'rounded px-2 py-0.5 text-[11px] font-medium transition',
+        active
+          ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+          : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
 function HistoryItem({
   entry,
   isRunning,
@@ -197,12 +241,22 @@ function HistoryItem({
   onHandoff: (entry: CommandHistoryEntry) => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [showTimeline, setShowTimeline] = useState(false)
   const status = getStatus(entry)
   const isComplete = entry.exit_code !== null
   const canRerun = isComplete && isRerunnable(entry.command)
   // "Pick up in terminal" surfaces only when there's actually a vendor session
   // token bound to this row — otherwise there's nothing to resume.
   const canHandoff = !!entry.workflow_id && !!entry.vendor_session_id
+  // Timeline only meaningful for AI commands (those carrying a vendor) and
+  // only fetched when the user opts in by toggling. The hook is gated by
+  // `enabled` so we don't pay the JSONL parse for every row scrolled past.
+  const executionId = parseExecutionId(entry.id)
+  const canShowTimeline = !!entry.vendor && expanded
+  const eventsQuery = useCommandEvents(
+    executionId,
+    canShowTimeline && showTimeline,
+  )
 
   return (
     <div className="border-b border-zinc-200 last:border-b-0 dark:border-zinc-800">
@@ -287,9 +341,72 @@ function HistoryItem({
               )}
             </dl>
           )}
-          <pre className="max-h-[300px] overflow-y-auto bg-zinc-950 px-4 py-3 font-mono text-sm leading-relaxed text-zinc-300">
-            {entry.output || 'No output recorded.'}
-          </pre>
+
+          {canHandoff && (
+            <div className="border-b border-zinc-100 bg-zinc-50/50 px-4 py-2 dark:border-zinc-800 dark:bg-zinc-900/30">
+              <button
+                type="button"
+                onClick={() => onHandoff(entry)}
+                title="Copy a resume command to continue this AI session in your terminal"
+                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              >
+                <Terminal className="h-3.5 w-3.5" />
+                Resume in terminal
+              </button>
+            </div>
+          )}
+
+          {canShowTimeline && (
+            <div className="flex items-center gap-2 border-b border-zinc-100 bg-zinc-50/50 px-4 py-2 dark:border-zinc-800 dark:bg-zinc-900/30">
+              <span className="text-[11px] text-zinc-500 dark:text-zinc-500">View:</span>
+              <ViewToggleButton
+                active={!showTimeline}
+                onClick={() => setShowTimeline(false)}
+              >
+                Raw output
+              </ViewToggleButton>
+              <ViewToggleButton
+                active={showTimeline}
+                onClick={() => setShowTimeline(true)}
+              >
+                Timeline
+              </ViewToggleButton>
+              {showTimeline && eventsQuery.isLoading && (
+                <span className="ml-auto text-[11px] text-zinc-500 dark:text-zinc-500">
+                  Loading…
+                </span>
+              )}
+              {showTimeline &&
+                !eventsQuery.isLoading &&
+                eventsQuery.data?.length === 0 && (
+                  <span className="ml-auto text-[11px] text-zinc-500 dark:text-zinc-500">
+                    No timeline data captured for this run.
+                  </span>
+                )}
+            </div>
+          )}
+
+          {canShowTimeline && showTimeline ? (
+            eventsQuery.data && eventsQuery.data.length > 0 ? (
+              <div className="flex max-h-[400px] flex-col bg-white dark:bg-zinc-950">
+                <EventStreamRenderer
+                  events={eventsQuery.data}
+                  isRunning={false}
+                  className="min-h-0 flex-1"
+                />
+              </div>
+            ) : (
+              // Empty timeline → fall through to the legacy raw view so the
+              // user always sees something useful.
+              <pre className="max-h-[300px] overflow-y-auto bg-zinc-950 px-4 py-3 font-mono text-sm leading-relaxed text-zinc-300">
+                {entry.output || 'No output recorded.'}
+              </pre>
+            )
+          ) : (
+            <pre className="max-h-[300px] overflow-y-auto bg-zinc-950 px-4 py-3 font-mono text-sm leading-relaxed text-zinc-300">
+              {entry.output || 'No output recorded.'}
+            </pre>
+          )}
         </div>
       )}
     </div>

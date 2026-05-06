@@ -154,6 +154,7 @@ export function CommandsPage() {
             <WorkflowOutput
               bare
               output={activeTab.output}
+              events={activeTab.events}
               isRunning={activeTab.status === 'running'}
               exitCode={activeTab.exitCode}
               commandName={activeTab.command}
