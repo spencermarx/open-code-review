@@ -61,3 +61,8 @@ yarn-error.log*
 test-results/
 playwright-report/
 blob-report/
+
+# Agent runtime telemetry (claude-flow) — not source. Per-package data
+# directories accumulate insights, traces, and intermediate state that
+# shouldn't reach PRs.
+**/.claude-flow/data/
