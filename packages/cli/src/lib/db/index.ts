@@ -49,6 +49,8 @@ export {
   bumpAgentSessionHeartbeat,
   setAgentSessionVendorId,
   bindVendorSessionIdOpportunistically,
+  recordVendorSessionIdForExecution,
+  linkDashboardInvocationToWorkflow,
   setAgentSessionStatus,
   updateAgentSession,
   sweepStaleAgentSessions,

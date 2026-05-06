@@ -13,7 +13,7 @@
 
 import { Command } from "commander";
 import chalk from "chalk";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { requireOcrSetup } from "../lib/guards.js";
 import {
@@ -28,9 +28,65 @@ import {
 } from "../lib/state/index.js";
 import type { WorkflowType, ReviewPhase, MapPhase, RoundCompleteResult, MapCompleteResult } from "../lib/state/types.js";
 import { replayCommandLog } from "../lib/db/command-log.js";
-import { getDb, saveDatabase } from "../lib/db/index.js";
+import {
+  getDb,
+  saveDatabase,
+  linkDashboardInvocationToWorkflow,
+} from "../lib/db/index.js";
 
 // ── Helpers ──
+
+/**
+ * Spawn-marker shape — written by the dashboard's command-runner at the
+ * moment it spawns an AI workflow, read here by `state init` to bind
+ * `workflow_id` on the dashboard's parent `command_executions` row.
+ *
+ * The marker is the durable answer to a fragile-by-construction problem:
+ * env vars get stripped, prompt instructions get ignored, watcher hooks
+ * miss UPDATE paths. The marker is filesystem state both processes
+ * deterministically share.
+ */
+type DashboardSpawnMarker = {
+  execution_uid: string;
+  pid: number;
+  started_at: string;
+};
+
+function readDashboardSpawnMarker(ocrDir: string): DashboardSpawnMarker | null {
+  const path = join(ocrDir, "data", "dashboard-active-spawn.json");
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf-8");
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    typeof (parsed as Record<string, unknown>).execution_uid !== "string" ||
+    typeof (parsed as Record<string, unknown>).pid !== "number"
+  ) {
+    return null;
+  }
+  const marker = parsed as DashboardSpawnMarker;
+  // Liveness check: a stale marker (dashboard crashed mid-spawn) must
+  // not be consumed. `process.kill(pid, 0)` throws ESRCH when the PID
+  // is gone — we treat that as "no live dashboard" and ignore the
+  // marker. This prevents a crashed dashboard's leftover marker from
+  // mis-linking a future CLI-only `state init` invocation.
+  try {
+    process.kill(marker.pid, 0);
+  } catch {
+    return null;
+  }
+  return marker;
+}
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -63,12 +119,17 @@ const initSubcommand = new Command("init")
     },
   )
   .option("--session-dir <dir>", "Session directory path (auto-resolved if omitted)")
+  .option(
+    "--dashboard-uid <uid>",
+    "Dashboard command_executions uid to link this workflow to. Takes precedence over the OCR_DASHBOARD_EXECUTION_UID env var so AI shells that strip env vars can still wire the linkage.",
+  )
   .action(
     async (options: {
       sessionId: string;
       branch: string;
       workflowType: WorkflowType;
       sessionDir?: string;
+      dashboardUid?: string;
     }) => {
       const targetDir = process.cwd();
       requireOcrSetup(targetDir);
@@ -89,6 +150,71 @@ const initSubcommand = new Command("init")
           sessionDir,
           ocrDir,
         });
+
+        // Late-link the dashboard's parent command_execution row to this
+        // newly-created session.
+        //
+        // When the dashboard spawns an AI workflow it puts its own
+        // command_executions.uid into `OCR_DASHBOARD_EXECUTION_UID`. The
+        // session row didn't exist at that point, so workflow_id was
+        // unset on the parent row. Now that the AI has created it, fill
+        // the linkage in. After this UPDATE, the parent row has both
+        // `workflow_id` (set here) AND `vendor_session_id` (bound by
+        // command-runner from Claude's stdout) — which is what the
+        // handoff route's `getLatestAgentSessionWithVendorId` lookup
+        // needs to surface a resume command.
+        // Three-source resolution, ordered by reliability:
+        //   1. `--dashboard-uid` flag — explicit, set by command-runner's
+        //      prompt injection. Survives shell stripping.
+        //   2. `OCR_DASHBOARD_EXECUTION_UID` env var — depends on the
+        //      AI's shell preserving unfamiliar env vars; sandboxed
+        //      shells can strip these.
+        //   3. Filesystem spawn marker — written by the dashboard at
+        //      spawn time. This is the durable, guaranteed path: it
+        //      doesn't depend on env-var inheritance or prompt-following.
+        //      Used as the fallback when (1) and (2) miss.
+        const markerUid = readDashboardSpawnMarker(ocrDir)?.execution_uid;
+        const dashboardUid =
+          options.dashboardUid ??
+          process.env["OCR_DASHBOARD_EXECUTION_UID"] ??
+          markerUid;
+        if (dashboardUid) {
+          try {
+            // Linkage flows through the single-owner CLI db helper
+            // (`linkDashboardInvocationToWorkflow`) — same primitive the
+            // dashboard's SessionCaptureService uses. No direct SQL here.
+            const db = await getDb(ocrDir);
+            linkDashboardInvocationToWorkflow(db, dashboardUid, sessionId);
+            saveDatabase(db, join(ocrDir, "data", "ocr.db"));
+            // Diagnostic log so dashboard-linkage failures are visible in
+            // the events JSONL: silently succeeding looks identical to
+            // silently skipping when the env var is missing — and that
+            // ambiguity hid a class of bugs through several iterations.
+            console.error(
+              chalk.gray(
+                `[state init] linked workflow_id=${sessionId} → dashboard uid=${dashboardUid}`,
+              ),
+            );
+          } catch (linkErr) {
+            // Non-fatal — the session is created either way; only resume
+            // discoverability suffers without the linkage.
+            console.error(
+              chalk.yellow(
+                `Warning: failed to link dashboard command_execution to session: ${
+                  linkErr instanceof Error ? linkErr.message : String(linkErr)
+                }`,
+              ),
+            );
+          }
+        } else {
+          // No flag, no env var, no marker. Running outside the
+          // dashboard — leave the parent execution row unlinked.
+          console.error(
+            chalk.gray(
+              `[state init] no dashboard linkage available (flag, env var, and marker file all absent — CLI-only invocation)`,
+            ),
+          );
+        }
 
         console.log(sessionId);
       } catch (error) {

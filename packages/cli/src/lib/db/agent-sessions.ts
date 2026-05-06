@@ -173,6 +173,17 @@ export function listAgentSessionsForWorkflow(
  * Returns the most recent `command_executions` row for a workflow whose
  * `vendor_session_id` is set. Used by `ocr review --resume <workflow-id>`
  * and the terminal-handoff route.
+ *
+ * Resolution requires an explicit `workflow_id` link. The link is
+ * established at write time by the CLI's `ocr state init` reading the
+ * dashboard spawn marker file (`.ocr/data/dashboard-active-spawn.json`)
+ * and binding the dashboard parent execution to the freshly-created
+ * workflow id. That marker is the durable handshake — if it's present
+ * the link IS made, deterministically.
+ *
+ * No timing derivation. No heuristic fallback. If the link is missing,
+ * the workflow is genuinely unresumable (dashboard wasn't running, AI
+ * ran outside the dashboard, or `state init` was never called).
  */
 export function getLatestAgentSessionWithVendorId(
   db: Database,
@@ -278,6 +289,53 @@ export function bindVendorSessionIdOpportunistically(
     [vendorSessionId, candidate.id],
   );
   return candidate.uid ?? String(candidate.id);
+}
+
+/**
+ * Records a vendor session id on the parent `command_executions` row
+ * spawned by the dashboard. Idempotent (COALESCE) — vendors emit
+ * `session_id` events on every stream message, we record only the first.
+ *
+ * Single-owner primitive for vendor session id capture (per the
+ * add-self-diagnosing-resume-handoff proposal). Direct SQL UPDATEs to
+ * `vendor_session_id` outside this helper are forbidden.
+ */
+export function recordVendorSessionIdForExecution(
+  db: Database,
+  executionId: number,
+  vendorSessionId: string,
+): void {
+  db.run(
+    `UPDATE command_executions
+        SET vendor_session_id = COALESCE(vendor_session_id, ?),
+            last_heartbeat_at = datetime('now')
+      WHERE id = ?`,
+    [vendorSessionId, executionId],
+  );
+}
+
+/**
+ * Late-links a dashboard-spawned `command_executions` row (identified by
+ * its `uid`) to a workflow created later by the AI's `ocr state init`
+ * call. Idempotent (COALESCE) — if a workflow_id is already set the
+ * UPDATE is a no-op.
+ *
+ * Single-owner primitive for workflow linkage (per the
+ * add-self-diagnosing-resume-handoff proposal). Direct SQL UPDATEs to
+ * `workflow_id` outside this helper are forbidden.
+ */
+export function linkDashboardInvocationToWorkflow(
+  db: Database,
+  dashboardUid: string,
+  workflowId: string,
+): void {
+  db.run(
+    `UPDATE command_executions
+        SET workflow_id = COALESCE(workflow_id, ?),
+            last_heartbeat_at = COALESCE(last_heartbeat_at, datetime('now'))
+      WHERE uid = ?`,
+    [workflowId, dashboardUid],
+  );
 }
 
 export function setAgentSessionStatus(
