@@ -22,28 +22,14 @@ import {
   getLatestAgentSessionWithVendorId,
   getSession,
 } from "../lib/db/index.js";
+import {
+  VENDOR_BINARIES,
+  buildResumeArgs,
+} from "../lib/vendor-resume.js";
 
 function fail(message: string): never {
   console.error(chalk.red(`Error: ${message}`));
   process.exit(1);
-}
-
-const VENDOR_BINARIES: Record<string, string> = {
-  claude: "claude",
-  opencode: "opencode",
-};
-
-function buildVendorResumeArgs(vendor: string, vendorSessionId: string): string[] {
-  if (vendor === "claude") {
-    return ["--resume", vendorSessionId];
-  }
-  if (vendor === "opencode") {
-    return ["run", "", "--session", vendorSessionId, "--continue"];
-  }
-  fail(
-    `Unknown vendor "${vendor}". Cannot construct resume invocation. ` +
-      `Run your AI CLI's resume command directly.`,
-  );
 }
 
 export const reviewCommand = new Command("review")
@@ -81,7 +67,7 @@ export const reviewCommand = new Command("review")
       );
     }
 
-    const binary = VENDOR_BINARIES[latest.vendor];
+    const binary = VENDOR_BINARIES[latest.vendor as keyof typeof VENDOR_BINARIES];
     if (!binary) {
       fail(
         `Unknown vendor "${latest.vendor}" recorded for workflow ${options.resume}. ` +
@@ -90,7 +76,12 @@ export const reviewCommand = new Command("review")
       );
     }
 
-    const args = buildVendorResumeArgs(latest.vendor, latest.vendor_session_id);
+    let args: string[];
+    try {
+      args = buildResumeArgs(latest.vendor, latest.vendor_session_id);
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
 
     console.error(
       chalk.dim(

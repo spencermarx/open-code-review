@@ -36,6 +36,12 @@
       "source": "./src/lib/models.ts",
       "import": "./dist/lib/models.js",
       "default": "./dist/lib/models.js"
+    },
+    "./vendor-resume": {
+      "types": "./src/lib/vendor-resume.ts",
+      "source": "./src/lib/vendor-resume.ts",
+      "import": "./dist/lib/vendor-resume.js",
+      "default": "./dist/lib/vendor-resume.js"
     }
   },
   "files": [

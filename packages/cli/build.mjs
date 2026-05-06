@@ -54,6 +54,7 @@ await build(libraryBundle('src/lib/runtime-config.ts', 'dist/lib/runtime-config.
 // at runtime — works in both dev mode and production-bundled mode.
 await build(libraryBundle('src/lib/team-config.ts', 'dist/lib/team-config.js', ['yaml']))
 await build(libraryBundle('src/lib/models.ts', 'dist/lib/models.js'))
+await build(libraryBundle('src/lib/vendor-resume.ts', 'dist/lib/vendor-resume.js'))
 
 // Copy dashboard dist into CLI dist (cross-platform, replaces Unix-only cp -r)
 const dashboardSrc = resolve('..', 'dashboard', 'dist')
