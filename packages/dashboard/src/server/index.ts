@@ -31,6 +31,7 @@ import { createAgentSessionsRouter } from './routes/agent-sessions.js'
 import { createHandoffRouter } from './routes/handoff.js'
 import { createTeamRouter } from './routes/team.js'
 import { AiCliService } from './services/ai-cli/index.js'
+import { createSessionCaptureService } from './services/capture/session-capture-service.js'
 import { FilesystemSync } from './services/filesystem-sync.js'
 import { DbSyncWatcher } from './services/db-sync-watcher.js'
 import { registerCommandHandlers } from './socket/command-runner.js'
@@ -334,7 +335,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   app.use('/api', createProgressRouter(db, ocrDir))
   app.use('/api/notes', createNotesRouter(db, ocrDir))
   app.use('/api/stats', createStatsRouter(db))
-  app.use('/api/commands', createCommandsRouter(db))
+  app.use('/api/commands', createCommandsRouter(db, ocrDir))
   app.use('/api/config', createConfigRouter(ocrDir, aiCliService))
   app.use('/api/sessions', createChatRouter(db, ocrDir))
   app.use('/api/reviewers', createReviewersRouter(ocrDir))
@@ -346,8 +347,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   // The actual `pullSync` callback is wired below after DbSyncWatcher
   // is constructed; the hook here is closure-captured.
   let pullSync: () => void = () => {}
+  // Single SessionCaptureService instance shared across the route + the
+  // command-runner. Avoids the previous "two default-constructed services"
+  // shape — both surfaces now write through the same façade, so future
+  // per-instance state (caches, metrics) has one home.
+  const sessionCapture = createSessionCaptureService({ db, ocrDir, aiCliService })
   app.use('/api/agent-sessions', createAgentSessionsRouter(db, () => pullSync()))
-  app.use('/api/sessions', createHandoffRouter(db, ocrDir, () => pullSync()))
+  app.use('/api/sessions', createHandoffRouter(sessionCapture, ocrDir, () => pullSync()))
   app.use('/api/team', createTeamRouter(ocrDir))
 
   // ── Static file serving (production) ──
@@ -380,7 +386,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   io.on('connection', (socket) => {
     registerSocketHandlers(io, socket)
-    registerCommandHandlers(io, socket, db, ocrDir, aiCliService)
+    registerCommandHandlers(io, socket, db, ocrDir, aiCliService, sessionCapture)
     registerChatHandlers(io, socket, db, ocrDir, aiCliService)
     registerPostHandlers(io, socket, db, ocrDir, aiCliService)
   })
@@ -390,9 +396,20 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   // and syncs sessions + orchestration_events into the in-memory DB.
 
   const dbFilePath = join(ocrDir, 'data', 'ocr.db')
-  const dbSyncWatcher = new DbSyncWatcher(db, dbFilePath, io, () => {
-    saveDb(db, ocrDir)
-  })
+  const dbSyncWatcher = new DbSyncWatcher(
+    db,
+    dbFilePath,
+    io,
+    () => {
+      saveDb(db, ocrDir)
+    },
+    // Auto-link the dashboard's parent execution row when the AI
+    // creates a new session via `ocr state init`. Eliminates the
+    // dependency on env-var/flag propagation through the AI's shell.
+    (session) => {
+      sessionCapture.autoLinkPendingDashboardExecution(session.id)
+    },
+  )
   await dbSyncWatcher.init()
   dbSyncWatcher.startWatching()
   // Wire the pull-on-read sync callback now that DbSyncWatcher exists.
@@ -486,12 +503,18 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   // ── Graceful shutdown ──
 
-  const shutdown = (): void => {
-    console.log('Shutting down dashboard server...')
+  const shutdown = (signal?: NodeJS.Signals): void => {
+    console.log(
+      `Shutting down dashboard server${signal ? ` (received ${signal})` : ''}...`,
+    )
 
     // Remove PID and port tracking files
     try { unlinkSync(pidFilePath) } catch { /* ignore */ }
     try { unlinkSync(portFilePath) } catch { /* ignore */ }
+    // Remove the dashboard spawn marker (used by CLI's `ocr state init`
+    // for durable workflow_id linkage). Cleared here so a crash-mid-spawn
+    // doesn't leave a stale marker pointing at a dead PID.
+    try { unlinkSync(join(dataDir, 'dashboard-active-spawn.json')) } catch { /* ignore */ }
 
     // Kill all child processes tracked in the database.
     // This is more robust than the in-memory Maps (which are lost on hot-reload).
@@ -543,6 +566,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     fsSync.stopWatching()
     stopReviewersWatch()
     io.close()
+    // Without this, keep-alive connections from the Vite dev proxy
+    // (long-lived `/socket.io` upgrades, /api keep-alives) hold the
+    // server open indefinitely; httpServer.close()'s callback never
+    // fires and tsx watch force-kills before our cleanup completes.
+    httpServer.closeAllConnections()
     httpServer.close(() => {
       try { saveDb(db, ocrDir) } catch { /* ignore */ }
       closeDb()
@@ -550,15 +578,27 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       process.exit(0)
     })
 
-    // Force exit after 5 seconds
+    // Force exit after 2 seconds — closeAllConnections() should make
+    // the close callback fire near-instantly; if it doesn't, something
+    // is holding a non-HTTP handle open and we shouldn't wait long.
     setTimeout(() => {
       console.error('Forced shutdown after timeout')
       process.exit(1)
-    }, 5000)
+    }, 2000).unref()
   }
 
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', () => shutdown('SIGINT'))
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  process.on('SIGHUP', () => shutdown('SIGHUP'))
+  // Surface the proximate cause of unexpected shutdowns. Diagnostic only —
+  // these don't trigger graceful shutdown themselves; node will already
+  // either crash or carry on depending on its config.
+  process.on('uncaughtException', (err) => {
+    console.error('[dashboard] uncaughtException:', err)
+  })
+  process.on('unhandledRejection', (reason) => {
+    console.error('[dashboard] unhandledRejection:', reason)
+  })
 }
 
 // Auto-start when run directly (e.g., `tsx watch src/server/index.ts`

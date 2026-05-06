@@ -268,7 +268,10 @@ export function registerPostHandlers(
       )
       tracker.appendOutput('▸ Generating human-voice review...\n')
 
-      // Parse normalized event stream
+      // Parse normalized event stream — stateful parser tracks streaming
+      // tool input across line boundaries so tool_call events carry the
+      // full input by the time we see them.
+      const parser = adapter.createParser()
       let assistantText = ''
       let lineBuffer = ''
       let thinkingStatusEmitted = false
@@ -279,22 +282,35 @@ export function registerPostHandlers(
       let activeToolName = ''
       let writeDone = false
 
-      proc.stdout?.on('data', (chunk: Buffer) => {
-        lineBuffer += chunk.toString()
+      // UTF-8 boundary safety — round-2 Blocker 1 (sweep completion).
+      // Without setEncoding, multi-byte codepoints split across pipe
+      // chunks become `�` and lines containing them fail JSON.parse,
+      // silently dropping text_delta / tool_call events. post-handler
+      // doesn't capture session_id (`session_id: ignored` at line 341)
+      // so this isn't a capture-loss path — but the streaming UX
+      // breaks the moment any vendor output contains non-ASCII content.
+      proc.stdout?.setEncoding('utf-8')
+      proc.stderr?.setEncoding('utf-8')
+
+      proc.stdout?.on('data', (chunk: string) => {
+        lineBuffer += chunk
         const lines = lineBuffer.split('\n')
         lineBuffer = lines.pop() ?? ''
 
         for (const line of lines) {
           if (!line.trim()) continue
-          for (const evt of adapter.parseLine(line)) {
+          for (const evt of parser.parseLine(line)) {
             handleEvent(evt)
           }
         }
       })
 
+      // Track active tool name by toolId so we can detect when Write finishes.
+      const toolNamesById = new Map<string, string>()
+
       function handleEvent(evt: NormalizedEvent): void {
         switch (evt.type) {
-          case 'text':
+          case 'text_delta':
             // After the Write tool finishes, suppress conversational text
             // (e.g. "I've written the review to final-human.md")
             if (!writeDone) {
@@ -302,44 +318,43 @@ export function registerPostHandlers(
               socket.emit('post:token', { token: evt.text })
             }
             break
-          case 'thinking':
+          case 'thinking_delta':
             if (!thinkingStatusEmitted) {
               thinkingStatusEmitted = true
               socket.emit('post:status', { tool: 'thinking', detail: 'Thinking...' })
               tracker.appendOutput('▸ Thinking...\n')
             }
             break
-          case 'tool_start':
-            if (evt.name === '__input_json_delta') {
-              // Input accumulation — no action needed here, content is
-              // read from file on close.
-            } else {
-              // New tool starting — clear any accumulated reasoning text
-              if (assistantText) {
-                assistantText = ''
-                socket.emit('post:clear-stream')
-              }
-              activeToolName = evt.name
-              const detail = formatToolDetail(evt.name, evt.input)
-              socket.emit('post:status', { tool: evt.name, detail })
-              tracker.appendOutput(`▸ ${detail}\n`)
+          case 'tool_call': {
+            // New tool starting — clear any accumulated reasoning text
+            if (assistantText) {
+              assistantText = ''
+              socket.emit('post:clear-stream')
             }
+            activeToolName = evt.name
+            toolNamesById.set(evt.toolId, evt.name)
+            const detail = formatToolDetail(evt.name, evt.input)
+            socket.emit('post:status', { tool: evt.name, detail })
+            tracker.appendOutput(`▸ ${detail}\n`)
             break
-          case 'tool_end':
-            if (activeToolName === 'Write') {
-              writeDone = true
-            }
+          }
+          case 'tool_result': {
+            const name = toolNamesById.get(evt.toolId)
+            if (name === 'Write') writeDone = true
             activeToolName = ''
+            toolNamesById.delete(evt.toolId)
             break
-          case 'full_text':
+          }
+          case 'message':
             assistantText = evt.text
             break
+          // tool_input_delta, error, session_id: post-handler ignores them.
         }
       }
 
       let stderrBuffer = ''
-      proc.stderr?.on('data', (chunk: Buffer) => {
-        stderrBuffer += chunk.toString()
+      proc.stderr?.on('data', (chunk: string) => {
+        stderrBuffer += chunk
       })
 
       proc.on('close', (code) => {
@@ -347,7 +362,7 @@ export function registerPostHandlers(
 
         // Process remaining buffer
         if (lineBuffer.trim()) {
-          for (const evt of adapter.parseLine(lineBuffer)) {
+          for (const evt of parser.parseLine(lineBuffer)) {
             handleEvent(evt)
           }
         }
