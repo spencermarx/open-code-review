@@ -72,6 +72,25 @@ Some explanation.
     expect(result.verdict).toBe('NEEDS DISCUSSION')
   })
 
+  it('reduces a long inline rationale to just the leading verdict keyword', () => {
+    // Real-world shape: reviewers like to put the verdict + rationale
+    // on the same line. The card badge must stay short, so the parser
+    // strips the rationale.
+    const content = `# Final Review
+
+**Verdict**: REQUEST CHANGES** — the architectural shape is well-delivered, but two findings must resolve before merge: a vendor-protocol bug (Blocker 1) and a same-process bypass (Blocker 2).
+`
+    const result = parseFinalMd(content)
+    expect(result.verdict).toBe('REQUEST CHANGES')
+  })
+
+  it('handles unknown verdict phrasings by clipping at the first sentence break', () => {
+    const content = `## Verdict: Hold for follow-up — needs more discussion next week.`
+    const result = parseFinalMd(content)
+    // Not a known keyword; clipped at the em-dash, no paragraph in the badge.
+    expect(result.verdict).toBe('Hold for follow-up')
+  })
+
   it('counts bullet items under category sub-headings', () => {
     const content = `# Code Review
 
