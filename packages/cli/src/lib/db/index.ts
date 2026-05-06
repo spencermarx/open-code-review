@@ -8,17 +8,25 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
 import initSqlJs, { type Database } from "sql.js";
 import { runMigrations } from "./migrations.js";
 
 // Re-export public types and functions
 export type {
+  AgentSession,
+  AgentSessionRow,
+  AgentSessionStatus,
+  AgentVendor,
   EventRow,
+  InsertAgentSessionParams,
   InsertEventParams,
   InsertSessionParams,
   Migration,
   SchemaVersionRow,
   SessionRow,
+  SweepResult,
+  UpdateAgentSessionParams,
   UpdateSessionParams,
 } from "./types.js";
 
@@ -32,6 +40,21 @@ export {
   getEventsForSession,
   getLatestEventId,
 } from "./queries.js";
+
+export {
+  insertAgentSession,
+  getAgentSession,
+  listAgentSessionsForWorkflow,
+  getLatestAgentSessionWithVendorId,
+  bumpAgentSessionHeartbeat,
+  setAgentSessionVendorId,
+  bindVendorSessionIdOpportunistically,
+  recordVendorSessionIdForExecution,
+  linkDashboardInvocationToWorkflow,
+  setAgentSessionStatus,
+  updateAgentSession,
+  sweepStaleAgentSessions,
+} from "./agent-sessions.js";
 
 export type { WorkflowType, SessionStatus } from "../state/types.js";
 
@@ -159,6 +182,60 @@ export async function ensureDatabase(ocrDir: string): Promise<Database> {
   saveDatabase(db, dbPath);
 
   return db;
+}
+
+/**
+ * Best-effort WAL checkpoint against the on-disk database file.
+ *
+ * sql.js runs SQLite in-memory, so a `PRAGMA wal_checkpoint(TRUNCATE)`
+ * issued through it has no effect on any external `.db-wal` file. To
+ * actually reclaim a stale WAL left behind by a native client (e.g. the
+ * `sqlite3` CLI, a database GUI, or a future better-sqlite3 process), we
+ * attempt to invoke the `sqlite3` binary if it is available on PATH.
+ *
+ * Returns one of:
+ *  - "checkpointed" — native sqlite3 was invoked and exited successfully
+ *  - "skipped"      — no `sqlite3` binary on PATH, nothing to do
+ *  - "failed"       — native sqlite3 was invoked but exited non-zero
+ *
+ * Never throws — startup callers should treat this as best-effort hygiene
+ * and continue regardless of the outcome.
+ */
+export type WalCheckpointResult = "checkpointed" | "skipped" | "failed";
+
+export function walCheckpointTruncate(dbPath: string): WalCheckpointResult {
+  if (!existsSync(dbPath)) {
+    return "skipped";
+  }
+
+  // No-op probe: spawn `sqlite3 -version` to detect availability without
+  // committing to the checkpoint call. Avoids noisy failure modes when the
+  // binary is missing entirely.
+  try {
+    const probe = spawnSync("sqlite3", ["-version"], {
+      stdio: "ignore",
+      timeout: 2000,
+    });
+    if (probe.status !== 0) {
+      return "skipped";
+    }
+  } catch {
+    return "skipped";
+  }
+
+  try {
+    const result = spawnSync(
+      "sqlite3",
+      [dbPath, "PRAGMA wal_checkpoint(TRUNCATE);"],
+      {
+        stdio: "ignore",
+        timeout: 5000,
+      },
+    );
+    return result.status === 0 ? "checkpointed" : "failed";
+  } catch {
+    return "failed";
+  }
 }
 
 /**

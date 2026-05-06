@@ -65,6 +65,54 @@ export type InsertEventParams = {
   metadata?: string;
 };
 
+// ── Agent session types ──
+
+import type { AgentSession, AgentVendor } from "../state/types.js";
+
+export type {
+  AgentSession,
+  AgentSessionStatus,
+  AgentVendor,
+} from "../state/types.js";
+
+/**
+ * Row shape returned from `agent_sessions` selects.
+ *
+ * Mirrors the `AgentSession` type — kept as a separate alias so db-layer
+ * consumers don't have to import from `state/types` directly.
+ */
+export type AgentSessionRow = AgentSession;
+
+export type InsertAgentSessionParams = {
+  id: string;
+  workflow_id: string;
+  vendor: AgentVendor;
+  persona?: string | null;
+  instance_index?: number | null;
+  name?: string | null;
+  resolved_model?: string | null;
+  phase?: string | null;
+  pid?: number | null;
+  notes?: string | null;
+};
+
+export type UpdateAgentSessionParams = Partial<
+  Pick<
+    AgentSession,
+    | "vendor_session_id"
+    | "phase"
+    | "status"
+    | "pid"
+    | "ended_at"
+    | "exit_code"
+    | "notes"
+  >
+>;
+
+export type SweepResult = {
+  orphanedIds: string[];
+};
+
 // ── Migration types ──
 
 export type Migration = {

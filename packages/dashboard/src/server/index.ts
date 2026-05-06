@@ -27,14 +27,19 @@ import { createCommandsRouter } from './routes/commands.js'
 import { createConfigRouter } from './routes/config.js'
 import { createChatRouter } from './routes/chat.js'
 import { createReviewersRouter, watchReviewersMeta } from './routes/reviewers.js'
+import { createAgentSessionsRouter } from './routes/agent-sessions.js'
+import { createHandoffRouter } from './routes/handoff.js'
+import { createTeamRouter } from './routes/team.js'
 import { AiCliService } from './services/ai-cli/index.js'
+import { createSessionCaptureService } from './services/capture/session-capture-service.js'
 import { FilesystemSync } from './services/filesystem-sync.js'
 import { DbSyncWatcher } from './services/db-sync-watcher.js'
 import { registerCommandHandlers } from './socket/command-runner.js'
 import { registerChatHandlers, cleanupAllChats } from './socket/chat-handler.js'
 import { registerPostHandlers, cleanupAllPostGenerations } from './socket/post-handler.js'
 import { flushSave } from './routes/progress.js'
-import { replayCommandLog } from '@open-code-review/cli/db'
+import { replayCommandLog, sweepStaleAgentSessions, walCheckpointTruncate } from '@open-code-review/cli/db'
+import { getAgentHeartbeatSeconds } from '@open-code-review/cli/runtime-config'
 
 import { homedir } from 'node:os'
 
@@ -152,6 +157,18 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   // Resolve .ocr directory
   const ocrDir = resolveOcrDir()
   const aiCliService = new AiCliService(ocrDir)
+
+  // ── WAL hygiene (best-effort, before opening the DB) ──
+  // sql.js loads the entire DB into memory, so a stale `.db-wal` left by an
+  // external native client (e.g. the `sqlite3` CLI, a database GUI, an older
+  // OCR build) can persist for weeks. Reclaim it before sql.js loads the file
+  // so subsequent reads see a clean state.
+  const dbPathForCheckpoint = join(ocrDir, 'data', 'ocr.db')
+  const walResult = walCheckpointTruncate(dbPathForCheckpoint)
+  if (walResult === 'checkpointed') {
+    console.log('  WAL checkpoint:    truncated stale write-ahead-log file')
+  }
+
   const db = await openDb(ocrDir)
 
   // ── Tracking files ──
@@ -281,6 +298,19 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     console.log(`  Cleaned up ${staleCount} stale command(s)`)
   }
 
+  // ── Agent-session liveness sweep ──
+  // Reclassifies `running` agent_sessions rows whose heartbeat has gone stale
+  // past the configured threshold to `orphaned`. Fires on dashboard startup
+  // (and again on each new agent-session insert) — no background timer.
+  const heartbeatSeconds = getAgentHeartbeatSeconds(ocrDir)
+  const sweepResult = sweepStaleAgentSessions(db, heartbeatSeconds)
+  if (sweepResult.orphanedIds.length > 0) {
+    saveDb(db, ocrDir)
+    console.log(
+      `  Cleaned up ${sweepResult.orphanedIds.length} stale agent session(s) (heartbeat threshold ${heartbeatSeconds}s)`
+    )
+  }
+
   // ── API Routes ──
 
   // GET /api/reviews — all review rounds across sessions
@@ -305,10 +335,26 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   app.use('/api', createProgressRouter(db, ocrDir))
   app.use('/api/notes', createNotesRouter(db, ocrDir))
   app.use('/api/stats', createStatsRouter(db))
-  app.use('/api/commands', createCommandsRouter(db))
+  app.use('/api/commands', createCommandsRouter(db, ocrDir))
   app.use('/api/config', createConfigRouter(ocrDir, aiCliService))
   app.use('/api/sessions', createChatRouter(db, ocrDir))
   app.use('/api/reviewers', createReviewersRouter(ocrDir))
+  // Pull-on-read for agent_session-backed routes: they read tables
+  // (sessions, agent_sessions) that the CLI writes via atomic rename.
+  // Calling syncFromDisk before serving each request makes the routes
+  // deterministic regardless of watcher debounce/timing — the watcher
+  // remains the push-based path for socket.io invalidation events.
+  // The actual `pullSync` callback is wired below after DbSyncWatcher
+  // is constructed; the hook here is closure-captured.
+  let pullSync: () => void = () => {}
+  // Single SessionCaptureService instance shared across the route + the
+  // command-runner. Avoids the previous "two default-constructed services"
+  // shape — both surfaces now write through the same façade, so future
+  // per-instance state (caches, metrics) has one home.
+  const sessionCapture = createSessionCaptureService({ db, ocrDir, aiCliService })
+  app.use('/api/agent-sessions', createAgentSessionsRouter(db, () => pullSync()))
+  app.use('/api/sessions', createHandoffRouter(sessionCapture, ocrDir, () => pullSync()))
+  app.use('/api/team', createTeamRouter(ocrDir))
 
   // ── Static file serving (production) ──
 
@@ -340,7 +386,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   io.on('connection', (socket) => {
     registerSocketHandlers(io, socket)
-    registerCommandHandlers(io, socket, db, ocrDir, aiCliService)
+    registerCommandHandlers(io, socket, db, ocrDir, aiCliService, sessionCapture)
     registerChatHandlers(io, socket, db, ocrDir, aiCliService)
     registerPostHandlers(io, socket, db, ocrDir, aiCliService)
   })
@@ -350,11 +396,26 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   // and syncs sessions + orchestration_events into the in-memory DB.
 
   const dbFilePath = join(ocrDir, 'data', 'ocr.db')
-  const dbSyncWatcher = new DbSyncWatcher(db, dbFilePath, io, () => {
-    saveDb(db, ocrDir)
-  })
+  const dbSyncWatcher = new DbSyncWatcher(
+    db,
+    dbFilePath,
+    io,
+    () => {
+      saveDb(db, ocrDir)
+    },
+    // Auto-link the dashboard's parent execution row when the AI
+    // creates a new session via `ocr state init`. Eliminates the
+    // dependency on env-var/flag propagation through the AI's shell.
+    (session) => {
+      sessionCapture.autoLinkPendingDashboardExecution(session.id)
+    },
+  )
   await dbSyncWatcher.init()
   dbSyncWatcher.startWatching()
+  // Wire the pull-on-read sync callback now that DbSyncWatcher exists.
+  // (Defined as a `let` above so the closure captured by the route
+  // factories resolves to the real method here at request time.)
+  pullSync = () => dbSyncWatcher.syncFromDisk()
   console.log(`  Watching DB:       ${shortenPath(dbFilePath)}`)
 
   // Register global save hooks so every saveDb() call automatically
@@ -442,12 +503,18 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   // ── Graceful shutdown ──
 
-  const shutdown = (): void => {
-    console.log('Shutting down dashboard server...')
+  const shutdown = (signal?: NodeJS.Signals): void => {
+    console.log(
+      `Shutting down dashboard server${signal ? ` (received ${signal})` : ''}...`,
+    )
 
     // Remove PID and port tracking files
     try { unlinkSync(pidFilePath) } catch { /* ignore */ }
     try { unlinkSync(portFilePath) } catch { /* ignore */ }
+    // Remove the dashboard spawn marker (used by CLI's `ocr state init`
+    // for durable workflow_id linkage). Cleared here so a crash-mid-spawn
+    // doesn't leave a stale marker pointing at a dead PID.
+    try { unlinkSync(join(dataDir, 'dashboard-active-spawn.json')) } catch { /* ignore */ }
 
     // Kill all child processes tracked in the database.
     // This is more robust than the in-memory Maps (which are lost on hot-reload).
@@ -499,6 +566,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     fsSync.stopWatching()
     stopReviewersWatch()
     io.close()
+    // Without this, keep-alive connections from the Vite dev proxy
+    // (long-lived `/socket.io` upgrades, /api keep-alives) hold the
+    // server open indefinitely; httpServer.close()'s callback never
+    // fires and tsx watch force-kills before our cleanup completes.
+    httpServer.closeAllConnections()
     httpServer.close(() => {
       try { saveDb(db, ocrDir) } catch { /* ignore */ }
       closeDb()
@@ -506,15 +578,27 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       process.exit(0)
     })
 
-    // Force exit after 5 seconds
+    // Force exit after 2 seconds — closeAllConnections() should make
+    // the close callback fire near-instantly; if it doesn't, something
+    // is holding a non-HTTP handle open and we shouldn't wait long.
     setTimeout(() => {
       console.error('Forced shutdown after timeout')
       process.exit(1)
-    }, 5000)
+    }, 2000).unref()
   }
 
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', () => shutdown('SIGINT'))
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  process.on('SIGHUP', () => shutdown('SIGHUP'))
+  // Surface the proximate cause of unexpected shutdowns. Diagnostic only —
+  // these don't trigger graceful shutdown themselves; node will already
+  // either crash or carry on depending on its config.
+  process.on('uncaughtException', (err) => {
+    console.error('[dashboard] uncaughtException:', err)
+  })
+  process.on('unhandledRejection', (reason) => {
+    console.error('[dashboard] unhandledRejection:', reason)
+  })
 }
 
 // Auto-start when run directly (e.g., `tsx watch src/server/index.ts`

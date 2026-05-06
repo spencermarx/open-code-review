@@ -99,6 +99,24 @@ Optional reviewers (added based on change type or user request):
 
 **Override via natural language**: "add security focus", "use 3 principal reviewers", "include testing"
 
+**Resolving the team at runtime**: Always call `ocr team resolve --json` in Phase 4
+rather than parsing `default_team` yourself. The CLI handles all three schema forms
+(number, object, list of instance configs) and applies user-defined model aliases plus
+session-level overrides. The returned array is the source of truth for which reviewers
+to spawn, what to name them, and which model each instance should run on.
+
+**Per-instance models**: When the resolved JSON includes a non-null `model` field on
+an instance, pass that model to your host CLI's per-task primitive (e.g. Claude Code
+subagent `model:` frontmatter). If your host CLI does not support per-task model
+overrides, run all instances on the parent model and surface a structured warning to
+the user — do not silently ignore configured models.
+
+**Journaling**: For every reviewer instance you spawn in Phase 4, call
+`ocr session start-instance` before, `bind-vendor-id` once the host CLI emits its
+session id, `beat` periodically, and `end-instance` on completion. The dashboard's
+liveness, "Continue here," and "Pick up in terminal" affordances all read from this
+journal — without it, the dashboard cannot tell a crashed reviewer from a paused one.
+
 ## Reviewer Agency
 
 Each reviewer sub-agent has **full agency** to explore the codebase as they see fit—just like a real engineer. They:

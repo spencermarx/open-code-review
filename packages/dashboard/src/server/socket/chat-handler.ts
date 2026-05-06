@@ -194,27 +194,39 @@ export function registerChatHandlers(
       )
       tracker.appendOutput('▸ Ask the Team — processing message...\n')
 
-      // Parse normalized event stream for assistant text tokens and tool activity
+      // Parse normalized event stream for assistant text tokens and tool activity.
+      // The parser is stateful — we create one per spawn so streaming
+      // tool input deltas can be assembled correctly.
+      const parser = adapter.createParser()
       let assistantText = ''
       let lineBuffer = ''
       let capturedClaudeSessionId: string | null = null
       let thinkingStatusEmitted = false
 
-      proc.stdout?.on('data', (chunk: Buffer) => {
-        lineBuffer += chunk.toString()
+      // UTF-8 boundary safety — round-2 Blocker 1 (sweep completion).
+      // Without setEncoding, multi-byte codepoints split across pipe
+      // chunks become `�` and the line containing them fails JSON.parse,
+      // silently dropping events including `session_id` capture lines.
+      // The chat handler's `capturedClaudeSessionId` (line 245, 273) is
+      // the same loss mode round-1 surfaced for command-runner.
+      proc.stdout?.setEncoding('utf-8')
+      proc.stderr?.setEncoding('utf-8')
+
+      proc.stdout?.on('data', (chunk: string) => {
+        lineBuffer += chunk
         const lines = lineBuffer.split('\n')
         // Keep the last incomplete line in the buffer
         lineBuffer = lines.pop() ?? ''
 
         for (const line of lines) {
           if (!line.trim()) continue
-          for (const evt of adapter.parseLine(line)) {
+          for (const evt of parser.parseLine(line)) {
             switch (evt.type) {
-              case 'text':
+              case 'text_delta':
                 assistantText += evt.text
                 socket.emit('chat:token', { conversationId, token: evt.text })
                 break
-              case 'thinking':
+              case 'thinking_delta':
                 if (!thinkingStatusEmitted) {
                   thinkingStatusEmitted = true
                   socket.emit('chat:status', {
@@ -225,43 +237,45 @@ export function registerChatHandlers(
                   tracker.appendOutput('▸ Thinking...\n')
                 }
                 break
-              case 'tool_start':
-                if (evt.name !== '__input_json_delta') {
-                  const detail = formatToolDetail(evt.name, evt.input)
-                  socket.emit('chat:status', {
-                    conversationId,
-                    tool: evt.name,
-                    detail,
-                  })
-                  tracker.appendOutput(`▸ ${detail}\n`)
-                }
+              case 'tool_call': {
+                const detail = formatToolDetail(evt.name, evt.input)
+                socket.emit('chat:status', {
+                  conversationId,
+                  tool: evt.name,
+                  detail,
+                })
+                tracker.appendOutput(`▸ ${detail}\n`)
                 break
-              case 'full_text':
+              }
+              case 'message':
                 assistantText = evt.text
                 break
               case 'session_id':
                 capturedClaudeSessionId = evt.id
                 break
+              // tool_input_delta, tool_result, error: not surfaced in the chat UI
+              // today — the chat status row already shows tool name and the
+              // assistant message will reflect the result.
             }
           }
         }
       })
 
-      // Capture stderr for error reporting
+      // Capture stderr for error reporting (encoding set above)
       let stderrBuffer = ''
-      proc.stderr?.on('data', (chunk: Buffer) => {
-        stderrBuffer += chunk.toString()
+      proc.stderr?.on('data', (chunk: string) => {
+        stderrBuffer += chunk
       })
 
       proc.on('close', (code) => {
         // Process any remaining buffered data
         if (lineBuffer.trim()) {
-          for (const evt of adapter.parseLine(lineBuffer)) {
+          for (const evt of parser.parseLine(lineBuffer)) {
             switch (evt.type) {
-              case 'text':
+              case 'text_delta':
                 assistantText += evt.text
                 break
-              case 'full_text':
+              case 'message':
                 assistantText = evt.text
                 break
               case 'session_id':

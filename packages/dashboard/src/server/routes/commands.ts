@@ -6,6 +6,7 @@ import { Router } from 'express'
 import type { Database } from 'sql.js'
 import { getCommandHistory } from '../db.js'
 import { getActiveCommands } from '../socket/command-runner.js'
+import { readEventJournal } from '../services/event-journal.js'
 
 type CommandDefinition = {
   name: string
@@ -44,7 +45,7 @@ const AVAILABLE_COMMANDS: CommandDefinition[] = [
   },
 ]
 
-export function createCommandsRouter(db: Database): Router {
+export function createCommandsRouter(db: Database, ocrDir: string): Router {
   const router = Router()
 
   // GET /api/commands — List available commands with descriptions
@@ -77,6 +78,33 @@ export function createCommandsRouter(db: Database): Router {
     } catch (err) {
       console.error('Failed to fetch command history:', err)
       res.status(500).json({ error: 'Failed to fetch command history' })
+    }
+  })
+
+  // GET /api/commands/:id/events — Replay the per-execution event stream.
+  //
+  // Returns the contents of `.ocr/data/events/<id>.jsonl` parsed back into
+  // a StreamEvent[]. Used by the client for two paths:
+  //   1. Rehydration when a tab reloads mid-run — the live socket
+  //      subscription only sees events from now on; this fills in the gap.
+  //   2. History replay — expanding a completed command in the history
+  //      list lazy-fetches its events to render the timeline.
+  //
+  // Returns an empty array (not 404) when no journal exists. Non-AI
+  // commands and rows that predate the events feature have no journal —
+  // the client treats empty as "use the legacy raw output instead."
+  router.get('/:id/events', (req, res) => {
+    const id = parseInt(req.params['id'] ?? '', 10)
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid execution id' })
+      return
+    }
+    try {
+      const events = readEventJournal(ocrDir, id)
+      res.json({ execution_id: id, events })
+    } catch (err) {
+      console.error(`Failed to read events for execution ${id}:`, err)
+      res.status(500).json({ error: 'Failed to read event journal' })
     }
   })
 

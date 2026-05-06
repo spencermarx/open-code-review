@@ -19,13 +19,26 @@ import {
 } from 'react'
 import { useSocket, useSocketEvent } from './socket-provider'
 import { fetchApi } from '../lib/utils'
+import type { CommandEventsResponse, StreamEvent } from '../lib/api-types'
 
 export type TabStatus = 'running' | 'complete' | 'cancelled' | 'failed'
 
 export type CommandTab = {
   executionId: number
   command: string
+  /**
+   * Legacy human-readable summary stream — populated from the
+   * `command:output` socket channel and used by the existing
+   * `WorkflowOutput` line-parser. Phase 3's renderer prefers `events`.
+   */
   output: string
+  /**
+   * Typed event stream from the AI CLI adapter. Empty for non-AI
+   * commands (utility subcommands like `state` or `progress`) and
+   * for AI executions that predate the events feature. The Phase 3
+   * `EventStreamRenderer` switches in only when this is non-empty.
+   */
+  events: StreamEvent[]
   status: TabStatus
   exitCode: number | null
   startedAt: string
@@ -83,6 +96,7 @@ export function CommandStateProvider({ children }: { children: ReactNode }) {
               executionId: cmd.execution_id,
               command: cmd.command,
               output: cmd.output ?? '',
+              events: [],
               status: 'running',
               exitCode: null,
               startedAt: cmd.started_at,
@@ -92,6 +106,38 @@ export function CommandStateProvider({ children }: { children: ReactNode }) {
 
           setTabMap(nextMap)
           setActiveTabId(lastId)
+
+          // Rehydrate the typed event stream for each running execution —
+          // the live socket subscription only sees events from now forward,
+          // and a page reload mid-run would otherwise show a partial
+          // timeline. Errors are non-fatal: empty `events` falls back to
+          // the legacy line-parser rendering.
+          for (const cmd of data.commands) {
+            fetchApi<CommandEventsResponse>(
+              `/api/commands/${cmd.execution_id}/events`,
+            )
+              .then((eventsResp) => {
+                if (!eventsResp.events || eventsResp.events.length === 0) return
+                setTabMap((prev) => {
+                  const existing = prev.get(cmd.execution_id)
+                  if (!existing) return prev
+                  // Don't clobber events received via the live socket while
+                  // we were fetching — append-with-dedup by seq.
+                  const seenSeqs = new Set(existing.events.map((e) => e.seq))
+                  const merged = [...existing.events]
+                  for (const evt of eventsResp.events) {
+                    if (!seenSeqs.has(evt.seq)) merged.push(evt)
+                  }
+                  merged.sort((a, b) => a.seq - b.seq)
+                  const next = new Map(prev)
+                  next.set(cmd.execution_id, { ...existing, events: merged })
+                  return next
+                })
+              })
+              .catch(() => {
+                /* non-fatal — falls back to legacy rendering */
+              })
+          }
         }
       })
       .catch(() => {
@@ -107,6 +153,7 @@ export function CommandStateProvider({ children }: { children: ReactNode }) {
         executionId: data.execution_id,
         command: data.command,
         output: '',
+        events: [],
         status: 'running',
         exitCode: null,
         startedAt: data.started_at,
@@ -137,6 +184,24 @@ export function CommandStateProvider({ children }: { children: ReactNode }) {
       })
     },
   )
+
+  // Live typed event stream from command-runner. The payload's `executionId`
+  // (camelCase) is set by command-runner — distinct from the snake_case
+  // `execution_id` used by the legacy channels.
+  useSocketEvent<StreamEvent>('command:event', (evt) => {
+    setTabMap((prev) => {
+      const existing = prev.get(evt.executionId)
+      if (!existing) return prev
+      // Drop duplicate seqs that may arrive if the socket reconnects mid-flight.
+      if (existing.events.some((e) => e.seq === evt.seq)) return prev
+      const next = new Map(prev)
+      next.set(evt.executionId, {
+        ...existing,
+        events: [...existing.events, evt],
+      })
+      return next
+    })
+  })
 
   useSocketEvent<{ execution_id: number; exitCode: number }>(
     'command:finished',

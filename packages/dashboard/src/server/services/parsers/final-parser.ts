@@ -22,6 +22,52 @@ const SHOULD_FIX_RE = /^\*\*Should\s*Fix\*\*\s*:?\s*(\d+)/im
 const SUGGESTIONS_RE = /^\*\*Suggestions?\*\*\s*:?\s*(\d+)/im
 
 /**
+ * Verdict label whitelist. Matched case-insensitively against the start of
+ * the captured verdict string so reviewers can write
+ * `**Verdict**: REQUEST CHANGES — long-form rationale...` and the parsed
+ * `verdict` field stays a short status label suitable for the session-card
+ * badge. Order matters: longer phrases must come first so
+ * `CHANGES REQUESTED` doesn't lose its second word to a `CHANGES` prefix.
+ */
+const KNOWN_VERDICTS = [
+  'REQUEST CHANGES',
+  'CHANGES REQUESTED',
+  'NEEDS DISCUSSION',
+  'NEEDS WORK',
+  'APPROVED',
+  'APPROVE',
+  'LGTM',
+  'BLOCK',
+  'REJECT',
+] as const
+
+/**
+ * Reduces a captured verdict line to a short status label.
+ *
+ * - Strips wrapping bold markers (`**APPROVED**` → `APPROVED`).
+ * - If the cleaned text starts with a known verdict keyword, returns just
+ *   the keyword (so `REQUEST CHANGES — long rationale` → `REQUEST CHANGES`).
+ * - Otherwise returns the text up to the first sentence break (`—`, `:`,
+ *   `.`), capped at 40 chars so unfamiliar verdict phrasings still render
+ *   as a badge rather than a paragraph.
+ */
+function normalizeVerdict(raw: string): string {
+  const cleaned = raw
+    .trim()
+    .replace(/^\*+|\*+$/g, '')
+    .trim()
+
+  const upper = cleaned.toUpperCase()
+  for (const verdict of KNOWN_VERDICTS) {
+    if (upper.startsWith(verdict)) return verdict
+  }
+
+  // Unknown phrasing — clip at the first sentence break or 40 chars.
+  const truncated = cleaned.split(/\s+[—:.]\s+|\n/, 1)[0] ?? cleaned
+  return truncated.length > 40 ? `${truncated.slice(0, 40).trim()}…` : truncated
+}
+
+/**
  * Parses a final.md file into structured review metadata.
  */
 export function parseFinalMd(content: string): ParsedFinal {
@@ -29,10 +75,10 @@ export function parseFinalMd(content: string): ParsedFinal {
   let verdict: string | null = null
   const verdictMatch = content.match(VERDICT_RE)
   if (verdictMatch) {
-    verdict = (verdictMatch[1] ?? '')
-      .trim()
-      .replace(/^\*+|\*+$/g, '') // strip bold markers
-      .trim()
+    const captured = (verdictMatch[1] ?? '').trim()
+    if (captured.length > 0) {
+      verdict = normalizeVerdict(captured)
+    }
   }
 
   // Extract counts - search for patterns anywhere in the content

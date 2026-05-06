@@ -11,13 +11,39 @@ type SessionCardProps = {
 
 const VERDICT_STYLES: Record<string, string> = {
   'APPROVED': 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+  'APPROVE': 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
   'LGTM': 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
   'REQUEST CHANGES': 'bg-red-500/15 text-red-700 dark:text-red-400',
   'CHANGES REQUESTED': 'bg-red-500/15 text-red-700 dark:text-red-400',
+  'NEEDS DISCUSSION': 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+  'NEEDS WORK': 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+}
+
+/**
+ * Reduces a raw verdict (which may carry post-keyword prose like
+ * `REQUEST CHANGES — long rationale...` from older parser output) to
+ * a short badge label. Picks the longest matching known keyword from
+ * the start of the string; otherwise truncates to ~30 chars so the
+ * card layout never gets blown out.
+ */
+function normalizeVerdictLabel(raw: string): string {
+  const upper = raw.trim().toUpperCase()
+  // Order longest-first so `CHANGES REQUESTED` doesn't lose its tail
+  // to a `CHANGES` prefix.
+  const keys = Object.keys(VERDICT_STYLES).sort((a, b) => b.length - a.length)
+  for (const key of keys) {
+    if (upper.startsWith(key)) return key
+  }
+  return upper.length > 30 ? `${upper.slice(0, 30).trim()}…` : upper
 }
 
 function verdictStyle(verdict: string): string {
-  return VERDICT_STYLES[verdict.toUpperCase()] ?? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+  const upper = verdict.trim().toUpperCase()
+  if (VERDICT_STYLES[upper]) return VERDICT_STYLES[upper]
+  for (const [key, style] of Object.entries(VERDICT_STYLES)) {
+    if (upper.startsWith(key)) return style
+  }
+  return 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
 }
 
 /** Statuses that indicate the user has addressed the review. */
@@ -80,7 +106,7 @@ export function SessionCard({ session }: SessionCardProps) {
             ) : (
               <>
                 <span className={cn('inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase', verdictStyle(session.latest_verdict))}>
-                  {session.latest_verdict}
+                  {normalizeVerdictLabel(session.latest_verdict)}
                 </span>
                 {session.latest_blocker_count > 0 && (
                   <span className="inline-flex items-center rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:text-red-400">

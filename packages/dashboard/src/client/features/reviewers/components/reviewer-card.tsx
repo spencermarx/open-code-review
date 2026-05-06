@@ -27,10 +27,16 @@ const TIER_BADGE: Record<string, { label: string; className: string } | undefine
 type ReviewerCardProps = {
   reviewer: ReviewerMeta
   onViewPrompt: (id: string) => void
+  /**
+   * Count of this reviewer's instances in the resolved default team.
+   * When > 0, replaces the binary "Default" badge with "In default team ×N".
+   */
+  inDefaultTeamCount?: number
 }
 
-export function ReviewerCard({ reviewer, onViewPrompt }: ReviewerCardProps) {
+export function ReviewerCard({ reviewer, onViewPrompt, inDefaultTeamCount }: ReviewerCardProps) {
   const badge = TIER_BADGE[reviewer.tier] ?? TIER_BADGE.custom
+  const teamCount = inDefaultTeamCount ?? (reviewer.is_default ? 1 : 0)
 
   return (
     <div className="group flex flex-col rounded-lg border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700">
@@ -45,9 +51,12 @@ export function ReviewerCard({ reviewer, onViewPrompt }: ReviewerCardProps) {
             <h3 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
               {reviewer.name}
             </h3>
-            {reviewer.is_default && (
-              <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
-                Default
+            {teamCount > 0 && (
+              <span
+                className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300"
+                title="Reviewer is part of the workspace's default team"
+              >
+                {teamCount > 1 ? `In default team ×${teamCount}` : 'In default team'}
               </span>
             )}
           </div>

@@ -444,44 +444,86 @@ See `references/context-discovery.md` for detailed algorithm.
 
 **State**: Call `ocr state transition --phase "reviews" --phase-number 4 --current-round $CURRENT_ROUND`
 
-> **CRITICAL**: Reviewer counts and types come from `.ocr/config.yaml` `default_team` section.
-> Do NOT use hardcoded defaults. Do NOT skip the `-{n}` suffix in filenames.
+> **CRITICAL**: Reviewer counts, types, and per-instance models come from `.ocr/config.yaml`
+> via `ocr team resolve --json`. Do NOT parse `default_team` yourself — the resolved
+> composition reflects the three-form schema (number / object / array of instances) and
+> applies user-defined model aliases. Do NOT skip the `-{n}` suffix in filenames.
 > See `references/session-files.md` for authoritative file naming.
 
 ### Steps
 
 1. Load reviewer personas from `references/reviewers/`.
 
-2. **Parse `default_team` from config** (already read in Phase 3):
-
-   For each reviewer type in config, spawn the specified number of instances:
+2. **Resolve the team composition** by calling:
 
    ```bash
-   # Example: If config says principal: 2, quality: 2, testing: 1
-   # You MUST spawn exactly these reviewers with numbered suffixes:
-
-   # From default_team.principal: 2
-   -> Create: rounds/round-$CURRENT_ROUND/reviews/principal-1.md
-   -> Create: rounds/round-$CURRENT_ROUND/reviews/principal-2.md
-
-   # From default_team.quality: 2
-   -> Create: rounds/round-$CURRENT_ROUND/reviews/quality-1.md
-   -> Create: rounds/round-$CURRENT_ROUND/reviews/quality-2.md
-
-   # From default_team.testing: 1
-   -> Create: rounds/round-$CURRENT_ROUND/reviews/testing-1.md
-
-   # Auto-detected (if applicable)
-   -> Create: rounds/round-$CURRENT_ROUND/reviews/security-1.md
+   ocr team resolve --json
    ```
 
-   **File naming pattern**: `{type}-{n}.md` where n starts at 1.
+   This returns a JSON array of `ReviewerInstance` objects, each with `persona`,
+   `instance_index`, `name`, and `model` (resolved string or `null`). Use this
+   array as the source of truth for which reviewers to spawn and which models to
+   honor — including any session-level overrides the user passed via `--team`.
 
-   Examples: `principal-1.md`, `principal-2.md`, `quality-1.md`, `quality-2.md`, `testing-1.md`
+   Example output for a team with two principals on different models:
 
-3. **Spawn ephemeral reviewers** (if `--reviewer` was provided):
+   ```json
+   [
+     { "persona": "principal", "instance_index": 1, "name": "principal-1", "model": "claude-opus-4-7" },
+     { "persona": "principal", "instance_index": 2, "name": "principal-2", "model": "claude-sonnet-4-6" },
+     { "persona": "quality",   "instance_index": 1, "name": "quality-1",   "model": "claude-haiku-4-5-20251001" }
+   ]
+   ```
 
-   For each ephemeral reviewer, create a task with a synthesized persona (no `.md` file lookup). The task receives the same context as library reviewers but uses the synthesized persona instead of a file-based one.
+   **File naming pattern**: `{persona}-{instance_index}.md` (or use the `name`
+   field directly when set by the user). Example file paths from the JSON above:
+
+   - `rounds/round-$CURRENT_ROUND/reviews/principal-1.md`
+   - `rounds/round-$CURRENT_ROUND/reviews/principal-2.md`
+   - `rounds/round-$CURRENT_ROUND/reviews/quality-1.md`
+
+3. **Honor per-instance models** when your host AI CLI supports per-task model
+   overrides (e.g. Claude Code subagent frontmatter accepts a `model:` field):
+
+   - For each instance with a non-null `model`, pass that model to your host's
+     per-task primitive when spawning the reviewer subagent.
+   - For instances with `model: null`, omit the override and let the parent
+     model apply.
+
+   **If your host CLI does not support per-task model override** (e.g. OpenCode
+   today): run all instances on the parent model and emit a clear warning to
+   the user in the final synthesis explaining that per-instance models were
+   configured but could not be honored on this CLI. Record the same warning
+   in `agent_sessions.notes` via `ocr session start-instance --note "..."`
+   so the dashboard can surface it. Do NOT silently ignore configured models.
+
+4. **Journal each instance** through the `ocr session` command family:
+
+   ```bash
+   # Before spawning the reviewer:
+   AGENT_ID=$(ocr session start-instance \
+     --workflow $SESSION_ID \
+     --persona principal --instance 1 --name principal-1 \
+     --vendor claude --model claude-opus-4-7)
+
+   # When the spawned subagent emits its underlying CLI session id:
+   ocr session bind-vendor-id $AGENT_ID <vendor-session-id>
+
+   # Periodically while the reviewer runs:
+   ocr session beat $AGENT_ID
+
+   # When the reviewer completes:
+   ocr session end-instance $AGENT_ID --exit-code 0
+   ```
+
+   The dashboard reads these rows to display Running / Stalled / Orphaned
+   liveness states and to power the "Continue here" / "Pick up in terminal"
+   resume affordances. Without journal entries, the dashboard cannot tell a
+   crashed reviewer from a paused one.
+
+5. **Spawn ephemeral reviewers** (if `--reviewer` was provided):
+
+   For each ephemeral reviewer, create a task with a synthesized persona (no `.md` file lookup). The task receives the same context as library reviewers but uses the synthesized persona instead of a file-based one. Journal them via `ocr session start-instance` exactly like library reviewers.
 
    ```bash
    # From --reviewer "Focus on error handling"
@@ -493,7 +535,7 @@ See `references/context-discovery.md` for detailed algorithm.
 
    See `references/reviewer-task.md` for the ephemeral reviewer task variant.
 
-4. Each task receives:
+6. Each task receives:
    - Reviewer persona (from `references/reviewers/{name}.md` for library reviewers, or synthesized for ephemeral)
    - Project context (from `discovered-standards.md`)
    - **Requirements context (from `requirements.md` if provided)**
@@ -501,7 +543,7 @@ See `references/context-discovery.md` for detailed algorithm.
    - The diff to review
    - **Instruction to explore codebase with full agency**
 
-5. Save each review to `.ocr/sessions/{id}/rounds/round-{current_round}/reviews/{type}-{n}.md`.
+7. Save each review to `.ocr/sessions/{id}/rounds/round-{current_round}/reviews/{type}-{n}.md`.
 
 See `references/reviewer-task.md` for the task template.
 

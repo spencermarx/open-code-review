@@ -2,10 +2,13 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, GitBranch, Clock, FileSearch, Map } from 'lucide-react'
 import { useSession } from './hooks/use-sessions'
+import { useAgentSessions, classifyLiveness } from './hooks/use-agent-sessions'
 import { useSocketEvent } from '../../providers/socket-provider'
 import { StatusBadge } from '../../components/ui/status-badge'
 import { PhaseTimeline, type Phase } from '../../components/ui/phase-timeline'
 import { SessionTabs } from './components/session-tabs'
+import { LivenessHeader } from './components/liveness-header'
+import { ResumeCard } from './components/resume-card'
 import { fetchApi, parseUtcDate } from '../../lib/utils'
 import { formatDate } from '../../lib/date-utils'
 import type { OrchestrationEvent } from '../../lib/api-types'
@@ -85,6 +88,24 @@ export function SessionDetailPage() {
     enabled: !!id,
   })
 
+  const agentSessionsQuery = useAgentSessions(id ?? undefined)
+  const liveness = agentSessionsQuery.data
+    ? classifyLiveness(agentSessionsQuery.data.agent_sessions)
+    : null
+  // Whether ANY agent session for this workflow ever bound a vendor session
+  // id — that's our minimum prerequisite for offering a manual-copy resume.
+  const hasResumableSessionId =
+    agentSessionsQuery.data?.agent_sessions.some(
+      (s) => s.vendor_session_id != null,
+    ) ?? false
+  // Show ResumeCard whenever there's something to resume:
+  //   - paused: workflow stalled/orphaned (recovery — also offers in-dashboard fire)
+  //   - completed: any other state where a vendor session id is captured
+  //                (manual hand-off only — copy commands, paste in terminal)
+  const isPaused =
+    liveness?.status === 'stalled' || liveness?.status === 'orphaned'
+  const showResume = isPaused || hasResumableSessionId
+
   // Refresh events when the DB sync watcher detects new orchestration_events
   useSocketEvent('session:events', () => {
     queryClient.invalidateQueries({ queryKey: ['sessions', id, 'events'] })
@@ -123,6 +144,19 @@ export function SessionDetailPage() {
         <ArrowLeft className="h-4 w-4" />
         Back to sessions
       </Link>
+
+      {/* Liveness header (Spec 2) — self-hides when there are no agent_sessions or status is idle */}
+      {id && <LivenessHeader workflowId={id} />}
+
+      {/* Resume affordance — `paused` for stalled/orphaned (recovery flow,
+          offers in-dashboard fire); `completed` for any other state with a
+          captured vendor session id (manual terminal hand-off only). */}
+      {id && showResume && (
+        <ResumeCard
+          workflowId={id}
+          variant={isPaused ? 'paused' : 'completed'}
+        />
+      )}
 
       {/* Session Header */}
       <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">

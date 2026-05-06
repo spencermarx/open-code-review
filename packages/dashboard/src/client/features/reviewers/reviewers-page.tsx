@@ -6,6 +6,8 @@ import { useReviewers, type ReviewerTier } from '../commands/hooks/use-reviewers
 import { useAiCli } from '../../hooks/use-ai-cli'
 import { useSocket, useSocketEvent } from '../../providers/socket-provider'
 import { ReviewerCard } from './components/reviewer-card'
+import { DefaultTeamSection } from './components/default-team-section'
+import { useResolvedTeam } from '../commands/hooks/use-team'
 import { PromptViewerSheet } from './components/prompt-viewer-sheet'
 import { CreateReviewerDialog } from './components/create-reviewer-dialog'
 
@@ -13,6 +15,16 @@ export function ReviewersPage() {
   const { reviewers, isLoaded } = useReviewers()
   const { isAvailable: aiAvailable } = useAiCli()
   const { socket } = useSocket()
+  const { data: resolvedTeam } = useResolvedTeam()
+
+  // Aggregate instance counts per persona for the badge on each reviewer card
+  const teamCountByPersona = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const inst of resolvedTeam?.team ?? []) {
+      map[inst.persona] = (map[inst.persona] ?? 0) + 1
+    }
+    return map
+  }, [resolvedTeam])
 
   const [search, setSearch] = useState('')
   const [collapsedTiers, setCollapsedTiers] = useState<Set<ReviewerTier>>(new Set())
@@ -104,6 +116,9 @@ export function ReviewersPage() {
         </p>
       </div>
 
+      {/* Default team — workspace baseline composition + per-instance models */}
+      <DefaultTeamSection />
+
       {/* Search */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
@@ -174,6 +189,7 @@ export function ReviewersPage() {
                         key={reviewer.id}
                         reviewer={reviewer}
                         onViewPrompt={setViewingPrompt}
+                        inDefaultTeamCount={teamCountByPersona[reviewer.id] ?? 0}
                       />
                     ))}
                   </div>
