@@ -19,7 +19,17 @@ import { ClaudeCodeAdapter } from './claude-adapter.js'
 import { OpenCodeAdapter } from './opencode-adapter.js'
 
 // Re-export everything consumers need
-export type { AiCliAdapter, AiCliStatus, NormalizedEvent, SpawnOptions, SpawnResult, SpawnMode } from './types.js'
+export type {
+  AiCliAdapter,
+  AiCliStatus,
+  LineParser,
+  NormalizedEvent,
+  SpawnOptions,
+  SpawnResult,
+  SpawnMode,
+  StreamEvent,
+} from './types.js'
+export { EventJournalAppender, eventJournalPath, eventsDir, readEventJournal } from '../event-journal.js'
 export { formatToolDetail, extractAssistantText, writeTempPrompt, cleanupTempFile } from './helpers.js'
 export { ClaudeCodeAdapter } from './claude-adapter.js'
 export { OpenCodeAdapter } from './opencode-adapter.js'
@@ -104,6 +114,36 @@ export class AiCliService {
   /** Returns the active adapter, or null if no AI CLI is available. */
   getAdapter(): AiCliAdapter | null {
     return this.activeAdapter
+  }
+
+  /**
+   * Returns the registered adapter whose `binary` matches `vendor`.
+   * Used by `SessionCaptureService` to delegate vendor-specific concerns
+   * (resume command construction, host-binary probing) without `if vendor
+   * === ...` switches at the service level.
+   *
+   * Returns `null` when no adapter is registered for the given vendor —
+   * callers should treat that as a typed unresumable outcome rather than
+   * fabricating a command.
+   */
+  getAdapterByBinary(vendor: string): AiCliAdapter | null {
+    const entry = this.entries.find((e) => e.adapter.binary === vendor)
+    return entry?.adapter ?? null
+  }
+
+  /**
+   * Whether the binary for a given vendor is available on the host.
+   * Reads the cached detection result captured at server startup —
+   * avoids the per-request `spawnSync(binary, ['--version'])` block
+   * that the previous in-service `probeBinary` would do on every
+   * handoff request (up to 3s of event-loop block per call).
+   *
+   * Returns `false` when no adapter is registered for the vendor or
+   * when its startup detection failed.
+   */
+  isAdapterAvailable(vendor: string): boolean {
+    const entry = this.entries.find((e) => e.adapter.binary === vendor)
+    return entry?.detection.found ?? false
   }
 
   /** Whether any AI CLI is available for command execution. */
