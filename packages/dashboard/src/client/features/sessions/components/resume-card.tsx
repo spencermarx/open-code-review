@@ -12,13 +12,24 @@ type ResumeCardProps = {
 }
 
 /**
- * Action card surfaced on the session detail page when a workflow is
- * stalled, orphaned, or completed-but-resumable. Offers two affordances:
+ * Action card on the session detail page. Two variants:
  *
- *   1. **Continue here** — re-spawns the AI CLI inside the dashboard via
- *      the existing `command:run` socket event with `--resume <workflow-id>`,
- *      then navigates to the Command Center to watch live output.
- *   2. **Pick up in terminal** — opens the terminal-handoff panel (Spec 5).
+ *   - `paused` (stalled/orphaned): the run crashed or stalled. The user
+ *     gets BOTH:
+ *       1. **Continue from where you left off** — primary, dashboard-fired
+ *          recovery. Re-spawns the AI CLI via the `command:run` socket
+ *          event with `--resume <workflow-id>` and navigates to the
+ *          Command Center to watch the resumed run live. This is the
+ *          "the dashboard saw your run die, click to bring it back" path.
+ *       2. **Resume in terminal** — secondary, manual hand-off. Opens the
+ *          terminal-handoff panel with copyable resume commands.
+ *
+ *   - `completed` (clean done state): the run finished normally. Only the
+ *     manual hand-off is offered — the dashboard does NOT fire a fresh
+ *     `--resume` from the user's behalf in the success case. The user
+ *     copies a command and runs it in their own terminal. This keeps the
+ *     dashboard in its viewer/command-copier role rather than creeping
+ *     into orchestration.
  */
 export function ResumeCard({ workflowId, variant = 'paused' }: ResumeCardProps) {
   const { socket } = useSocket()
@@ -33,10 +44,13 @@ export function ResumeCard({ workflowId, variant = 'paused' }: ResumeCardProps) 
     navigate('/')
   }, [socket, workflowId, navigate])
 
-  const headline =
-    variant === 'completed'
-      ? 'Continue this review where it left off.'
-      : 'This review is paused.'
+  const isPaused = variant === 'paused'
+  const headline = isPaused
+    ? 'This review is paused.'
+    : 'Continue this review in your terminal.'
+  const subline = isPaused
+    ? 'Bring the AI back where it left off, or hand off the resume command to your terminal.'
+    : 'Copy the resume command and pick up the AI conversation in your own terminal.'
 
   return (
     <>
@@ -50,36 +64,40 @@ export function ResumeCard({ workflowId, variant = 'paused' }: ResumeCardProps) 
           <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
             {headline}
           </p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Pick up the prior conversation in the dashboard or hand off to your terminal.
-          </p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">{subline}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={continueHere}
-            disabled={continueDisabled}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
-              'bg-zinc-900 text-white hover:bg-zinc-800',
-              'dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200',
-              continueDisabled && 'cursor-not-allowed opacity-50',
-            )}
-          >
-            <Play className="h-3.5 w-3.5" aria-hidden />
-            <span>Continue here</span>
-          </button>
+          {isPaused && (
+            <button
+              type="button"
+              onClick={continueHere}
+              disabled={continueDisabled}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
+                'bg-zinc-900 text-white hover:bg-zinc-800',
+                'dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200',
+                continueDisabled && 'cursor-not-allowed opacity-50',
+              )}
+            >
+              <Play className="h-3.5 w-3.5" aria-hidden />
+              <span>Continue from where you left off</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setHandoffOpen(true)}
             className={cn(
               'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition',
-              'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50',
-              'dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800/50',
+              // For the completed variant, the terminal hand-off IS the
+              // primary action — promote it to the filled style so the
+              // single button reads as the page's primary CTA.
+              isPaused
+                ? 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800/50'
+                : 'border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800 dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200',
             )}
           >
             <Terminal className="h-3.5 w-3.5" aria-hidden />
-            <span>Pick up in terminal</span>
+            <span>Resume in terminal</span>
           </button>
         </div>
       </div>

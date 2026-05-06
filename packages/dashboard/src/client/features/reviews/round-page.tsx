@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, MessageSquare } from 'lucide-react'
+import { ArrowLeft, MessageSquare, Terminal } from 'lucide-react'
 import { useState } from 'react'
 import { useRound, useRoundFindings, useArtifact, useUpdateRoundStatus } from './hooks/use-reviews'
 import type { RoundTriage } from '../../lib/api-types'
@@ -14,6 +14,7 @@ import { MarkdownRenderer } from '../../components/markdown/markdown-renderer'
 import { ChatPanel } from '../chat/components/chat-panel'
 import { PostReviewDialog } from './components/post-review-dialog'
 import { AddressFeedbackPopover } from './components/address-feedback-popover'
+import { TerminalHandoffPanel } from '../sessions/components/terminal-handoff-panel'
 
 const ROUND_STATUS_OPTIONS: { value: RoundTriage; label: string }[] = [
   { value: 'needs_review', label: 'Needs Review' },
@@ -41,6 +42,7 @@ export function RoundPage() {
 
   const [showDiscourse, setShowDiscourse] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  const [handoffOpen, setHandoffOpen] = useState(false)
 
   if (isLoading) {
     return <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading round...</p>
@@ -124,8 +126,24 @@ export function RoundPage() {
             <MessageSquare className="h-3.5 w-3.5" />
             Ask the Team
           </button>
+          <button
+            type="button"
+            onClick={() => setHandoffOpen(true)}
+            title="Copy a resume command to continue this review's AI conversation in your terminal"
+            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+          >
+            <Terminal className="h-3.5 w-3.5" />
+            Resume in terminal
+          </button>
         </div>
       </div>
+
+      {handoffOpen && sessionId && (
+        <TerminalHandoffPanel
+          workflowId={sessionId}
+          onClose={() => setHandoffOpen(false)}
+        />
+      )}
 
       {/* Verdict Banner */}
       {round.verdict && (

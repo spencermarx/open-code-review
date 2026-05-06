@@ -40,7 +40,26 @@ export function useHandoff(workflowId: string | undefined) {
 
 export type AgentLiveness = 'running' | 'stalled' | 'orphaned' | 'idle'
 
-const HEARTBEAT_FRESH_MS = 60_000
+/**
+ * How long a `running` row's heartbeat can lag before the UI calls it
+ * "stalled" (likely-crashed AI).
+ *
+ * Set to **15 minutes** to accommodate long-running review workflows:
+ * a multi-reviewer round can sit on a single Claude turn for many
+ * minutes (large diff parsing, deep file walks, slow tool calls), and
+ * the orchestrator's own heartbeat stamping happens at phase
+ * transitions and start-instance calls — not on every tool tick.
+ *
+ * 60 seconds was the old value and produced false-positive "Stalled"
+ * banners on healthy reviews.
+ *
+ * The CLI's separate `runtime.agent_heartbeat_seconds` (default 60s)
+ * controls how often agents bump their heartbeat. The UI threshold
+ * here is independent and intentionally generous — we'd rather wait
+ * a little too long and surface a true crash, than cry stall on every
+ * mid-review pause.
+ */
+const HEARTBEAT_FRESH_MS = 15 * 60_000
 
 /**
  * Classify a workflow's overall liveness from its child agent_sessions rows.

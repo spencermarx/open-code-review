@@ -133,15 +133,55 @@ export type AgentSessionsResponse = {
 
 // ── Terminal handoff payload (Spec 5) ──
 
+// Mirror of server-side ResumeOutcome. Keep in sync with
+// `packages/dashboard/src/server/services/capture/session-capture-service.ts`.
+//
+// Discriminated union: `kind: 'resumable'` carries a copyable vendor
+// command pair; `kind: 'unresumable'` carries a typed reason + structured
+// diagnostics. The panel switches on `kind` and never fabricates a
+// command for the unresumable path.
+//
+// Single-source for the union: re-exported from the server-side
+// `unresumable-microcopy.ts` (which derives the type from the
+// `ALL_UNRESUMABLE_REASONS` const-assertion). Type-only imports get
+// erased by the bundler, so this never pulls server runtime into the
+// client bundle. Round-3 SF3: closes the previous client/server
+// drift risk by eliminating the hand-maintained mirror.
+export type { UnresumableReason } from '../../server/services/capture/unresumable-microcopy'
+
+export type CaptureDiagnostics = {
+  vendor: string | null
+  vendorBinaryAvailable: boolean
+  invocationsForWorkflow: number
+  sessionIdEventsObserved: number
+  remediation: string
+  microcopy: {
+    headline: string
+    cause: string
+    remediation: string
+  }
+}
+
+export type ResumeOutcome =
+  | {
+      kind: 'resumable'
+      vendor: string
+      vendorSessionId: string
+      hostBinaryAvailable: boolean
+      vendorCommand: string
+    }
+  | {
+      kind: 'unresumable'
+      reason: UnresumableReason
+      diagnostics: CaptureDiagnostics
+    }
+
 export type HandoffPayload = {
   workflow_id: string
-  vendor: string | null
-  vendor_session_id: string | null
-  project_dir: string
-  host_binary_available: boolean
-  ocr_command: string
-  vendor_command: string | null
-  fallback: 'fresh-start' | null
+  /** Project root the resume command should `cd` into. Hoisted from
+   *  ResumeOutcome arms (round-3 Suggestion 4). */
+  projectDir: string
+  outcome: ResumeOutcome
 }
 
 // ── Team composition ──
@@ -248,6 +288,37 @@ export type ChatToolStatus = {
   tool: string
   detail: string
   timestamp: number
+}
+
+// ── Live event stream (Phase 1 → 3) ──
+//
+// Mirrors the StreamEvent shape command-runner persists to JSONL and emits
+// on the `command:event` socket channel. The server is authoritative; this
+// type is a hand-mirror because the server lives in an unbundled package
+// and the client can't directly import its types. Keep it in sync with
+// `packages/dashboard/src/server/services/ai-cli/types.ts`.
+
+export type NormalizedStreamEvent =
+  | { type: 'message'; text: string }
+  | { type: 'text_delta'; text: string }
+  | { type: 'thinking_delta'; text: string }
+  | { type: 'tool_call'; toolId: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_input_delta'; toolId: string; deltaJson: string }
+  | { type: 'tool_result'; toolId: string; output: string; isError: boolean }
+  | { type: 'error'; source: 'agent' | 'process'; message: string; detail?: string }
+  | { type: 'session_id'; id: string }
+
+export type StreamEvent = NormalizedStreamEvent & {
+  executionId: number
+  agentId: string
+  parentAgentId?: string
+  timestamp: string
+  seq: number
+}
+
+export type CommandEventsResponse = {
+  execution_id: number
+  events: StreamEvent[]
 }
 
 export type PostCheckResult = {

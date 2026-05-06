@@ -92,11 +92,19 @@ export function SessionDetailPage() {
   const liveness = agentSessionsQuery.data
     ? classifyLiveness(agentSessionsQuery.data.agent_sessions)
     : null
-  const showResume =
-    liveness != null &&
-    (liveness.status === 'stalled' ||
-      liveness.status === 'orphaned' ||
-      (session?.status === 'closed' && liveness.status !== 'idle'))
+  // Whether ANY agent session for this workflow ever bound a vendor session
+  // id — that's our minimum prerequisite for offering a manual-copy resume.
+  const hasResumableSessionId =
+    agentSessionsQuery.data?.agent_sessions.some(
+      (s) => s.vendor_session_id != null,
+    ) ?? false
+  // Show ResumeCard whenever there's something to resume:
+  //   - paused: workflow stalled/orphaned (recovery — also offers in-dashboard fire)
+  //   - completed: any other state where a vendor session id is captured
+  //                (manual hand-off only — copy commands, paste in terminal)
+  const isPaused =
+    liveness?.status === 'stalled' || liveness?.status === 'orphaned'
+  const showResume = isPaused || hasResumableSessionId
 
   // Refresh events when the DB sync watcher detects new orchestration_events
   useSocketEvent('session:events', () => {
@@ -140,11 +148,13 @@ export function SessionDetailPage() {
       {/* Liveness header (Spec 2) — self-hides when there are no agent_sessions or status is idle */}
       {id && <LivenessHeader workflowId={id} />}
 
-      {/* Resume affordance (Spec 3) — surfaced for stalled / orphaned / completed-resumable workflows */}
+      {/* Resume affordance — `paused` for stalled/orphaned (recovery flow,
+          offers in-dashboard fire); `completed` for any other state with a
+          captured vendor session id (manual terminal hand-off only). */}
       {id && showResume && (
         <ResumeCard
           workflowId={id}
-          variant={session?.status === 'closed' ? 'completed' : 'paused'}
+          variant={isPaused ? 'paused' : 'completed'}
         />
       )}
 
