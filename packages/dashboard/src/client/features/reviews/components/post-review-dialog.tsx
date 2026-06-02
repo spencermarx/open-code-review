@@ -71,6 +71,7 @@ export function PostReviewDialog({
   const [open, setOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editContent, setEditContent] = useState("");
+  const [manualPrUrl, setManualPrUrl] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   const streamEndRef = useRef<HTMLDivElement>(null);
 
@@ -100,6 +101,7 @@ export function PostReviewDialog({
     setOpen(false);
     setEditMode(false);
     setEditContent("");
+    setManualPrUrl("");
     reset();
   }, [reset]);
 
@@ -463,6 +465,29 @@ export function PostReviewDialog({
                       {error}
                     </p>
                   </div>
+
+                  {/* Manual PR URL input — shown when auto-detection fails */}
+                  {error?.includes("No open PR found") && (
+                    <div className="space-y-2">
+                      <label
+                        htmlFor="manual-pr-url"
+                        className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                      >
+                        Or enter the PR URL manually:
+                      </label>
+                      <input
+                        id="manual-pr-url"
+                        type="url"
+                        value={manualPrUrl}
+                        onChange={(e) => setManualPrUrl(e.target.value)}
+                        placeholder="https://github.com/owner/repo/pull/123"
+                        className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
+                      />
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Use this when reviewing code from a different repository than where OCR is running.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -533,6 +558,20 @@ export function PostReviewDialog({
                     <RefreshCw className="h-3.5 w-3.5" />
                     Retry
                   </button>
+                  {/* Post with manual URL when available */}
+                  {manualPrUrl && /github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(manualPrUrl) && (
+                    <button
+                      onClick={() => {
+                        const content = getPostContent();
+                        saveDraft(sessionId, roundNumber, content);
+                        submitToGitHub(manualPrUrl, content);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      Post to GitHub
+                    </button>
+                  )}
                   <button
                     onClick={close}
                     className="rounded-md border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"

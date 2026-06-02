@@ -207,11 +207,16 @@ export function usePostReview(): UsePostReviewReturn {
   )
 
   const submitToGitHub = useCallback(
-    (prNumber: number, content: string) => {
+    (prNumberOrUrl: number | string, content: string) => {
       if (!socket) return
       setStep('posting')
       setError(null)
-      socket.emit('post:submit', { prNumber, content })
+      // Support both prNumber (auto-detected) and prUrl (manual entry)
+      if (typeof prNumberOrUrl === 'string') {
+        socket.emit('post:submit', { prUrl: prNumberOrUrl, content })
+      } else {
+        socket.emit('post:submit', { prNumber: prNumberOrUrl, content })
+      }
     },
     [socket],
   )
