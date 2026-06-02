@@ -475,23 +475,57 @@ export function registerPostHandlers(
   )
 
   // ── Submit review to GitHub ──
+  //
+  // Accepts either:
+  //   - prNumber (auto-detected from local branch)
+  //   - prUrl (manually provided when auto-detection fails, e.g. cross-repo reviews)
+  //
+  // When prUrl is provided, we extract the repo and PR number from it to use
+  // `gh pr comment --repo <owner/repo>` which works regardless of local git remote.
   socket.on(
     'post:submit',
-    async (payload: { prNumber: number; content: string }) => {
+    async (payload: { prNumber?: number; prUrl?: string; content: string }) => {
       try {
-        const { prNumber, content } = payload ?? {}
-        if (typeof prNumber !== 'number' || typeof content !== 'string') {
-          socket.emit('post:submit-result', { success: false, error: 'Invalid payload' })
+        const { prNumber, prUrl, content } = payload ?? {}
+        if (typeof content !== 'string') {
+          socket.emit('post:submit-result', { success: false, error: 'Invalid payload: content required' })
+          return
+        }
+
+        // Resolve PR number and optional repo from either prNumber or prUrl
+        let resolvedPrNumber: number
+        let repo: string | null = null
+
+        if (prUrl && typeof prUrl === 'string') {
+          // Parse GitHub PR URL: https://github.com/owner/repo/pull/123
+          const urlMatch = prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/)
+          if (!urlMatch) {
+            socket.emit('post:submit-result', {
+              success: false,
+              error: 'Invalid PR URL format. Expected: https://github.com/owner/repo/pull/123',
+            })
+            return
+          }
+          repo = urlMatch[1] ?? null
+          resolvedPrNumber = parseInt(urlMatch[2] ?? '0', 10)
+        } else if (typeof prNumber === 'number') {
+          resolvedPrNumber = prNumber
+        } else {
+          socket.emit('post:submit-result', {
+            success: false,
+            error: 'Invalid payload: either prNumber or prUrl required',
+          })
           return
         }
 
         // Track in command_executions
+        const prLabel = repo ? `${repo}#${resolvedPrNumber}` : `PR #${resolvedPrNumber}`
         const tracker = startTrackedExecution(
           io, db, ocrDir,
           'ocr post-to-github',
-          [`PR #${prNumber}`],
+          [prLabel],
         )
-        tracker.appendOutput(`▸ Posting review to PR #${prNumber}...\n`)
+        tracker.appendOutput(`▸ Posting review to ${prLabel}...\n`)
 
         // Write content to temp file for --body-file
         const tmpDir = join(tmpdir(), 'ocr-post-comments')
@@ -501,16 +535,22 @@ export function registerPostHandlers(
 
         const repoRoot = dirname(ocrDir)
         try {
+          // Build gh command args — include --repo when posting to a different repo
+          const ghArgs = ['pr', 'comment', String(resolvedPrNumber), '--body-file', tmpFile]
+          if (repo) {
+            ghArgs.push('--repo', repo)
+          }
+
           const { stdout } = await execBinaryAsync(
             'gh',
-            ['pr', 'comment', String(prNumber), '--body-file', tmpFile],
+            ghArgs,
             { env: cleanEnv(), cwd: repoRoot, encoding: 'utf-8' },
           )
 
           // Try to extract the comment URL from gh output
           const urlMatch = stdout.match(/(https:\/\/github\.com\S+)/)?.[0] ?? null
 
-          tracker.appendOutput(`✓ Posted to PR #${prNumber}${urlMatch ? ` — ${urlMatch}` : ''}\n`)
+          tracker.appendOutput(`✓ Posted to ${prLabel}${urlMatch ? ` — ${urlMatch}` : ''}\n`)
           tracker.finish(0)
           socket.emit('post:submit-result', { success: true, commentUrl: urlMatch })
         } catch (err) {
