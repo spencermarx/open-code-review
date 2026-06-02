@@ -53,7 +53,52 @@ export function detectActiveVendor(): ModelVendor | null {
   return null;
 }
 
+/**
+ * Try to enumerate models via the vendor's native CLI.
+ *
+ * - Claude CLI: supports `models --json` returning a JSON array
+ * - OpenCode CLI: outputs plain text (one model ID per line), no --json flag
+ */
 function tryNativeEnumeration(vendor: ModelVendor): ModelDescriptor[] | null {
+  if (vendor === "opencode") {
+    return tryOpenCodeEnumeration();
+  }
+  return tryJsonEnumeration(vendor);
+}
+
+/**
+ * OpenCode outputs plain text model IDs, one per line.
+ * Example: "kiro/claude-opus-4-7\nkiro/claude-sonnet-4-6\n..."
+ */
+function tryOpenCodeEnumeration(): ModelDescriptor[] | null {
+  try {
+    const output = execBinary("opencode", ["models"], {
+      encoding: "utf-8",
+      timeout: 10000, // model list can be long
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+
+    const models: ModelDescriptor[] = [];
+    for (const line of output.split("\n")) {
+      const id = line.trim();
+      if (!id) continue;
+
+      // Extract provider from "provider/model" format
+      const slashIdx = id.indexOf("/");
+      const provider = slashIdx > 0 ? id.slice(0, slashIdx) : undefined;
+
+      models.push({ id, provider });
+    }
+    return models.length > 0 ? models : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Claude CLI supports `models --json` returning a JSON array.
+ */
+function tryJsonEnumeration(vendor: ModelVendor): ModelDescriptor[] | null {
   try {
     const output = execBinary(vendor, ["models", "--json"], {
       encoding: "utf-8",

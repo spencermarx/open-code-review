@@ -144,42 +144,28 @@ export class OpenCodeAdapter implements AiCliAdapter {
   }
 
   async listModels(): Promise<ModelDescriptor[]> {
-    // OpenCode has historically exposed model discovery via configuration
-    // rather than a CLI subcommand. Probe defensively for `models --json`
-    // in case a future version adds it; otherwise fall back to the bundled
-    // list. Free-text input is the canonical bypass for users on unusual
-    // provider/model combinations.
+    // OpenCode outputs plain text model IDs (one per line) via `opencode models`.
+    // No --json flag is available. Parse the plain text output.
     try {
-      const output = execBinary('opencode', ['models', '--json'], {
+      const output = execBinary('opencode', ['models'], {
         encoding: 'utf-8',
-        timeout: 5000,
+        timeout: 10000, // model list can be long
         stdio: ['ignore', 'pipe', 'ignore'],
       })
-      const parsed: unknown = JSON.parse(output)
-      if (Array.isArray(parsed)) {
-        const models: ModelDescriptor[] = []
-        for (const item of parsed) {
-          if (typeof item === 'string') {
-            models.push({ id: item })
-          } else if (
-            typeof item === 'object' &&
-            item !== null &&
-            'id' in (item as Record<string, unknown>) &&
-            typeof (item as Record<string, unknown>).id === 'string'
-          ) {
-            const obj = item as Record<string, unknown>
-            const desc: ModelDescriptor = { id: obj.id as string }
-            if (typeof obj.displayName === 'string') desc.displayName = obj.displayName
-            if (typeof obj.provider === 'string') desc.provider = obj.provider
-            if (Array.isArray(obj.tags)) {
-              desc.tags = obj.tags.filter((t): t is string => typeof t === 'string')
-            }
-            models.push(desc)
-          }
-        }
-        if (models.length > 0) {
-          return models
-        }
+
+      const models: ModelDescriptor[] = []
+      for (const line of output.split('\n')) {
+        const id = line.trim()
+        if (!id) continue
+
+        // Extract provider from "provider/model" format
+        const slashIdx = id.indexOf('/')
+        const provider = slashIdx > 0 ? id.slice(0, slashIdx) : undefined
+
+        models.push({ id, provider })
+      }
+      if (models.length > 0) {
+        return models
       }
     } catch {
       // Native enumeration unavailable — fall through to bundled list
