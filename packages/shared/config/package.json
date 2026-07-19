@@ -10,6 +10,11 @@
       "source": "./src/models.ts",
       "default": "./src/models.ts"
     },
+    "./dashboard-config": {
+      "types": "./src/dashboard-config.ts",
+      "source": "./src/dashboard-config.ts",
+      "default": "./src/dashboard-config.ts"
+    },
     "./runtime-config": {
       "types": "./src/runtime-config.ts",
       "source": "./src/runtime-config.ts",

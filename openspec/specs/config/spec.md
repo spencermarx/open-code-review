@@ -9,6 +9,35 @@ and the model catalog. It is a source-only, private shared package
 (`@open-code-review/config`) consumed by the CLI and the dashboard.
 
 ## Requirements
+### Requirement: Dashboard Environment Passthrough
+
+The system SHALL support an optional `dashboard.env_passthrough` list in
+`.ocr/config.yaml`. Each entry names an environment variable whose current
+value is forwarded to processes launched by the dashboard. Configuration SHALL
+store names only, never environment variable values.
+
+#### Scenario: Configured variable is forwarded
+
+- **GIVEN** `dashboard.env_passthrough` contains `AWS_REGION`
+- **AND** the dashboard process environment defines `AWS_REGION=us-west-2`
+- **WHEN** the dashboard launches an AI CLI process
+- **THEN** the child process SHALL receive `AWS_REGION=us-west-2`
+
+#### Scenario: Unconfigured variable remains filtered
+
+- **GIVEN** the dashboard process environment contains a variable that is not
+  in the built-in allowlist or `dashboard.env_passthrough`
+- **WHEN** the dashboard launches a child process
+- **THEN** that variable SHALL NOT be present in the child environment
+
+#### Scenario: Invalid entries are ignored
+
+- **GIVEN** `dashboard.env_passthrough` contains duplicate entries, non-string
+  entries, or invalid environment variable names
+- **WHEN** dashboard configuration is loaded
+- **THEN** duplicate names SHALL be deduplicated
+- **AND** invalid entries SHALL be ignored without exposing their values
+
 ### Requirement: Code Review Map Configuration
 
 The system SHALL support a `code-review-map` configuration section in `.ocr/config.yaml` that allows users to customize map generation behavior, including agent redundancy settings.
@@ -232,4 +261,3 @@ The system SHALL expose runtime configuration governing forward-resume bounds, m
 
 - **WHEN** `runtime.forward_resume_max_attempts` is set to a non-integer or to a value < 1
 - **THEN** configuration load SHALL fail with a clear error and SHALL NOT silently coerce the value
-

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { cleanEnv } from '../env.js'
+import { cleanEnv, configureEnvPassthrough } from '../env.js'
 
 // ── cleanEnv ─────────────────────────────────────────────────────────────────
 
@@ -9,6 +9,7 @@ describe('cleanEnv', () => {
   afterEach(() => {
     // Restore the original environment after each test
     process.env = { ...originalEnv }
+    configureEnvPassthrough([])
   })
 
   it('returns an object (not null or undefined)', () => {
@@ -70,6 +71,8 @@ describe('cleanEnv', () => {
       'OPENAI_API_KEY',
       'OPENCODE_CONFIG',
       'OPENCODE_CONFIG_DIR',
+      'GH_TOKEN',
+      'GITHUB_TOKEN',
       'NODE_ENV',
       'SHELL',
       'USER',
@@ -91,5 +94,40 @@ describe('cleanEnv', () => {
     process.env.LANG = '  en_US.UTF-8  '
     const result = cleanEnv()
     expect(result.LANG).toBe('  en_US.UTF-8  ')
+  })
+
+  it('includes project-configured environment variables when present', () => {
+    process.env.AWS_BEARER_TOKEN_BEDROCK = 'test-token'
+    process.env.AWS_REGION = 'us-west-2'
+    configureEnvPassthrough(['AWS_BEARER_TOKEN_BEDROCK', 'AWS_REGION'])
+
+    expect(cleanEnv()).toMatchObject({
+      AWS_BEARER_TOKEN_BEDROCK: 'test-token',
+      AWS_REGION: 'us-west-2',
+    })
+  })
+
+  it('does not include an environment variable until it is configured', () => {
+    process.env.AWS_REGION = 'us-west-2'
+    expect(cleanEnv().AWS_REGION).toBeUndefined()
+  })
+
+  it('replaces the configured passthrough list', () => {
+    process.env.FIRST_VALUE = 'first'
+    process.env.SECOND_VALUE = 'second'
+    configureEnvPassthrough(['FIRST_VALUE'])
+    configureEnvPassthrough(['SECOND_VALUE'])
+
+    const result = cleanEnv()
+    expect(result.FIRST_VALUE).toBeUndefined()
+    expect(result.SECOND_VALUE).toBe('second')
+  })
+
+  it('ignores invalid configured names', () => {
+    process.env.VALID_NAME = 'present'
+    configureEnvPassthrough(['VALID_NAME', 'INVALID-NAME'])
+
+    expect(cleanEnv().VALID_NAME).toBe('present')
+    expect(cleanEnv()).not.toHaveProperty('INVALID-NAME')
   })
 })

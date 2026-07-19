@@ -54,8 +54,10 @@ import {
   getAgentHeartbeatSeconds,
   getForwardResumeMaxAttempts,
 } from '@open-code-review/config/runtime-config'
+import { readDashboardConfig } from '@open-code-review/config/dashboard-config'
 import { runForwardResumeSweep } from './services/forward-resume-sweep.js'
 import { reconcileCompletedSessions } from '@open-code-review/persistence/state'
+import { configureEnvPassthrough } from './socket/env.js'
 
 import { homedir } from 'node:os'
 
@@ -209,6 +211,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   // Resolve .ocr directory
   const ocrDir = resolveOcrDir()
+  configureEnvPassthrough(readDashboardConfig(ocrDir).envPassthrough)
   const aiCliService = new AiCliService(ocrDir)
 
   // ── WAL hygiene (best-effort, before opening the DB) ──

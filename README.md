@@ -502,10 +502,20 @@ github:
   auto_prompt_post: false
   comment_format: "single"
 
-# Dashboard IDE integration
+# Dashboard integration
 dashboard:
+  ai_cli: auto  # auto | claude | opencode | off
   ide: auto  # vscode | cursor | windsurf | jetbrains | sublime
+  # Forward provider variables by name. Values stay in the parent environment.
+  env_passthrough:
+    - AWS_BEARER_TOKEN_BEDROCK
+    - AWS_REGION
 ```
+
+`env_passthrough` is useful when the selected AI CLI authenticates through
+provider-specific environment variables. Only configure trusted variables:
+each listed value is forwarded to processes launched by the dashboard. Restart
+the dashboard after changing this setting.
 
 Team composition can also be changed per-review via `--team` (explicit roster) or `--reviewer` (ephemeral reviewers), or via natural language: "use 3 principal reviewers and add security."
 

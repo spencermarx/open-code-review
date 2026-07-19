@@ -135,3 +135,16 @@ discourse:
 github:
   auto_prompt_post: false
   comment_format: "single"  # "single" or "inline"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DASHBOARD (optional)
+# ─────────────────────────────────────────────────────────────────────────────
+# Select the AI CLI used by dashboard actions and explicitly forward provider
+# environment variables to child processes. List variable names only; values
+# are read from the dashboard process environment when it starts.
+#
+# dashboard:
+#   ai_cli: auto  # "auto", "claude", "opencode", or "off"
+#   env_passthrough:
+#     - AWS_BEARER_TOKEN_BEDROCK
+#     - AWS_REGION
