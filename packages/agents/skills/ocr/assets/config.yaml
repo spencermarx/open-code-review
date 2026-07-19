@@ -141,7 +141,7 @@ github:
 # ─────────────────────────────────────────────────────────────────────────────
 # Select the AI CLI used by dashboard actions and explicitly forward any
 # additional environment variables required by child processes. List variable
-# names only; values are read from the dashboard process environment at startup.
+# names only; values are inherited when each child process starts.
 #
 # dashboard:
 #   ai_cli: auto  # "auto", "claude", "opencode", or "off"
