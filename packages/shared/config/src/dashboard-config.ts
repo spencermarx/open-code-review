@@ -15,10 +15,9 @@ export type DashboardConfig = {
   envPassthrough: string[];
 };
 
-const DEFAULT_DASHBOARD_CONFIG: DashboardConfig = {
-  aiCli: "auto",
-  envPassthrough: [],
-};
+function defaultDashboardConfig(): DashboardConfig {
+  return { aiCli: "auto", envPassthrough: [] };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -51,12 +50,12 @@ function parseEnvPassthrough(value: unknown): string[] {
 /** Read dashboard settings from `.ocr/config.yaml`. */
 export function readDashboardConfig(ocrDir: string): DashboardConfig {
   const configPath = join(ocrDir, "config.yaml");
-  if (!existsSync(configPath)) return { ...DEFAULT_DASHBOARD_CONFIG };
+  if (!existsSync(configPath)) return defaultDashboardConfig();
 
   try {
     const parsed: unknown = parseYaml(readFileSync(configPath, "utf-8"));
     if (!isRecord(parsed) || !isRecord(parsed.dashboard)) {
-      return { ...DEFAULT_DASHBOARD_CONFIG };
+      return defaultDashboardConfig();
     }
 
     return {
@@ -69,6 +68,6 @@ export function readDashboardConfig(ocrDir: string): DashboardConfig {
     process.stderr.write(
       "[ocr] Failed to parse dashboard configuration; using defaults.\n",
     );
-    return { ...DEFAULT_DASHBOARD_CONFIG };
+    return defaultDashboardConfig();
   }
 }

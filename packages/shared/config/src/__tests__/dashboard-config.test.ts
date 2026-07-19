@@ -31,6 +31,13 @@ describe("readDashboardConfig", () => {
     });
   });
 
+  it("returns a fresh environment passthrough list for each default", () => {
+    const first = readDashboardConfig(ocrDir);
+    first.envPassthrough.push("FIRST_VALUE");
+
+    expect(readDashboardConfig(ocrDir).envPassthrough).toEqual([]);
+  });
+
   it("reads the AI CLI preference and environment passthrough list", () => {
     writeFileSync(
       join(ocrDir, "config.yaml"),
