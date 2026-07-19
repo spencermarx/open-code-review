@@ -57,8 +57,8 @@ export class AiCliService {
   private readonly preference: AiCliPreference
   private readonly status: AiCliStatus
 
-  constructor(ocrDir: string) {
-    this.preference = readDashboardConfig(ocrDir).aiCli
+  constructor(ocrDir: string, preference?: AiCliPreference) {
+    this.preference = preference ?? readDashboardConfig(ocrDir).aiCli
 
     // Register all known adapters and run detection
     const adapters = createRegisteredAdapters()

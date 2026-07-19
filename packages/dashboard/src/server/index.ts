@@ -211,8 +211,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   // Resolve .ocr directory
   const ocrDir = resolveOcrDir()
-  configureEnvPassthrough(readDashboardConfig(ocrDir).envPassthrough)
-  const aiCliService = new AiCliService(ocrDir)
+  const dashboardConfig = readDashboardConfig(ocrDir)
+  configureEnvPassthrough(dashboardConfig.envPassthrough)
+  const aiCliService = new AiCliService(ocrDir, dashboardConfig.aiCli)
 
   // ── WAL hygiene (best-effort, before opening the DB) ──
   // Best-effort WAL checkpoint before opening the shared connection —
