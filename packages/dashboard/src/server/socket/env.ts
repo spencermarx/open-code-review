@@ -26,7 +26,7 @@ const ENV_ALLOWLIST = [
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 let configuredEnvPassthrough = new Set<string>()
 
-/** Replace the project-configured environment variable passthrough list. */
+/** Replace the project-configured names added to the built-in allowlist. */
 export function configureEnvPassthrough(names: readonly string[]): void {
   configuredEnvPassthrough = new Set(
     names.filter((name) => ENV_NAME_PATTERN.test(name)),
@@ -35,7 +35,7 @@ export function configureEnvPassthrough(names: readonly string[]): void {
 
 /**
  * Build a clean env for spawning an AI CLI as a child process.
- * Uses an allowlist so only known-safe variables are passed through.
+ * Uses the built-in allowlist plus explicitly configured variable names.
  */
 export function cleanEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
