@@ -38,7 +38,7 @@ export function configureEnvPassthrough(names: readonly string[]): void {
  * Uses the built-in allowlist plus explicitly configured variable names.
  */
 export function cleanEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {}
+  const env = Object.create(null) as NodeJS.ProcessEnv
   for (const key of [...ENV_ALLOWLIST, ...configuredEnvPassthrough]) {
     if (process.env[key] !== undefined) {
       env[key] = process.env[key]

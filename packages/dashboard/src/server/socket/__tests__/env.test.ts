@@ -130,4 +130,18 @@ describe('cleanEnv', () => {
     expect(cleanEnv().VALID_NAME).toBe('present')
     expect(cleanEnv()).not.toHaveProperty('INVALID-NAME')
   })
+
+  it('forwards valid names that collide with Object prototype properties', () => {
+    Object.defineProperty(process.env, '__proto__', {
+      value: 'prototype-value',
+      configurable: true,
+      enumerable: true,
+      writable: true,
+    })
+    configureEnvPassthrough(['__proto__'])
+
+    const result = cleanEnv()
+    expect(Object.prototype.hasOwnProperty.call(result, '__proto__')).toBe(true)
+    expect(result['__proto__']).toBe('prototype-value')
+  })
 })
