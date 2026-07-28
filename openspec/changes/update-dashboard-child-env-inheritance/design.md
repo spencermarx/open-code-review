@@ -150,9 +150,11 @@ entry. No remedy mechanism is sketched in advance.
 
 - Startup line: snapshot timestamp (full ISO-8601 — dashboards run for
   days), source, removed names, and the restart remedy sentence.
-- Per-execution log header: `env: shell snapshot <ts> (<source>) minus [...]
-  plus [...]`, computed by the same `buildChildEnv` call that spawned the
-  child — the filtering is the instrument; no parallel bookkeeping to drift.
+- Per-execution log header: `env: shell snapshot <ts> (<source>)
+  removed [...] injected [...]`, formatted from the same `buildChildEnv`
+  result that spawned the child — the filtering is the instrument; no
+  parallel bookkeeping to drift. (The startup line and failure hint
+  recompute the same deterministic result from the frozen base.)
 - Failure-time hint: on nonzero child exit, the run-detail error surface
   shows the removed list, snapshot timestamp, and remedy; when
   `NODE_OPTIONS` was removed and the shell had it set, the hint states

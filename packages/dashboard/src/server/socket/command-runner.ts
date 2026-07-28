@@ -24,7 +24,7 @@ import {
 } from '../services/ai-cli/index.js'
 import { FileTailer } from '../services/ai-cli/file-tailer.js'
 import { resolveLocalCli } from './cli-resolver.js'
-import { childEnv, childEnvFailureHint } from '../child-env.js'
+import { childEnv, childEnvFailureHint, formatChildEnvHeader } from '../child-env.js'
 import {
   generateCommandUid,
   appendCommandLog,
@@ -287,16 +287,24 @@ function spawnCliCommand(
 ): void {
   const localCli = resolveLocalCli()
   const repoRoot = dirname(ocrDir)
+  const envResult = childEnv()
   const proc = localCli
     ? spawnBinary('node', [localCli, baseCommand, ...subArgs], {
         cwd: repoRoot,
-        env: childEnv().env,
+        env: envResult.env,
       })
     : spawnBinary('ocr', [baseCommand, ...subArgs], {
         cwd: repoRoot,
-        env: childEnv().env,
+        env: envResult.env,
       })
   entry.process = proc
+
+  // Env provenance line, for parity with the adapter path's exec-log header
+  // (names only) — a successful plain-CLI run records what was inherited,
+  // not just the failure hint on a nonzero exit.
+  const envHeader = `${formatChildEnvHeader(envResult)}\n`
+  entry.outputBuffer += envHeader
+  io.emit('command:output', { execution_id: executionId, content: envHeader })
 
   // Persist PID for orphan detection on restart
   if (proc.pid) {

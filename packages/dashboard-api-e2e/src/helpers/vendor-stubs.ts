@@ -18,6 +18,10 @@
  * PATH key case-insensitively — Windows commonly has `Path`), so the stubs
  * shadow any real CLI installed on the machine and the tests stay
  * deterministic on dev laptops and every CI runner.
+ *
+ * NOTE: kept in lockstep with
+ * packages/cli-e2e/src/helpers/vendor-stubs.ts — test-only
+ * duplication; the two e2e packages have no shared test library.
  */
 
 import {
@@ -176,6 +180,3 @@ export function createVendorStubs(
     },
   };
 }
-
-// NOTE: kept in lockstep with packages/cli-e2e/src/helpers/vendor-stubs.ts —
-// test-only duplication; the two e2e packages have no shared test library.

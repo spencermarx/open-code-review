@@ -196,6 +196,22 @@ export function buildChildEnvForPlatform(
 }
 
 /**
+ * Freeze a null-prototype copy of an environment: later writes throw in
+ * strict mode instead of silently mutating the contract between spawns, and
+ * `__proto__`-named keys stay ordinary keys. The single canonical snapshot
+ * primitive — the CLI's capture (before its `NODE_ENV` mutation) and the
+ * dashboard holder's registration both use THIS, so the "how we snapshot"
+ * logic cannot diverge between the `cli-launch` and `dev-direct-run` paths.
+ * Idempotent over already-clean inputs (the holder re-freezes defensively).
+ */
+export function freezeEnvSnapshot(
+  env: Readonly<NodeJS.ProcessEnv>,
+): Readonly<NodeJS.ProcessEnv> {
+  const copy = Object.assign(Object.create(null), env) as NodeJS.ProcessEnv;
+  return Object.freeze(copy);
+}
+
+/**
  * Human-readable posture text generated from the same constants that drive
  * {@link buildChildEnv} — the doctor/startup/docs surface can never drift
  * from behavior. Names only; this module never sees or prints values.

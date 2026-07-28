@@ -26,6 +26,7 @@ export {
   buildChildEnv,
   buildChildEnvForPlatform,
   describeChildEnvPosture,
+  freezeEnvSnapshot,
 } from "./child-env.js";
 export type { ChildEnvInject, ChildEnvResult } from "./child-env.js";
 

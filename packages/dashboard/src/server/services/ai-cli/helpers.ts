@@ -34,6 +34,9 @@ export function buildFileStdio(
   }
   // 0o600: per-execution logs are owner-only — the child-env design's
   // stated posture for exec logs (previously umask-governed by default).
+  // The mode applies at CREATION; log paths are per-execution-unique
+  // (uid-named), so the append re-open of an existing file — which keeps
+  // its original mode — does not arise in practice.
   const logFd = openSync(logFile, 'a', 0o600)
   return { stdio: ['pipe', logFd, logFd], logFd, logPath: logFile }
 }

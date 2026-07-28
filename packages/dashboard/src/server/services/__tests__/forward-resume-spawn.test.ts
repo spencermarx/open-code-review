@@ -15,6 +15,8 @@ import {
 
 const spawnMock = vi.mocked(spawnBinary)
 
+let fakeChild: { on: ReturnType<typeof vi.fn>; unref: ReturnType<typeof vi.fn> }
+
 // Pins the spec scenario "Forward-resume spawn uses the builder": the sweep's
 // resume child receives the frozen launch-snapshot env — no dashboard-mutated
 // NODE_ENV, no ambient OCR_* — not the server's process.env. This was the one
@@ -33,10 +35,8 @@ describe('makeSpawnResume', () => {
       source: 'cli-launch',
       capturedAt: '2026-07-28T00:00:00.000Z',
     })
-    spawnMock.mockReturnValue({
-      on: vi.fn(),
-      unref: vi.fn(),
-    } as unknown as ChildProcess)
+    fakeChild = { on: vi.fn(), unref: vi.fn() }
+    spawnMock.mockReturnValue(fakeChild as unknown as ChildProcess)
   })
 
   afterEach(() => {
@@ -74,6 +74,12 @@ describe('makeSpawnResume', () => {
     expect(opts.env.OCR_DASHBOARD_EXECUTION_UID).toBeUndefined()
     expect(opts.env.NODE_ENV).toBeUndefined()
     expect(opts.env.FORWARD_RESUME_TEST_AMBIENT).toBeUndefined()
+
+    // Fire-and-forget contract: error listener attached (a dead `ocr`
+    // binary must not crash the server) and the child is unref'd so it
+    // never holds the dashboard's event loop open.
+    expect(fakeChild.on).toHaveBeenCalledWith('error', expect.any(Function))
+    expect(fakeChild.unref).toHaveBeenCalledTimes(1)
   })
 
   it('throws (never falls back to process.env) if the snapshot is unregistered', () => {

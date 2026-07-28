@@ -164,6 +164,8 @@ export default [
       'no-restricted-syntax': [
         'error',
         {
+          // Vector 1: a spawn with NO env anywhere in its arguments —
+          // catches the missing-options and options-without-env spellings.
           selector:
             'CallExpression[callee.name=/^(spawnBinary|execBinary|execBinaryAsync)$/]' +
             ':not(:has(ObjectExpression Property[key.name="env"]))',
@@ -172,6 +174,20 @@ export default [
             '(env: childEnv().env). If this spawn deliberately uses the ' +
             'ambient env (argument-only probe), add a per-line disable with ' +
             'the rationale.',
+        },
+        {
+          // Vector 2 (options-scoped): an options OBJECT lacking `env` even
+          // when an unrelated nested `env:` key elsewhere in the arguments
+          // would satisfy vector 1's broad :has — the false-negative mode
+          // the round-2 review demonstrated. Both are pinned by the canary
+          // in packages/shared/platform/src/__tests__/child-env-gate.test.ts.
+          selector:
+            'CallExpression[callee.name=/^(spawnBinary|execBinary|execBinaryAsync)$/]' +
+            ' > ObjectExpression:not(:has(> Property[key.name="env"]))',
+          message:
+            'This spawn options object has no env property — pass env from ' +
+            'the child-env builder (env: childEnv().env), or add a per-line ' +
+            'disable with the rationale for a deliberate ambient probe.',
         },
       ],
     },

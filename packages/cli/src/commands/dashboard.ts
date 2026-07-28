@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import chalk from "chalk";
-import { importModule } from "@open-code-review/platform";
+import { importModule, freezeEnvSnapshot } from "@open-code-review/platform";
 import { requireOcrSetup } from "../lib/guards.js";
 import { ensureDatabase, closeAllDatabases } from "@open-code-review/persistence";
 
@@ -81,14 +81,12 @@ export const dashboardCommand = new Command("dashboard")
 
       // Capture the child-env snapshot BEFORE the NODE_ENV mutation below:
       // dashboard-spawned children inherit the shell environment as it was
-      // at launch (frozen null-prototype copy — later writes throw instead
-      // of silently changing the contract between spawns). Constructed
-      // inline: the CLI must not import dashboard code (app→app boundary);
-      // `startServer` types this parameter structurally.
+      // at launch. The freeze primitive is the platform package's canonical
+      // one (shared with the dashboard holder, which re-freezes defensively
+      // on registration); the CLI cannot import dashboard code (app→app
+      // boundary), so `startServer` types this parameter structurally.
       const childEnvBase = {
-        env: Object.freeze(
-          Object.assign(Object.create(null), process.env),
-        ) as Readonly<NodeJS.ProcessEnv>,
+        env: freezeEnvSnapshot(process.env),
         source: "cli-launch" as const,
         capturedAt: new Date().toISOString(),
       };

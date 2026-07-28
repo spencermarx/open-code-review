@@ -45,9 +45,12 @@ behavior.
 
 The child-env base SHALL be captured once, frozen at capture (null-prototype
 object, `Object.freeze`), and registered exactly once. No spawn path SHALL
-read `process.env` directly or fall back to it; direct `process.env` access
-in spawn modules SHALL be forbidden by lint. `startServer` SHALL require a
-`childEnvBase` parameter carrying the snapshot, its source (`cli-launch` or
+read `process.env` when constructing a child environment, nor fall back to
+it when the snapshot is unregistered; direct `process.env` access in spawn
+modules SHALL be forbidden by lint. (Server-configuration reads outside
+child-env construction — e.g. `PORT`, the server's own `NODE_ENV`, IDE
+detection — are unaffected.) `startServer` SHALL require a `childEnvBase`
+parameter carrying the snapshot, its source (`cli-launch` or
 `dev-direct-run`), and its capture timestamp.
 
 #### Scenario: Use before init fails loud

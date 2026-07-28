@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { formatToolDetail, extractAssistantText } from '../helpers.js'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { formatToolDetail, extractAssistantText, buildFileStdio, closeFileStdio } from '../helpers.js'
 
 // ── formatToolDetail ─────────────────────────────────────────────────────────
 
@@ -183,5 +186,31 @@ describe('extractAssistantText', () => {
       },
     }
     expect(extractAssistantText(parsed)).toBe('content')
+  })
+})
+
+// ── buildFileStdio ───────────────────────────────────────────────────────────
+
+describe('buildFileStdio', () => {
+  it('creates the exec log owner-only (0o600) on POSIX', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ocr-filestdio-test-'))
+    const logFile = join(dir, 'exec.log')
+    const { logFd, logPath } = buildFileStdio(logFile)
+    try {
+      expect(logPath).toBe(logFile)
+      if (process.platform !== 'win32') {
+        expect(statSync(logFile).mode & 0o777).toBe(0o600)
+      }
+    } finally {
+      closeFileStdio(logFd)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('returns all-pipe stdio with no fd when logFile is undefined', () => {
+    const { stdio, logFd, logPath } = buildFileStdio(undefined)
+    expect(stdio).toEqual(['pipe', 'pipe', 'pipe'])
+    expect(logFd).toBeNull()
+    expect(logPath).toBeUndefined()
   })
 })

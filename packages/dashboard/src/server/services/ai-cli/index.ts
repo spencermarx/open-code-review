@@ -59,7 +59,9 @@ export class AiCliService {
 
   constructor(ocrDir: string, preference?: AiCliPreference) {
     // The server passes the startup-parsed preference; the fallback read
-    // keeps direct construction (tests, tooling) working standalone.
+    // keeps direct construction (tests, tooling) working standalone. The
+    // fallback is startup/test-only disk+YAML I/O — never construct this
+    // service on a hot path without passing the preference in.
     this.preference = preference ?? readDashboardConfig(ocrDir).aiCli
 
     // Register all known adapters and run detection

@@ -15,6 +15,7 @@
 
 import {
   buildChildEnv,
+  freezeEnvSnapshot,
   type ChildEnvInject,
   type ChildEnvResult,
 } from '@open-code-review/platform'
@@ -32,24 +33,16 @@ export type ChildEnvBase = {
 let registered: ChildEnvBase | null = null
 
 /**
- * Freeze a null-prototype copy of `env` so any later write from any module
- * throws in strict mode instead of silently mutating the contract between
- * spawns. Idempotent over already-clean inputs.
- */
-function freezeEnvCopy(env: Readonly<NodeJS.ProcessEnv>): Readonly<NodeJS.ProcessEnv> {
-  const copy = Object.assign(Object.create(null), env) as NodeJS.ProcessEnv
-  return Object.freeze(copy)
-}
-
-/**
  * Capture the current `process.env` as a child-env base. The CLI launch path
  * captures before its `NODE_ENV` mutation and passes the result through
  * `startServer`; the dev direct-run path calls this at entry. This is the
- * single sanctioned `process.env` read on the spawn side.
+ * single sanctioned `process.env` read on the spawn side. The freeze
+ * primitive lives in the platform package so the CLI's capture and this one
+ * cannot diverge.
  */
 export function captureChildEnvBase(source: ChildEnvSource): ChildEnvBase {
   return {
-    env: freezeEnvCopy(process.env),
+    env: freezeEnvSnapshot(process.env),
     source,
     capturedAt: new Date().toISOString(),
   }
@@ -62,7 +55,8 @@ export function initChildEnvBase(base: ChildEnvBase): void {
       'child-env base already registered — initChildEnvBase is set-once',
     )
   }
-  registered = { ...base, env: freezeEnvCopy(base.env) }
+  // Defensive re-freeze: the invariant survives a caller that skipped it.
+  registered = { ...base, env: freezeEnvSnapshot(base.env) }
 }
 
 /** The registered base. Throws before init; never falls back to process.env. */
