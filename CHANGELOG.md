@@ -1,3 +1,21 @@
+## 2.5.0 (2026-07-28)
+
+### 🚀 Features
+
+- **cli:** capture the pre-mutation env snapshot for dashboard children ([0e41df6](https://github.com/spencermarx/open-code-review/commit/0e41df6))
+- **config:** add dashboard settings parsing layer ([#56](https://github.com/spencermarx/open-code-review/issues/56))
+- **dashboard:** inherit the launch shell environment in child processes ([#57](https://github.com/spencermarx/open-code-review/issues/57), [#56](https://github.com/spencermarx/open-code-review/issues/56))
+- **platform:** add child-env builder with criteria-governed denylist ([7490f06](https://github.com/spencermarx/open-code-review/commit/7490f06))
+
+### 🩹 Fixes
+
+- **dashboard:** close spawn-convergence gaps from OCR round-1 review ([ddd02bc](https://github.com/spencermarx/open-code-review/commit/ddd02bc))
+
+### ❤️ Thank You
+
+- claude-flow @agentic-org
+- Spencer Marx
+
 ## 2.4.0 (2026-06-28)
 
 ### 🚀 Features

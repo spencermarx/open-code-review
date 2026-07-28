@@ -1,3 +1,18 @@
+## 2.5.0 (2026-07-28)
+
+### 🚀 Features
+
+- **cli:** capture the pre-mutation env snapshot for dashboard children ([0e41df6](https://github.com/spencermarx/open-code-review/commit/0e41df6))
+
+### 🩹 Fixes
+
+- **dashboard:** close spawn-convergence gaps from OCR round-1 review ([ddd02bc](https://github.com/spencermarx/open-code-review/commit/ddd02bc))
+
+### ❤️ Thank You
+
+- claude-flow @agentic-org
+- Spencer Marx
+
 ## 2.4.0 (2026-06-28)
 
 ### 🚀 Features
