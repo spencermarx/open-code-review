@@ -32,7 +32,9 @@ export function buildFileStdio(
   if (!logFile) {
     return { stdio: ['pipe', 'pipe', 'pipe'], logFd: null, logPath: undefined }
   }
-  const logFd = openSync(logFile, 'a')
+  // 0o600: per-execution logs are owner-only — the child-env design's
+  // stated posture for exec logs (previously umask-governed by default).
+  const logFd = openSync(logFile, 'a', 0o600)
   return { stdio: ['pipe', logFd, logFd], logFd, logPath: logFile }
 }
 

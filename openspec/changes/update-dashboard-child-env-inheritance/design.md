@@ -13,8 +13,8 @@ design; contested points and dispositions are recorded below.
 Reviews launched from the dashboard see the same environment as the shell
 where you ran `ocr dashboard` — if it works in your shell, it works in the
 dashboard. OCR removes only its own `OCR_*` internals, npm's script-lifecycle
-plumbing your shell never had, and `NODE_OPTIONS`, and every run's log records
-exactly what was removed.
+plumbing your shell never had (`npm_*` and `INIT_CWD`), and `NODE_OPTIONS`,
+and every run's log records exactly what was removed.
 
 ## Threat model
 
@@ -100,11 +100,21 @@ export function buildChildEnv(
   exported as levers. A read-only `describeChildEnvPosture()` generates the
   doctor/startup/log-header text from the same constants so prose can never
   drift from behavior.
-- Every spawn path converges on the builder: both adapters, the command
-  runner, the post handler's `gh` calls, and the forward-resume sweep
-  (today a full-mutated-env leak). Enforcement is an ESLint
-  `no-restricted-properties` ban on `process.env` scoped to the spawn
-  modules, so the next divergent spawn site fails at lint time.
+- Every child-carrying spawn path converges on the builder: both adapters,
+  the command runner (both paths), the post handler's `gh` calls, the team
+  and config routes' `ocr`/`git` spawns, and the forward-resume sweep
+  (today a full-mutated-env leak). Documented exceptions, each carrying a
+  per-line lint disable naming the rationale: the adapter `--version`
+  detection probes and the `ps` process-identity probe — argument-only
+  diagnostics that read nothing env-derived.
+- Enforcement is two-part, matching the two ways the leak can reopen:
+  (1) an ESLint `no-restricted-properties` ban on `process.env` reads in
+  the spawn modules, and (2) an ESLint `no-restricted-syntax` rule over the
+  whole dashboard server flagging any `spawnBinary`/`execBinary`/
+  `execBinaryAsync` call whose arguments carry no `env` property — the
+  omission vector that the property ban structurally cannot see. A new
+  divergent spawn site fails at lint time on one rule or the other, or
+  carries a visible per-line disable stating why it is exempt.
 
 ### Denylist contents (internal, criteria-governed)
 

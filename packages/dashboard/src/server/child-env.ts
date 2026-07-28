@@ -87,15 +87,18 @@ export function childEnv(inject?: ChildEnvInject): ChildEnvResult {
 }
 
 /**
- * One-line env provenance for a per-execution log file, computed from the
- * same builder call that produced the spawn's env — the filtering is the
+ * One-line env provenance for a per-execution log file, formatted from the
+ * SAME builder result that spawned the child — the filtering is the
  * instrument; there is no parallel bookkeeping to drift. Names only.
+ * Vocabulary ("shell snapshot", "removed", "injected") is shared with the
+ * startup line and failure hint so the three surfaces correlate directly.
  */
 export function formatChildEnvHeader(result: ChildEnvResult): string {
   const base = getChildEnvBase()
-  const minus = result.removed.length > 0 ? result.removed.join(', ') : 'none'
-  const plus = result.injected.length > 0 ? result.injected.join(', ') : 'none'
-  return `env: shell snapshot ${base.capturedAt} (${base.source}) minus [${minus}] plus [${plus}]`
+  const removed = result.removed.length > 0 ? result.removed.join(', ') : 'none'
+  const injected =
+    result.injected.length > 0 ? result.injected.join(', ') : 'none'
+  return `env: shell snapshot ${base.capturedAt} (${base.source}) removed [${removed}] injected [${injected}]`
 }
 
 /**
@@ -103,6 +106,13 @@ export function formatChildEnvHeader(result: ChildEnvResult): string {
  * the snapshot was taken, and the remedy. States `NODE_OPTIONS` causality
  * explicitly when the launch shell had it set — the one denylist entry that
  * can carry deliberate user intent.
+ *
+ * Recomputes the builder result rather than reusing the spawn's (which is
+ * out of scope at the close handler): `removed` is a deterministic function
+ * of the frozen base and the compiled-in constants, so the recomputation is
+ * identical by construction. Injections are deliberately not reported here —
+ * they are irrelevant to a "why didn't my variable reach the child"
+ * diagnosis (they only ever ADD the execution UID).
  */
 export function childEnvFailureHint(): string {
   const base = getChildEnvBase()

@@ -90,7 +90,7 @@ describe('observability strings', () => {
     )
     expect(header).toBe(
       'env: shell snapshot 2026-07-28T14:02:11.000Z (cli-launch) ' +
-        'minus [NODE_OPTIONS] plus [OCR_DASHBOARD_EXECUTION_UID]',
+        'removed [NODE_OPTIONS] injected [OCR_DASHBOARD_EXECUTION_UID]',
     )
     expect(header).not.toContain('us-west-2')
     expect(header).not.toContain('uid-1')

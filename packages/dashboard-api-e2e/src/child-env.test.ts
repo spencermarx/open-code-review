@@ -155,8 +155,8 @@ describe("dashboard child-process environment (e2e)", () => {
       .map((f) => readFileSync(resolve(execLogsDir, f), "utf-8"))
       .join("\n");
     expect(logContent).toContain("env: shell snapshot");
-    expect(logContent).toMatch(/minus \[[^\]]*NODE_OPTIONS[^\]]*\]/);
-    expect(logContent).toContain("plus [OCR_DASHBOARD_EXECUTION_UID]");
+    expect(logContent).toMatch(/removed \[[^\]]*NODE_OPTIONS[^\]]*\]/);
+    expect(logContent).toContain("injected [OCR_DASHBOARD_EXECUTION_UID]");
     expect(logContent).not.toContain("must-not-leak");
   }, 40_000);
 });

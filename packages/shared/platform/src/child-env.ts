@@ -50,7 +50,13 @@ const NPM_RESIDUE_PREFIXES_WINDOWS = [
   "npm_package_",
   "npm_lifecycle_",
 ];
-const NPM_RESIDUE_NAMES_WINDOWS = ["npm_execpath", "npm_node_execpath"];
+// `npm_command` completes the residue enumeration for the same entry: npm
+// injects it (e.g. "run-script") alongside the lifecycle vars.
+const NPM_RESIDUE_NAMES_WINDOWS = [
+  "npm_execpath",
+  "npm_node_execpath",
+  "npm_command",
+];
 
 /**
  * (b) npm launch residue injected OUTSIDE the `npm_` prefix: nested npm

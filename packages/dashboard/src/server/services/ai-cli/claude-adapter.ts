@@ -50,6 +50,10 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
 
   detect(): DetectionResult {
     try {
+      // Deliberate ambient spawn: argument-only `--version` detection probe
+      // (needs only PATH; documented exception per the child-env posture
+      // spec).
+      // eslint-disable-next-line no-restricted-syntax
       const output = execBinary('claude', ['--version'], {
         encoding: 'utf-8',
         timeout: 5000,

@@ -95,6 +95,7 @@ describe("buildChildEnv", () => {
       Ocr_Dashboard_Execution_Uid: "stale",
       Init_Cwd: "C:\\launch",
       NPM_CONFIG_REGISTRY: "https://corp",
+      npm_command: "run-script",
       Path: "C:\\Windows",
     });
     expect(env.Node_Options).toBeUndefined();
@@ -103,6 +104,7 @@ describe("buildChildEnv", () => {
     // Windows collision is undecidable and documented: the residue
     // sub-namespace grab takes NPM_CONFIG_* case-insensitively.
     expect(env.NPM_CONFIG_REGISTRY).toBeUndefined();
+    expect(env.npm_command).toBeUndefined();
     expect(env.Path).toBe("C:\\Windows");
     expect(removed).toEqual(
       expect.arrayContaining([

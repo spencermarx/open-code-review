@@ -7,8 +7,12 @@
 Dashboard-spawned child processes SHALL receive the environment of the shell
 that launched `ocr dashboard` — captured as a snapshot at launch — minus only
 the internal denylist, plus only registered injections. This covers every
-spawn path: AI CLI adapters, utility commands, `gh` invocations, and
-forward-resume spawns. No public configuration key SHALL govern this
+child-carrying spawn path: AI CLI adapters, utility commands (including the
+team and config routes' `ocr`/`git` spawns), `gh` invocations, and
+forward-resume spawns. Argument-only diagnostic probes (adapter `--version`
+detection, the `ps` process-identity check) MAY use the ambient environment,
+and each such exception SHALL carry a per-line lint suppression stating the
+rationale at the call site. No public configuration key SHALL govern this
 behavior.
 
 #### Scenario: Provider variable flows through
@@ -116,12 +120,15 @@ Secret-shaped and third-party provider names are categorically inadmissible.
 
 ### Requirement: Closed Child-Env Injection Channel
 
-Every child spawn SHALL construct its environment through the single builder
-function. Injected keys SHALL be limited to a compile-time-frozen allowed set
-(currently `OCR_DASHBOARD_EXECUTION_UID`), enforced by a runtime error at the
-builder. Injected entries with undefined values SHALL be omitted from both
-the output env and the injected-names list. No socket-, HTTP-, or
-agent-derived value SHALL become or override child env.
+Every child-carrying spawn SHALL construct its environment through the
+single builder function (documented argument-only probe exceptions per the
+Shell-Parity requirement). Injected keys SHALL be limited to a
+compile-time-frozen allowed set (currently `OCR_DASHBOARD_EXECUTION_UID`),
+enforced by a runtime error at the builder. Injected entries with undefined
+values SHALL be omitted from both the output env and the injected-names
+list. No socket-, HTTP-, or agent-derived value SHALL become or override
+child env. Lint SHALL flag both divergence vectors: direct `process.env`
+reads in spawn modules, and spawn calls whose arguments omit `env`.
 
 #### Scenario: Unregistered inject key rejected at runtime
 

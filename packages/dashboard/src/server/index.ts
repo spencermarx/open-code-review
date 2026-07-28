@@ -63,6 +63,7 @@ import {
   type ChildEnvBase,
 } from './child-env.js'
 import { runForwardResumeSweep } from './services/forward-resume-sweep.js'
+import { makeSpawnResume } from './services/forward-resume-spawn.js'
 import { reconcileCompletedSessions } from '@open-code-review/persistence/state'
 
 import { homedir } from 'node:os'
@@ -199,6 +200,10 @@ function isOcrDashboardProcess(pid: number): boolean {
   if (process.platform === 'win32') return false
   try {
     const cmd = (
+      // Deliberate ambient spawn: argument-only `ps` identity probe; reads
+      // nothing env-derived and runs before/independent of the child-env
+      // snapshot (documented exception per the child-env posture spec).
+      // eslint-disable-next-line no-restricted-syntax
       execBinary('ps', ['-p', String(pid), '-o', 'command='], {
         encoding: 'utf-8',
         timeout: 3000,
@@ -469,23 +474,10 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   // primitive a human would (`ocr review --resume`), which owns the lease/cap/
   // adapter; the sweep owns only the death-evidence gate and the cap-close.
   const forwardResumeMaxAttempts = getForwardResumeMaxAttempts(ocrDir)
-  const spawnResume = (sessionId: string): void => {
-    // Detached, fire-and-forget. The CLI command re-checks liveness + acquires
-    // the single-writer lease, so a duplicate trigger cannot double-drive.
-    const child = spawnBinary('ocr', ['review', '--resume', sessionId], {
-      cwd: ocrDir.replace(/\.ocr$/, '') || process.cwd(),
-      // Same builder as every other spawn path — without this the sweep
-      // child inherited the dashboard's full mutated env (NODE_ENV=
-      // production and any ambient OCR_*), diverging from adapter spawns.
-      env: childEnv().env,
-      stdio: 'ignore',
-      detached: true,
-    })
-    child.on('error', (err) => {
-      console.error(`[ForwardResume] spawn failed for ${sessionId}:`, err.message)
-    })
-    child.unref()
-  }
+  // Extracted to services/forward-resume-spawn.ts so the builder-env
+  // convergence at this site is unit-pinned and lint-covered (this file
+  // cannot join the process.env ban — it reads server config legitimately).
+  const spawnResume = makeSpawnResume(ocrDir)
   const runForwardResume = (): void => {
     try {
       runForwardResumeSweep({
@@ -693,12 +685,14 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   console.log(`  Auth token:        ${AUTH_TOKEN.slice(0, 8)}...[redacted]`)
   {
     // Env posture, delta only (names, never values): what children WON'T
-    // see, from the same builder every spawn uses.
+    // see. Recomputed via the same builder + constants every spawn uses
+    // (deterministic in the frozen base), with the same vocabulary as the
+    // log header and failure hint so the surfaces correlate.
     const base = getChildEnvBase()
     const { removed } = childEnv()
     console.log(
       `  Child env:         inheriting your shell environment ` +
-        `(snapshot ${base.capturedAt}, source: ${base.source})`,
+        `(shell snapshot ${base.capturedAt}, source: ${base.source})`,
     )
     if (removed.length > 0) {
       console.log(`                     removed: ${removed.join(', ')}`)
