@@ -502,12 +502,25 @@ github:
   auto_prompt_post: false
   comment_format: "single"
 
-# Dashboard IDE integration
+# Dashboard integration
 dashboard:
+  ai_cli: auto  # auto | claude | opencode | off
   ide: auto  # vscode | cursor | windsurf | jetbrains | sublime
 ```
 
 Team composition can also be changed per-review via `--team` (explicit roster) or `--reviewer` (ephemeral reviewers), or via natural language: "use 3 principal reviewers and add security."
+
+### Dashboard child-process environment
+
+Reviews launched from the dashboard see the same environment as the shell
+where you ran `ocr dashboard` — if it works in your shell, it works in the
+dashboard. OCR removes only its own `OCR_*` internals, npm's script-lifecycle
+plumbing your shell never had, and `NODE_OPTIONS` (the one intentional
+difference from your shell — an inherited `--inspect` or `--require` breaks
+concurrent review children), and every run's log records exactly what was
+removed. The snapshot is taken at launch: variables exported afterwards are
+invisible to children until you run `ocr dashboard` again. To withhold a
+variable from dashboard children: `env -u VAR ocr dashboard`.
 
 ---
 

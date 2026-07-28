@@ -105,4 +105,37 @@ export default [
       ],
     },
   },
+  {
+    // Child-env convergence gate (dashboard child-process environment spec):
+    // spawn modules must build child env through the child-env builder from
+    // the frozen launch snapshot — never from ambient `process.env`, which
+    // inside the server is the MUTATED env (NODE_ENV=production) and would
+    // silently reopen the leak this posture closes. The dashboard's
+    // `child-env.ts` holder is deliberately NOT listed: its capture function
+    // is the single sanctioned read.
+    files: [
+      'packages/dashboard/src/server/services/ai-cli/claude-adapter.ts',
+      'packages/dashboard/src/server/services/ai-cli/opencode-adapter.ts',
+      'packages/dashboard/src/server/services/ai-cli/helpers.ts',
+      'packages/dashboard/src/server/socket/command-runner.ts',
+      'packages/dashboard/src/server/socket/post-handler.ts',
+      'packages/shared/platform/src/child-env.ts',
+    ],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { sourceType: 'module' },
+    },
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'process',
+          property: 'env',
+          message:
+            'Spawn modules must not read process.env — build child env via ' +
+            'the child-env holder/builder (frozen launch-shell snapshot).',
+        },
+      ],
+    },
+  },
 ]
