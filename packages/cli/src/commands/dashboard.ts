@@ -79,6 +79,20 @@ export const dashboardCommand = new Command("dashboard")
         process.exit(1);
       }
 
+      // Capture the child-env snapshot BEFORE the NODE_ENV mutation below:
+      // dashboard-spawned children inherit the shell environment as it was
+      // at launch (frozen null-prototype copy — later writes throw instead
+      // of silently changing the contract between spawns). Constructed
+      // inline: the CLI must not import dashboard code (app→app boundary);
+      // `startServer` types this parameter structurally.
+      const childEnvBase = {
+        env: Object.freeze(
+          Object.assign(Object.create(null), process.env),
+        ) as Readonly<NodeJS.ProcessEnv>,
+        source: "cli-launch" as const,
+        capturedAt: new Date().toISOString(),
+      };
+
       // Set NODE_ENV before importing — the server uses this for static file serving
       process.env.NODE_ENV = "production";
 
@@ -89,8 +103,18 @@ export const dashboardCommand = new Command("dashboard")
       // Dynamically import the dashboard server and call startServer().
       // This is the ONLY place where dashboard code is loaded.
       try {
-        const { startServer } = await importModule<{ startServer: (opts: { port: number; open: boolean }) => Promise<void> }>(serverPath);
-        await startServer({ port, open: options.open });
+        const { startServer } = await importModule<{
+          startServer: (opts: {
+            port: number;
+            open: boolean;
+            childEnvBase: {
+              env: Readonly<NodeJS.ProcessEnv>;
+              source: "cli-launch";
+              capturedAt: string;
+            };
+          }) => Promise<void>;
+        }>(serverPath);
+        await startServer({ port, open: options.open, childEnvBase });
       } catch (err) {
         console.error(chalk.red("Error: Failed to start dashboard server."));
         console.error(

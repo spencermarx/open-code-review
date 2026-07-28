@@ -10,6 +10,7 @@ import {
   printCapabilities,
 } from "../lib/deps.js";
 import { probeEngine, probeWrite } from "@open-code-review/persistence";
+import { describeChildEnvPosture } from "@open-code-review/platform";
 
 /**
  * Print the Storage Engine section and return whether the engine is healthy.
@@ -126,6 +127,17 @@ export const doctorCommand = new Command("doctor")
     // Probe it so a too-old runtime or a disabled built-in surfaces clearly.
     if (!printStorageEngine(options.probeWrite ?? false)) {
       hasIssues = true;
+    }
+
+    // ── Dashboard child environment ──
+    // Generated from the same constants that drive the spawn-time builder,
+    // so this prose can never drift from behavior.
+
+    console.log();
+    console.log(chalk.bold("  Dashboard Child Environment"));
+    console.log();
+    for (const line of describeChildEnvPosture()) {
+      console.log(`    ${chalk.dim(line)}`);
     }
 
     // ── Capabilities ──
