@@ -58,6 +58,17 @@ export type StubBehavior =
        */
       kind: "tripwire";
       markerPath: string;
+    }
+  | {
+      /**
+       * Answers `--version`; ANY other argv dumps the stub's own
+       * `process.env` as JSON to `dumpPath` and exits 3. Lets an e2e observe
+       * exactly what environment a dashboard-spawned child inherited
+       * (child-env posture coverage), and the nonzero exit exercises the
+       * failure-hint surface.
+       */
+      kind: "env-dump";
+      dumpPath: string;
     };
 
 export type VendorStubs = {
@@ -80,6 +91,15 @@ function stubScript(behavior: StubBehavior): string {
     "  process.exit(0);",
     "}",
   ];
+  if (behavior.kind === "env-dump") {
+    // Any non-version argv: dump the inherited environment and fail.
+    lines.push(
+      'require("node:fs").writeFileSync(' +
+        `${JSON.stringify(behavior.dumpPath)}, JSON.stringify(process.env));`,
+      "process.exit(3);",
+    );
+    return lines.join("\n") + "\n";
+  }
   if (behavior.kind === "native") {
     const ending = behavior.lineEnding ?? "\n";
     lines.push(

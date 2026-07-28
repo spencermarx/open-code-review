@@ -80,7 +80,9 @@ describe("dashboard command child-env snapshot", () => {
     }
 
     expect(startServerMock).toHaveBeenCalledTimes(1);
-    const opts = startServerMock.mock.calls[0][0] as {
+    const firstCall = startServerMock.mock.calls[0];
+    if (!firstCall) throw new Error("startServer was not called");
+    const opts = firstCall[0] as {
       childEnvBase: {
         env: Readonly<NodeJS.ProcessEnv>;
         source: string;

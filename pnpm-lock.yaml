@@ -234,6 +234,9 @@ importers:
       '@open-code-review/dashboard':
         specifier: workspace:*
         version: link:../dashboard
+      socket.io-client:
+        specifier: ^4.8
+        version: 4.8.3
 
   packages/dashboard-ui-e2e:
     devDependencies:
