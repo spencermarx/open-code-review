@@ -19,7 +19,8 @@ import type {
   SpawnResult,
 } from './types.js'
 import { extractAssistantText, buildFileStdio, closeFileStdio, deliverPrompt, assertNonEmptyPrompt } from './helpers.js'
-import { cleanEnv } from '../../socket/env.js'
+import { writeSync } from 'node:fs'
+import { childEnv, formatChildEnvHeader } from '../../child-env.js'
 import {
   buildResumeArgs as buildResumeArgsShared,
   buildResumeCommand as buildResumeCommandShared,
@@ -112,13 +113,22 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
       isWorkflow ? opts.logFile : undefined,
     )
 
-    // Spawn claude directly with stdin pipe (no shell needed). Merge any
-    // caller-supplied env vars (e.g. OCR_DASHBOARD_EXECUTION_UID for the
-    // late-linking workflow_id flow) on top of the cleaned baseline so
-    // child `ocr` invocations inherit the dashboard's execution context.
+    // Shell-parity env from the frozen launch snapshot; `opts.env` is the
+    // closed inject channel (e.g. OCR_DASHBOARD_EXECUTION_UID for the
+    // late-linking workflow_id flow), applied by the builder AFTER the deny
+    // step so child `ocr` invocations inherit the execution context.
+    const envResult = childEnv(opts.env)
+    // Provenance header into the exec log, from the SAME builder call that
+    // spawns the child. The stream parsers drop non-JSON lines, so this is
+    // human-only. Names only — never values.
+    if (logFd !== null) {
+      writeSync(logFd, `${formatChildEnvHeader(envResult)}\n`)
+    }
+
+    // Spawn claude directly with stdin pipe (no shell needed).
     const proc = spawnBinary('claude', flags, {
       cwd: opts.cwd,
-      env: { ...cleanEnv(), ...(opts.env ?? {}) },
+      env: envResult.env,
       detached: isWorkflow,
       stdio,
     })

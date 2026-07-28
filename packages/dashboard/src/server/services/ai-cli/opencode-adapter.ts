@@ -24,7 +24,8 @@ import type {
   SpawnOptions,
   SpawnResult,
 } from './types.js'
-import { cleanEnv } from '../../socket/env.js'
+import { writeSync } from 'node:fs'
+import { childEnv, formatChildEnvHeader } from '../../child-env.js'
 import {
   buildResumeArgs as buildResumeArgsShared,
   buildResumeCommand as buildResumeCommandShared,
@@ -137,13 +138,21 @@ export class OpenCodeAdapter implements AiCliAdapter {
       isWorkflow ? opts.logFile : undefined,
     )
 
+    // Shell-parity env from the frozen launch snapshot; `opts.env` is the
+    // closed inject channel (e.g. OCR_DASHBOARD_EXECUTION_UID for the
+    // late-linking workflow_id flow), applied by the builder AFTER the deny
+    // step — mirrors the Claude adapter.
+    const envResult = childEnv(opts.env)
+    // Provenance header into the exec log (human-only; parsers drop
+    // non-JSON lines). Names only — never values.
+    if (logFd !== null) {
+      writeSync(logFd, `${formatChildEnvHeader(envResult)}\n`)
+    }
+
     // OpenCode does not support --max-turns; agents run to completion.
-    // Merge caller-supplied env vars (e.g. OCR_DASHBOARD_EXECUTION_UID for
-    // the late-linking workflow_id flow) on top of the cleaned baseline so
-    // child `ocr` invocations inherit the dashboard's execution context.
     const proc = spawnBinary('opencode', args, {
       cwd: opts.cwd,
-      env: { ...cleanEnv(), ...(opts.env ?? {}) },
+      env: envResult.env,
       detached: isWorkflow,
       stdio,
     })

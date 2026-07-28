@@ -54,6 +54,14 @@ import {
   getAgentHeartbeatSeconds,
   getForwardResumeMaxAttempts,
 } from '@open-code-review/config/runtime-config'
+import { readDashboardConfig } from '@open-code-review/config/dashboard-config'
+import {
+  captureChildEnvBase,
+  childEnv,
+  getChildEnvBase,
+  initChildEnvBase,
+  type ChildEnvBase,
+} from './child-env.js'
 import { runForwardResumeSweep } from './services/forward-resume-sweep.js'
 import { reconcileCompletedSessions } from '@open-code-review/persistence/state'
 
@@ -158,6 +166,14 @@ if (process.env.NODE_ENV !== 'production') {
 export type StartServerOptions = {
   port?: number
   open?: boolean
+  /**
+   * Frozen snapshot of the launch shell's environment, captured BEFORE any
+   * `process.env` mutation (the CLI sets `NODE_ENV=production` pre-import).
+   * Required — there is deliberately no fallback to the server's own
+   * (mutated) `process.env`; a caller that cannot supply a snapshot must
+   * capture one at its entry point (see the dev direct-run path below).
+   */
+  childEnvBase: ChildEnvBase
 }
 
 /**
@@ -165,7 +181,7 @@ export type StartServerOptions = {
  *
  * Exported so the CLI can call it via dynamic import:
  *   const { startServer } = await import('./dashboard/server.js')
- *   await startServer({ port: 4173, open: true })
+ *   await startServer({ port: 4173, open: true, childEnvBase })
  */
 /**
  * Whether `pid` is positively identified as an OCR dashboard server — guards the
@@ -197,8 +213,15 @@ function isOcrDashboardProcess(pid: number): boolean {
   }
 }
 
-export async function startServer(options: StartServerOptions = {}): Promise<void> {
+export async function startServer(options: StartServerOptions): Promise<void> {
   const port = options.port ?? parseInt(process.env.PORT ?? '4173', 10)
+
+  // Register the frozen launch-shell snapshot exactly once — every spawn
+  // path builds its child env from THIS, never from the server's own
+  // (NODE_ENV-mutated) process.env. Registered before any service that
+  // could spawn is constructed, so use-before-init is structurally
+  // unreachable in this wiring.
+  initChildEnvBase(options.childEnvBase)
 
   // Stamp a stable, positively-identifying process title so a later instance's
   // single-instance takeover can recognize THIS server (and never mistake a
@@ -209,7 +232,18 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   // Resolve .ocr directory
   const ocrDir = resolveOcrDir()
-  const aiCliService = new AiCliService(ocrDir)
+  const dashboardConfig = readDashboardConfig(ocrDir)
+  if (dashboardConfig.sawRetiredEnvPassthrough) {
+    // Courtesy for anyone who installed an unmerged PR #56 build: never an
+    // error (a config file must not brick the dashboard), never silent
+    // (dead config keys are a debuggability landmine).
+    console.log(
+      '  Config note:       dashboard.env_passthrough is no longer needed — ' +
+        'dashboard children now inherit your shell environment; the key is ' +
+        'ignored and can be deleted',
+    )
+  }
+  const aiCliService = new AiCliService(ocrDir, dashboardConfig.aiCli)
 
   // ── WAL hygiene (best-effort, before opening the DB) ──
   // Best-effort WAL checkpoint before opening the shared connection —
@@ -440,6 +474,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     // the single-writer lease, so a duplicate trigger cannot double-drive.
     const child = spawnBinary('ocr', ['review', '--resume', sessionId], {
       cwd: ocrDir.replace(/\.ocr$/, '') || process.cwd(),
+      // Same builder as every other spawn path — without this the sweep
+      // child inherited the dashboard's full mutated env (NODE_ENV=
+      // production and any ambient OCR_*), diverging from adapter spawns.
+      env: childEnv().env,
       stdio: 'ignore',
       detached: true,
     })
@@ -653,6 +691,23 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   console.log(`  OCR directory:     ${shortenPath(ocrDir)}`)
   console.log()
   console.log(`  Auth token:        ${AUTH_TOKEN.slice(0, 8)}...[redacted]`)
+  {
+    // Env posture, delta only (names, never values): what children WON'T
+    // see, from the same builder every spawn uses.
+    const base = getChildEnvBase()
+    const { removed } = childEnv()
+    console.log(
+      `  Child env:         inheriting your shell environment ` +
+        `(snapshot ${base.capturedAt}, source: ${base.source})`,
+    )
+    if (removed.length > 0) {
+      console.log(`                     removed: ${removed.join(', ')}`)
+    }
+    console.log(
+      `                     variables exported after this are invisible to ` +
+        `children; restart 'ocr dashboard' to pick them up`,
+    )
+  }
   console.log()
 
   // ── Browser auto-open (when called with open: true) ──
@@ -781,7 +836,9 @@ const argPath = process.argv[1] ? resolve(process.argv[1]) : ''
 const isDirectRun = argPath === selfPath
 
 if (isDirectRun) {
-  startServer().catch((err) => {
+  // Direct run has no CLI wrapper to capture the pre-mutation snapshot, so
+  // capture at entry — nothing has mutated process.env yet on this path.
+  startServer({ childEnvBase: captureChildEnvBase('dev-direct-run') }).catch((err) => {
     console.error('Failed to start dashboard server:', err)
     process.exit(1)
   })

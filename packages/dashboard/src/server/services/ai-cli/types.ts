@@ -7,6 +7,7 @@
  */
 
 import type { ChildProcess } from 'node:child_process'
+import type { ChildEnvInject } from '@open-code-review/platform'
 
 // ── Normalized Events ──
 // All adapters parse their CLI's output format into these common events.
@@ -108,13 +109,13 @@ export type SpawnOptions = {
    */
   model?: string
   /**
-   * Extra environment variables merged into the spawned process. Used to
-   * propagate context the AI's child `ocr` invocations need — currently
+   * Deliberate per-spawn injections, limited to the platform builder's
+   * closed key set (runtime-enforced). Currently only
    * `OCR_DASHBOARD_EXECUTION_UID`, which lets `ocr state begin` link the
    * new session row's id back to the dashboard's parent command_execution
    * row (so the handoff lookup can resolve the captured vendor_session_id).
    */
-  env?: Record<string, string>
+  env?: ChildEnvInject
   /**
    * When set (workflow mode), the adapter redirects the spawned process's
    * stdout+stderr to THIS file instead of OS pipes, and the caller tails the

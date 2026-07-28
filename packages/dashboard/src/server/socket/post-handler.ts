@@ -15,7 +15,7 @@ import type { Server as SocketIOServer, Socket } from 'socket.io'
 import type { Database } from '@open-code-review/persistence'
 import { execBinaryAsync } from '@open-code-review/platform'
 import { getSession } from '../db.js'
-import { cleanEnv } from './env.js'
+import { childEnv } from '../child-env.js'
 import { resolveLocalCli } from './cli-resolver.js'
 import { AiCliService, formatToolDetail, type NormalizedEvent } from '../services/ai-cli/index.js'
 import { startTrackedExecution } from './execution-tracker.js'
@@ -120,7 +120,7 @@ export function registerPostHandlers(
       // Check gh auth
       const repoRoot = dirname(ocrDir)
       try {
-        await execBinaryAsync('gh', ['auth', 'status'], { env: cleanEnv(), cwd: repoRoot, encoding: 'utf-8' })
+        await execBinaryAsync('gh', ['auth', 'status'], { env: childEnv().env, cwd: repoRoot, encoding: 'utf-8' })
       } catch {
         socket.emit('post:gh-result', {
           authenticated: false,
@@ -133,7 +133,7 @@ export function registerPostHandlers(
       }
 
       // Find PR for branch (tries slash-restored variants if needed)
-      const pr = await findPrForBranch(branch, cleanEnv(), repoRoot)
+      const pr = await findPrForBranch(branch, childEnv().env, repoRoot)
       if (pr) {
         socket.emit('post:gh-result', {
           authenticated: true,
@@ -502,7 +502,7 @@ export function registerPostHandlers(
           const { stdout } = await execBinaryAsync(
             'gh',
             ['pr', 'comment', String(prNumber), '--body-file', tmpFile],
-            { env: cleanEnv(), cwd: repoRoot, encoding: 'utf-8' },
+            { env: childEnv().env, cwd: repoRoot, encoding: 'utf-8' },
           )
 
           // Try to extract the comment URL from gh output
