@@ -6,6 +6,7 @@
   "type": "module",
   "devDependencies": {
     "@open-code-review/cli": "workspace:*",
-    "@open-code-review/dashboard": "workspace:*"
+    "@open-code-review/dashboard": "workspace:*",
+    "socket.io-client": "^4.8"
   }
 }

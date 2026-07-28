@@ -12,8 +12,10 @@
  * spawn/parse calls to it — never touching CLI binaries directly.
  */
 
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  readDashboardConfig,
+  type AiCliPreference,
+} from '@open-code-review/config/dashboard-config'
 import type { AiCliAdapter, AiCliStatus, DetectionResult } from './types.js'
 import { ClaudeCodeAdapter } from './claude-adapter.js'
 import { OpenCodeAdapter } from './opencode-adapter.js'
@@ -34,8 +36,6 @@ export { formatToolDetail, extractAssistantText, writeTempPrompt, cleanupTempFil
 export { ClaudeCodeAdapter } from './claude-adapter.js'
 export { OpenCodeAdapter } from './opencode-adapter.js'
 
-type AiCliPreference = 'auto' | 'claude' | 'opencode' | 'off'
-
 type AdapterEntry = {
   adapter: AiCliAdapter
   detection: DetectionResult
@@ -51,31 +51,18 @@ export function createRegisteredAdapters(): AiCliAdapter[] {
   return [new ClaudeCodeAdapter(), new OpenCodeAdapter()]
 }
 
-/**
- * Read `dashboard.ai_cli` from `.ocr/config.yaml`.
- * Falls back to 'auto' if the field is missing or the file doesn't exist.
- */
-function readAiCliPreference(ocrDir: string): AiCliPreference {
-  try {
-    const configPath = join(ocrDir, 'config.yaml')
-    const content = readFileSync(configPath, 'utf-8')
-    const match = content.match(/^\s*ai_cli:\s*(\S+)/m)
-    const value = match?.[1] ?? 'auto'
-    if (value === 'claude' || value === 'opencode' || value === 'off') return value
-    return 'auto'
-  } catch {
-    return 'auto'
-  }
-}
-
 export class AiCliService {
   private readonly entries: AdapterEntry[]
   private readonly activeAdapter: AiCliAdapter | null
   private readonly preference: AiCliPreference
   private readonly status: AiCliStatus
 
-  constructor(ocrDir: string) {
-    this.preference = readAiCliPreference(ocrDir)
+  constructor(ocrDir: string, preference?: AiCliPreference) {
+    // The server passes the startup-parsed preference; the fallback read
+    // keeps direct construction (tests, tooling) working standalone. The
+    // fallback is startup/test-only disk+YAML I/O — never construct this
+    // service on a hot path without passing the preference in.
+    this.preference = preference ?? readDashboardConfig(ocrDir).aiCli
 
     // Register all known adapters and run detection
     const adapters = createRegisteredAdapters()

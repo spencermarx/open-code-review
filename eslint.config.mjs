@@ -105,4 +105,91 @@ export default [
       ],
     },
   },
+  {
+    // Child-env convergence gate, part 1 (dashboard child-process environment
+    // spec): spawn modules must build child env through the child-env builder
+    // from the frozen launch snapshot — never from ambient `process.env`,
+    // which inside the server is the MUTATED env (NODE_ENV=production) and
+    // would silently reopen the leak this posture closes. The dashboard's
+    // `child-env.ts` holder is deliberately NOT listed: its capture function
+    // is the single sanctioned read. `server/index.ts` is also not listed —
+    // it legitimately reads server config (PORT, NODE_ENV) — which is why
+    // part 2 below exists: the spawn-shape rule covers it.
+    files: [
+      'packages/dashboard/src/server/services/ai-cli/claude-adapter.ts',
+      'packages/dashboard/src/server/services/ai-cli/opencode-adapter.ts',
+      'packages/dashboard/src/server/services/ai-cli/helpers.ts',
+      'packages/dashboard/src/server/socket/command-runner.ts',
+      'packages/dashboard/src/server/socket/post-handler.ts',
+      // routes/team.ts joins the ban; routes/config.ts cannot — it
+      // legitimately reads process.env for IDE detection. Its spawn is
+      // covered by the spawn-shape rule (part 2) instead.
+      'packages/dashboard/src/server/routes/team.ts',
+      'packages/shared/platform/src/child-env.ts',
+    ],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { sourceType: 'module' },
+    },
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'process',
+          property: 'env',
+          message:
+            'Spawn modules must not read process.env — build child env via ' +
+            'the child-env holder/builder (frozen launch-shell snapshot).',
+        },
+      ],
+    },
+  },
+  {
+    // Child-env convergence gate, part 2: the vector that actually reopens
+    // the leak is OMITTING `env` on a spawn call (the child then inherits
+    // the server's mutated process.env) — which references no process.env
+    // token and so cannot be caught by the property ban above. This rule
+    // flags any platform spawn/exec call in the dashboard server whose
+    // arguments carry no `env` property. Deliberate ambient spawns
+    // (argument-only probes like `--version` and `ps`) carry a per-line
+    // disable naming the rationale, which is exactly the visibility the
+    // spec's documented-exception clause requires.
+    files: ['packages/dashboard/src/server/**/*.ts'],
+    ignores: ['packages/dashboard/src/server/**/__tests__/**'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { sourceType: 'module' },
+    },
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          // Vector 1: a spawn with NO env anywhere in its arguments —
+          // catches the missing-options and options-without-env spellings.
+          selector:
+            'CallExpression[callee.name=/^(spawnBinary|execBinary|execBinaryAsync)$/]' +
+            ':not(:has(ObjectExpression Property[key.name="env"]))',
+          message:
+            'Dashboard child spawns must pass env from the child-env builder ' +
+            '(env: childEnv().env). If this spawn deliberately uses the ' +
+            'ambient env (argument-only probe), add a per-line disable with ' +
+            'the rationale.',
+        },
+        {
+          // Vector 2 (options-scoped): an options OBJECT lacking `env` even
+          // when an unrelated nested `env:` key elsewhere in the arguments
+          // would satisfy vector 1's broad :has — the false-negative mode
+          // the round-2 review demonstrated. Both are pinned by the canary
+          // in packages/shared/platform/src/__tests__/child-env-gate.test.ts.
+          selector:
+            'CallExpression[callee.name=/^(spawnBinary|execBinary|execBinaryAsync)$/]' +
+            ' > ObjectExpression:not(:has(> Property[key.name="env"]))',
+          message:
+            'This spawn options object has no env property — pass env from ' +
+            'the child-env builder (env: childEnv().env), or add a per-line ' +
+            'disable with the rationale for a deliberate ambient probe.',
+        },
+      ],
+    },
+  },
 ]

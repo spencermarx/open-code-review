@@ -5,6 +5,7 @@
 import { Router } from 'express'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { execBinary } from '@open-code-review/platform'
+import { childEnv } from '../child-env.js'
 import { join, dirname, basename } from 'node:path'
 import type { AiCliService } from '../services/ai-cli/index.js'
 
@@ -61,6 +62,10 @@ function detectGitBranch(cwd: string): string | null {
   try {
     return execBinary('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd,
+      // Called from createConfigRouter, which runs after startServer has
+      // registered the snapshot — convergence keeps every child on the
+      // launch-shell env, per the child-env posture spec.
+      env: childEnv().env,
       timeout: 3000,
       encoding: 'utf-8',
     }).trim() || null

@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import chalk from "chalk";
-import { importModule } from "@open-code-review/platform";
+import { importModule, freezeEnvSnapshot } from "@open-code-review/platform";
 import { requireOcrSetup } from "../lib/guards.js";
 import { ensureDatabase, closeAllDatabases } from "@open-code-review/persistence";
 
@@ -79,6 +79,18 @@ export const dashboardCommand = new Command("dashboard")
         process.exit(1);
       }
 
+      // Capture the child-env snapshot BEFORE the NODE_ENV mutation below:
+      // dashboard-spawned children inherit the shell environment as it was
+      // at launch. The freeze primitive is the platform package's canonical
+      // one (shared with the dashboard holder, which re-freezes defensively
+      // on registration); the CLI cannot import dashboard code (app→app
+      // boundary), so `startServer` types this parameter structurally.
+      const childEnvBase = {
+        env: freezeEnvSnapshot(process.env),
+        source: "cli-launch" as const,
+        capturedAt: new Date().toISOString(),
+      };
+
       // Set NODE_ENV before importing — the server uses this for static file serving
       process.env.NODE_ENV = "production";
 
@@ -89,8 +101,18 @@ export const dashboardCommand = new Command("dashboard")
       // Dynamically import the dashboard server and call startServer().
       // This is the ONLY place where dashboard code is loaded.
       try {
-        const { startServer } = await importModule<{ startServer: (opts: { port: number; open: boolean }) => Promise<void> }>(serverPath);
-        await startServer({ port, open: options.open });
+        const { startServer } = await importModule<{
+          startServer: (opts: {
+            port: number;
+            open: boolean;
+            childEnvBase: {
+              env: Readonly<NodeJS.ProcessEnv>;
+              source: "cli-launch";
+              capturedAt: string;
+            };
+          }) => Promise<void>;
+        }>(serverPath);
+        await startServer({ port, open: options.open, childEnvBase });
       } catch (err) {
         console.error(chalk.red("Error: Failed to start dashboard server."));
         console.error(

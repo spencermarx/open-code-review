@@ -11,6 +11,7 @@
  */
 
 import { Router } from 'express'
+import { childEnv } from '../child-env.js'
 import {
   loadTeamConfig,
   resolveTeamComposition,
@@ -92,6 +93,9 @@ export function createTeamRouter(ocrDir: string): Router {
     try {
       execBinary('ocr', ['team', 'set', '--stdin'], {
         input: JSON.stringify(body.team),
+        // Shell-parity env from the frozen launch snapshot — an `ocr` child
+        // is a node process; ambient NODE_OPTIONS/OCR_* must not reach it.
+        env: childEnv().env,
         encoding: 'utf-8',
         // Run from the project root (parent of `.ocr`). `dirname` is
         // separator-correct on every platform — a prior `/\/\.ocr$/` regex

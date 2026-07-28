@@ -30,6 +30,10 @@ vi.mock('@open-code-review/platform', async (importOriginal) => {
 import { spawnBinary } from '@open-code-review/platform'
 import { ClaudeCodeAdapter } from '../claude-adapter.js'
 import { OpenCodeAdapter } from '../opencode-adapter.js'
+import {
+  initChildEnvBase,
+  resetChildEnvBaseForTests,
+} from '../../../child-env.js'
 
 const spawnMock = vi.mocked(spawnBinary)
 
@@ -57,6 +61,14 @@ function fakeChild(): FakeChild {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Adapters build child env from the registered launch snapshot; register a
+  // minimal one the way startServer does.
+  resetChildEnvBaseForTests()
+  initChildEnvBase({
+    env: { PATH: '/usr/bin' },
+    source: 'cli-launch',
+    capturedAt: '2026-07-28T00:00:00.000Z',
+  })
 })
 
 const PROMPT = 'Review this diff & report | findings > here\nmultiline body'

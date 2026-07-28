@@ -24,7 +24,7 @@ import {
 } from '../services/ai-cli/index.js'
 import { FileTailer } from '../services/ai-cli/file-tailer.js'
 import { resolveLocalCli } from './cli-resolver.js'
-import { cleanEnv } from './env.js'
+import { childEnv, childEnvFailureHint, formatChildEnvHeader } from '../child-env.js'
 import {
   generateCommandUid,
   appendCommandLog,
@@ -287,16 +287,24 @@ function spawnCliCommand(
 ): void {
   const localCli = resolveLocalCli()
   const repoRoot = dirname(ocrDir)
+  const envResult = childEnv()
   const proc = localCli
     ? spawnBinary('node', [localCli, baseCommand, ...subArgs], {
         cwd: repoRoot,
-        env: cleanEnv(),
+        env: envResult.env,
       })
     : spawnBinary('ocr', [baseCommand, ...subArgs], {
         cwd: repoRoot,
-        env: cleanEnv(),
+        env: envResult.env,
       })
   entry.process = proc
+
+  // Env provenance line, for parity with the adapter path's exec-log header
+  // (names only) — a successful plain-CLI run records what was inherited,
+  // not just the failure hint on a nonzero exit.
+  const envHeader = `${formatChildEnvHeader(envResult)}\n`
+  entry.outputBuffer += envHeader
+  io.emit('command:output', { execution_id: executionId, content: envHeader })
 
   // Persist PID for orphan detection on restart
   if (proc.pid) {
@@ -328,6 +336,13 @@ function spawnCliCommand(
   })
 
   proc.on('close', (code) => {
+    // Env-posture diagnostic on failure — same surface contract as the AI
+    // workflow path: removed names + snapshot age + remedy, names only.
+    if (code !== 0) {
+      const hint = `\n${childEnvFailureHint()}\n`
+      entry.outputBuffer += hint
+      io.emit('command:output', { execution_id: executionId, content: hint })
+    }
     // `finishExecution` applies the cancel-wins preference centrally, so the
     // close handler need only translate a signal-kill (null code) to -1.
     finishExecution(io, db, ocrDir, executionId, code ?? -1, entry.outputBuffer)
@@ -861,6 +876,15 @@ function spawnAiCommand(
         message: 'Process exited with non-zero code',
         detail: stderrBuffer.trim(),
       })
+    }
+
+    // Env-posture diagnostic on any failure: a "works in my shell, fails in
+    // dashboard" report must be resolvable from this surface alone (removed
+    // names + snapshot age + restart remedy — names only, never values).
+    if (code !== 0) {
+      const hint = `\n${childEnvFailureHint()}\n`
+      entry.outputBuffer += hint
+      io.emit('command:output', { execution_id: executionId, content: hint })
     }
 
     // Best-effort flush of the events JSONL. The promise is intentionally

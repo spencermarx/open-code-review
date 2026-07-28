@@ -135,3 +135,13 @@ discourse:
 github:
   auto_prompt_post: false
   comment_format: "single"  # "single" or "inline"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DASHBOARD (optional)
+# ─────────────────────────────────────────────────────────────────────────────
+# Select the AI CLI used by dashboard actions. Dashboard-launched child
+# processes inherit the environment of the shell that ran `ocr dashboard`
+# (no configuration needed; restart the dashboard to pick up new exports).
+#
+# dashboard:
+#   ai_cli: auto  # "auto", "claude", "opencode", or "off"
