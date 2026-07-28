@@ -22,6 +22,14 @@ export {
 export type { CanonicalVerdict } from "./verdict.js";
 
 export {
+  ALLOWED_INJECT_KEYS,
+  buildChildEnv,
+  buildChildEnvForPlatform,
+  describeChildEnvPosture,
+} from "./child-env.js";
+export type { ChildEnvInject, ChildEnvResult } from "./child-env.js";
+
+export {
   FINDING_CATEGORIES,
   deriveCounts,
   resolveRoundCounts,
