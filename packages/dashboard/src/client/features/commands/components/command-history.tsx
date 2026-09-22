@@ -157,11 +157,22 @@ function statusPillClasses(status: StatusFilter): string {
 
 // ── Sort comparator ──
 
-function compareEntries(a: CommandHistoryEntry, b: CommandHistoryEntry, field: SortField, dir: SortDir): number {
+export function compareEntries(
+  a: CommandHistoryEntry,
+  b: CommandHistoryEntry,
+  field: SortField,
+  dir: SortDir,
+): number {
   let cmp = 0
   switch (field) {
     case 'date':
-      cmp = new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
+      // `parseUtcDate`, never bare `new Date()`: `started_at` arrives in TWO
+      // formats — ISO-8601 with `Z` (dashboard writes, `new Date().toISOString()`)
+      // and SQLite's `YYYY-MM-DD HH:MM:SS` (CLI writes, `CURRENT_TIMESTAMP`).
+      // Both are UTC, but V8 parses the space-separated form as LOCAL time, so
+      // a bare `new Date()` shifts only the CLI rows by the UTC offset and the
+      // comparator inverts for any pair that straddles the two formats.
+      cmp = parseUtcDate(a.started_at).getTime() - parseUtcDate(b.started_at).getTime()
       break
     case 'command':
       cmp = a.command.localeCompare(b.command)
