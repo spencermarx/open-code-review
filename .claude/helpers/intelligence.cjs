@@ -17,12 +17,17 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(process.cwd(), '.claude-flow', 'data');
+// Anchor to the project root (this file lives in <root>/.claude/helpers), like
+// auto-memory-hook.mjs and metrics-db.mjs: hooks run in whatever directory the
+// shell is in, and a cwd-based path scattered .claude-flow/data/ into packages
+// (and into .ocr/skills/references, breaking the skill mirror parity test).
+const PROJECT_ROOT = path.join(__dirname, '..', '..');
+const DATA_DIR = path.join(PROJECT_ROOT, '.claude-flow', 'data');
 const STORE_PATH = path.join(DATA_DIR, 'auto-memory-store.json');
 const GRAPH_PATH = path.join(DATA_DIR, 'graph-state.json');
 const RANKED_PATH = path.join(DATA_DIR, 'ranked-context.json');
 const PENDING_PATH = path.join(DATA_DIR, 'pending-insights.jsonl');
-const SESSION_DIR = path.join(process.cwd(), '.claude-flow', 'sessions');
+const SESSION_DIR = path.join(PROJECT_ROOT, '.claude-flow', 'sessions');
 const SESSION_FILE = path.join(SESSION_DIR, 'current.json');
 
 // ── Stop words for trigram matching ──────────────────────────────────────────
@@ -221,7 +226,7 @@ function buildEdges(entries) {
  */
 function bootstrapFromMemoryFiles() {
   const entries = [];
-  const cwd = process.cwd();
+  const cwd = PROJECT_ROOT;
 
   // Search for auto-memory directories
   const candidates = [
