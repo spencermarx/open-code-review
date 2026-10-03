@@ -265,7 +265,7 @@ Omit ONLY if changeset is purely docs/config with no behavioral changes.
 The map MUST include every changed file:
 
 ```bash
-EXPECTED=$(git diff --cached --name-only | sort)
+EXPECTED=$(git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --cached --name-only | sort)
 MAPPED=$(grep -oE '\| `[^`]+` \|' map.md | sed 's/.*`\([^`]*\)`.*/\1/' | sort)
 diff <(echo "$EXPECTED") <(echo "$MAPPED")
 ```

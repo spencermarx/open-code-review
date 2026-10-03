@@ -159,7 +159,7 @@ The final `map.md` contains:
 The map MUST include every changed file. The workflow validates completeness before finalizing:
 
 ```bash
-CHANGED=$(git diff --cached --name-only | wc -l)
+CHANGED=$(git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --cached --name-only | wc -l)
 MAPPED=$(grep -c '^\- \[ \]' map.md)
 
 if [ "$CHANGED" -ne "$MAPPED" ]; then

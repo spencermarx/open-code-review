@@ -302,15 +302,21 @@ See `references/context-discovery.md` for detailed algorithm.
 ### Steps
 
 1. Identify the review target:
-   - Staged changes: `git diff --cached`
-   - Unstaged changes: `git diff`
-   - Commit range: `git diff {range}`
+   - Staged changes: `git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --cached`
+   - Unstaged changes: `git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/`
+   - Commit range: `git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ {range}`
    - PR: `gh pr diff {number}`
+
+   Always spell out the diff flags shown here. A bare `git diff` honors the user's
+   git config: `diff.mnemonicPrefix` yields `c/ i/ w/` prefixes, `diff.noprefix`
+   drops them, `diff.external` / textconv replace the unified diff with tool
+   output, and `core.quotePath` escapes non-ASCII file names. The pinned flags
+   make the output the same on every machine.
 
 2. Gather supporting context:
    ```bash
    # Get the diff
-   git diff --cached > /tmp/ocr-diff.txt
+   git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --cached > /tmp/ocr-diff.txt
 
    # Get recent commit messages for intent
    git log --oneline -10
@@ -319,7 +325,7 @@ See `references/context-discovery.md` for detailed algorithm.
    git branch --show-current
 
    # List affected files
-   git diff --cached --name-only
+   git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --cached --name-only
    ```
 
 3. Create session directory:

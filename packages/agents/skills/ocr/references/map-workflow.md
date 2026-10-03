@@ -185,19 +185,19 @@ code-review-map:
 
    | Target | Command |
    |--------|---------|
-   | Staged changes (default) | `git diff --cached --name-only` |
-   | Unstaged changes | `git diff --name-only` |
-   | Specific commit | `git diff {commit}^ {commit} --name-only` |
-   | Commit range | `git diff {from}..{to} --name-only` |
-   | Branch vs main | `git diff main...{branch} --name-only` |
+   | Staged changes (default) | `git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --cached --name-only` |
+   | Unstaged changes | `git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --name-only` |
+   | Specific commit | `git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ {commit}^ {commit} --name-only` |
+   | Commit range | `git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ {from}..{to} --name-only` |
+   | Branch vs main | `git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ main...{branch} --name-only` |
    | PR (via gh CLI) | `gh pr diff {number} --name-only` |
 
    ```bash
    # Default: staged changes
-   git diff --cached --name-only
+   git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --cached --name-only
 
    # Store canonical file list for completeness validation
-   git diff --cached --name-only > /tmp/ocr-canonical-files.txt
+   git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --cached --name-only > /tmp/ocr-canonical-files.txt
    ```
 
    **CRITICAL**: Store this canonical file list. It's used for completeness validation in Phase 5.
@@ -400,7 +400,7 @@ See `references/map-personas/flow-analyst.md` for persona details.
 
 10. **Validate completeness**:
    ```bash
-   EXPECTED=$(git diff --cached --name-only | wc -l)
+   EXPECTED=$(git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --cached --name-only | wc -l)
    MAPPED=$(grep -oE '\| `[^`]+` \|' map.md | wc -l)
    [ "$EXPECTED" -ne "$MAPPED" ] && echo "ERROR: Missing files!"
    ```
