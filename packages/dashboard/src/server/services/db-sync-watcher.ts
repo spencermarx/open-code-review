@@ -9,7 +9,7 @@
  * cached snapshots, and emit the granular Socket.IO events the dashboard UI
  * subscribes to. It also fires the one-shot `onSessionInserted` hook used to
  * auto-link the dashboard's parent execution row to a new workflow, and
- * projects newly-observed completion events into the artifact tables.
+ * projects round lifecycle and completion events into the artifact tables.
  *
  * It performs NO merge writes to `sessions`/`orchestration_events` —
  * those are CLI-owned and already authoritative on the shared connection.
@@ -60,7 +60,30 @@ export class DbSyncWatcher {
    * the native engine.)
    */
   async init(): Promise<void> {
+    this.materializeStartedRounds()
     this.primeSnapshots()
+  }
+
+  /**
+   * Backfill review-round shells from lifecycle events that existed before
+   * the dashboard started. Without this reconciliation an active round stays
+   * absent from the rounds list until its first reviewer artifact is written.
+   */
+  private materializeStartedRounds(): void {
+    const rows = resultToRows<Row>(
+      this.db.exec(
+        `SELECT DISTINCT session_id, round
+           FROM orchestration_events
+          WHERE event_type = 'round_started' AND round IS NOT NULL`,
+      ),
+    )
+    for (const row of rows) {
+      const sessionId = col(row, 'session_id') as string
+      const roundNumber = col(row, 'round') as number
+      if (sessionId && roundNumber > 0) {
+        this.ensureRoundExists(sessionId, roundNumber)
+      }
+    }
   }
 
   private primeSnapshots(): void {
@@ -205,7 +228,12 @@ export class DbSyncWatcher {
       if (eventId > this.maxEventId) this.maxEventId = eventId
       if (sessionId) affectedSessions.add(sessionId)
 
-      if (eventType === 'round_completed') {
+      if (eventType === 'round_started') {
+        const roundNumber = col(row, 'round') as number | null
+        if (sessionId && roundNumber && roundNumber > 0) {
+          this.processRoundStartedEvent(sessionId, roundNumber)
+        }
+      } else if (eventType === 'round_completed') {
         const roundNumber = col(row, 'round') as number | null
         if (sessionId && roundNumber && metadataStr) {
           this.processRoundCompletedEvent(sessionId, roundNumber, metadataStr)
@@ -221,6 +249,25 @@ export class DbSyncWatcher {
     for (const sessionId of affectedSessions) {
       this.io.to(`session:${sessionId}`).emit('session:events', { session_id: sessionId })
     }
+  }
+
+  private ensureRoundExists(sessionId: string, roundNumber: number): void {
+    this.db.run(
+      `INSERT OR IGNORE INTO review_rounds (session_id, round_number) VALUES (?, ?)`,
+      [sessionId, roundNumber],
+    )
+  }
+
+  /** Materialize an active round before any reviewer artifacts exist. */
+  private processRoundStartedEvent(sessionId: string, roundNumber: number): void {
+    this.ensureRoundExists(sessionId, roundNumber)
+    // Round lists exist both inside a session and on the global Reviews page,
+    // so this notification must be global rather than room-scoped.
+    this.io.emit('round:updated', {
+      sessionId,
+      roundNumber,
+      source: 'lifecycle',
+    })
   }
 
   private detectCommandChanges(): void {
@@ -269,10 +316,7 @@ export class DbSyncWatcher {
       return
     }
 
-    this.db.run(
-      `INSERT OR IGNORE INTO review_rounds (session_id, round_number) VALUES (?, ?)`,
-      [sessionId, roundNumber],
-    )
+    this.ensureRoundExists(sessionId, roundNumber)
     this.db.run(
       `UPDATE review_rounds
        SET verdict = ?, blocker_count = ?, suggestion_count = ?, should_fix_count = ?,

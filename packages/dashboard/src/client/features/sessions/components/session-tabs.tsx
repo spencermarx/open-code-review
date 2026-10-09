@@ -77,6 +77,11 @@ function ReviewTabContent({ sessionId, status }: { sessionId: string; status: Se
   useSocketEvent('artifact:updated', () => {
     queryClient.invalidateQueries({ queryKey: ['sessions', sessionId, 'rounds'] })
   })
+  useSocketEvent<{ sessionId: string }>('round:updated', (event) => {
+    if (event.sessionId === sessionId) {
+      queryClient.invalidateQueries({ queryKey: ['sessions', sessionId, 'rounds'] })
+    }
+  })
 
   const { data: rounds, isLoading } = useQuery<ReviewRound[]>({
     queryKey: ['sessions', sessionId, 'rounds'],
