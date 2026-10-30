@@ -77,22 +77,28 @@ principal:2,quality:2`, which is the default), and 3 or more are encouraged (e.g
 principal:2,quality:2,security:1`). Instance counts don't help (`principal:3` is still one
 persona), and ephemeral `--reviewer` personas don't count because they have no persona id.
 
-**1. Review-address loop.** Starting at `round = 1`, while the verdict is not `APPROVE` and
-`round <= max-rounds`:
+**1. Review-address loop.** Count iterations with a local `iteration` (starting at 1, capped by
+`max-rounds`). The **round number** used in file paths and markers is OCR's own (`round-{n}` in
+the session), which continues across same-day re-runs, so never assume it equals `iteration`.
+While the verdict is not `APPROVE` and `iteration <= max-rounds`:
 
-1. **Push, then review** — commit anything pending, `git push`, and confirm the PR's head SHA
-   equals local `HEAD`, so the reviewed commit is the PR's commit. Record that full 40-hex SHA.
-   Invoke `/ocr:review` (default team, or `--team`). It runs the full pipeline and finalizes
-   `rounds/round-{round}/final.md` + `round-meta.json` with a `verdict`.
-2. **Post the review** to the PR, headed `OCR review — Round {round}`, with the review marker
-   (`<!-- ocr-review-loop:review round=… verdict=… personas=… sha=… -->`) as its first line.
-   *(skip if `--no-post`)*
+1. **Push, then review the whole PR** — commit anything pending, `git push`, and confirm the PR's
+   head SHA equals local `HEAD` (retry once if GitHub hasn't caught up), so the reviewed commit
+   is the PR's commit. Record that full 40-hex SHA. Invoke `/ocr:review` with the **full PR range
+   as the target** (`<base>...HEAD`, e.g. `main...HEAD`; never the default staged changes, never
+   only the commits since the last round) plus `--team` if given. It runs the full pipeline and
+   finalizes `rounds/round-{n}/final.md` + `round-meta.json` with a `verdict`.
+2. **Post the review** to the PR, headed `OCR multi-agent review — Round {n}`, with the review
+   marker (`<!-- ocr-review-loop:review round=… verdict=… personas=… sha=… -->`) as its first
+   line. Take `personas` from the reviewers that actually ran this round (the persona part of
+   each `rounds/round-{n}/reviews/{persona}-{i}.md`, excluding `ephemeral-*`), not from the
+   planned team. *(skip if `--no-post`)*
 3. **Gate on the verdict** (read it from `round-meta.json` / `final.md`):
    - **`APPROVE`** → exit the loop (proceed to step 2 below).
    - **`NEEDS DISCUSSION`** → **STOP the loop.** This is a human gate — surface the
      clarifying questions to the user and await direction. Do **not** fabricate a fix.
    - **`REQUEST CHANGES`** → continue.
-4. **Address** — invoke `/ocr:address` on `rounds/round-{round}/final.md`. Corroborate every
+4. **Address** — invoke `/ocr:address` on `rounds/round-{n}/final.md`. Corroborate every
    item against the actual code; implement the **blockers and should-fixes** (these clear the
    gate); decline incorrect feedback with evidence; you MAY defer pure **suggestions** to the
    final pass. **Verify** (typecheck + lint + tests) until green, then **commit** (atomic,
@@ -100,7 +106,7 @@ persona), and ephemeral `--reviewer` personas don't count because they have no p
 5. **Post the address round** to the PR: what was addressed, declined (with reasoning), and
    deferred, with the address marker (`<!-- ocr-review-loop:address round=… sha=<pushed SHA> -->`)
    as its first line. *(skip if `--no-post`)*
-6. `round += 1`; loop.
+6. `iteration += 1`; loop (OCR starts `round-{n+1}`).
 
 **2. Final suggestions pass** (only after `APPROVE`, unless `--no-final-suggestions`):
 invoke `/ocr:address` once more to clear remaining **suggestions**, verify, commit, push, and
@@ -108,7 +114,7 @@ post a final address comment (marker `round=final`, `sha=` the pushed commit) th
 **loop-summary table** (round → verdict → outcome). If this pass changes nothing, still post it,
 with `sha=` the unchanged `HEAD`.
 
-**3. Stop conditions.** If `round` exceeds `max-rounds` without `APPROVE`, **stop** and report
+**3. Stop conditions.** If `iteration` exceeds `max-rounds` without `APPROVE`, **stop** and report
 the outstanding blockers — never loop indefinitely. If APPROVE was reached on round 1, skip the
 loop body and go straight to the final suggestions pass.
 
@@ -120,6 +126,8 @@ loop body and go straight to the final suggestions pass.
   verdict (the marker's verdict is exactly `round-meta.json`'s, spaces → underscores), and never
   list a persona that didn't review. `sha` is always the real full SHA (`git rev-parse HEAD`
   after the push). Exactly one marker per comment, on its own line, outside any code block.
+  Fixing a typo in a posted marker so it records what actually ran is fine (the gate re-checks
+  on edit); changing its verdict or SHA is not.
 - **Two-persona minimum.** Stop in preconditions if the resolved team has fewer than 2 distinct
   personas; don't run rounds that can't satisfy the policy.
 - **Reviewed SHA = PR SHA.** Always push before reviewing. If new commits land after the loop

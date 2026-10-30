@@ -45,26 +45,33 @@ If `COUNT < 2`, **stop before any review** and tell the user, in plain words:
 > can't approve its own blind spots. 3 or more are encouraged, e.g.
 > `--team principal:2,quality:2,security:1`. Re-run with a team like that.
 
-Keep `PERSONAS` (sorted, comma-separated, no spaces) for the review markers. Ephemeral
-`--reviewer` personas have no persona id, so they never appear in the marker or the count.
+This check is about the *planned* team. The marker's `personas` field records who *actually*
+reviewed each round (see 1b), since the Tech Lead may auto-add a reviewer and a sub-agent can fail.
+Ephemeral `--reviewer` personas have no persona id, so they never appear in the marker or the count.
 
 ---
 
 ## 1. Per-round mechanics
 
-### a. Push, then review
+### a. Push, then review the whole PR
 
-The reviewed commit must be the PR's commit, so push first and verify:
+The reviewed commit must be the PR's commit, so push first and verify (GitHub can lag a moment
+behind a push, so retry once before giving up):
 
 ```bash
 git push                                  # (git push -u origin "$BRANCH" the first time)
 SHA="$(git rev-parse HEAD)"               # full 40-hex
 PR_HEAD="$(gh pr view "$PR" --json headRefOid -q .headRefOid)"
 [ "$SHA" = "$PR_HEAD" ] || { echo "PR head ($PR_HEAD) != local HEAD ($SHA); push or pull first."; exit 1; }
+BASE="$(gh pr view "$PR" --json baseRefName -q .baseRefName)"
 ```
 
-Then invoke `/ocr:review` (pass `--team <spec>` only if the user supplied one). It runs the full
-8-phase pipeline and finalizes the round, writing:
+Then invoke `/ocr:review` with the **full PR range as the target**, `"$BASE...HEAD"` (for
+example `/ocr:review main...HEAD --team principal:2,quality:2`), passing `--team <spec>` only if
+the user supplied one. `/ocr:review`'s default target is *staged changes*, which is empty right
+after a push, and reviewing only the commits since the last round would leave the marker claiming
+more coverage than the review had. It runs the full 8-phase pipeline and finalizes the round,
+writing:
 
 - `.ocr/sessions/{YYYY-MM-DD}-{branch}/rounds/round-{n}/final.md`
 - `.ocr/sessions/{YYYY-MM-DD}-{branch}/rounds/round-{n}/round-meta.json`  (verdict + counts)
@@ -80,14 +87,21 @@ same session**:
   step at a time** (`context → change-context → analysis → reviews …`) — the CLI rejects
   illegal jumps. Reuse the existing `discovered-standards.md` and `context.md`; only the
   `rounds/round-{n+1}/` artifacts are new.
-- Regenerate the diff each round (the branch has new commits from the prior address pass).
+- Regenerate the full `"$BASE...HEAD"` diff each round (the branch has new commits from the
+  prior address pass).
+- `{n}` is **OCR's** round number, not the loop's iteration count. A same-day re-run of the
+  loop continues the session at `round-{n+1}`, so read `n` from the round that was just
+  finalized (`ocr state show`, or the highest `rounds/round-*` directory) and use it for both
+  the file paths and the marker.
 
-### b. Read the verdict (the loop gate)
+### b. Read the verdict and who reviewed (the loop gate)
 
 ```bash
-META=".ocr/sessions/{id}/rounds/round-{n}/round-meta.json"
-VERDICT="$(jq -r .verdict "$META")"   # "APPROVE" | "REQUEST CHANGES" | "NEEDS DISCUSSION"
+ROUND_DIR=".ocr/sessions/{id}/rounds/round-{n}"
+VERDICT="$(jq -r .verdict "$ROUND_DIR/round-meta.json")"  # "APPROVE" | "REQUEST CHANGES" | "NEEDS DISCUSSION"
 MARKER_VERDICT="$(printf '%s' "$VERDICT" | tr ' ' '_')"   # APPROVE | REQUEST_CHANGES | NEEDS_DISCUSSION
+# Personas that actually reviewed: strip the -<instance> suffix, drop ephemeral reviewers.
+PERSONAS="$(ls "$ROUND_DIR/reviews" | sed -n 's/^\(.*\)-[0-9][0-9]*\.md$/\1/p' | grep -v '^ephemeral$' | sort -u | paste -sd, -)"
 ```
 
 The verdict is the **merge gate** and the loop condition:
@@ -113,7 +127,7 @@ suboptimal.
 - **Verify before committing:** run the project's typecheck + lint + tests (e.g.
   `pnpm nx run-many -t typecheck lint`, the relevant `nx test`/`nx e2e`). Fix until green.
 - **Commit** atomically with conventional messages (see the repo's `/atomic-commits` style),
-  then **push**. End commit bodies with the repo's required `Co-Authored-By` trailer.
+  then **push**. Follow the repo's commit conventions (CLAUDE.md / CONTRIBUTING.md).
 - Record `ADDRESS_SHA="$(git rev-parse HEAD)"` **after** the push, for the address marker. If
   every item was declined and nothing was committed, it is simply the unchanged `HEAD`.
 
@@ -156,17 +170,19 @@ to decide whether the PR keeps its `needs-ocr-review` label:
 |---|---|---|
 | `round` | review round number, or `final` (address only) | `^(\d{1,3}\|final)$` |
 | `verdict` | `round-meta.json` verdict, spaces → underscores | one of the three values |
-| `personas` | `$PERSONAS` from the team check, e.g. `principal,quality,security` | each `^[a-z0-9][a-z0-9-]{0,63}$`, ≥2 distinct to pass |
+| `personas` | `$PERSONAS` from 1b, e.g. `principal,quality,security` | each `^[a-z0-9][a-z0-9-]{0,63}$` (a `-<digits>` instance suffix is ignored), ≥2 distinct to pass |
 | `sha` | `git rev-parse HEAD` after the push | `^[0-9a-f]{7,40}$` (always write the full 40) |
 
-The gate passes when the **latest review marker** is `APPROVE` with ≥2 personas **and** the
-**latest marker of either kind** has a `sha` equal to the PR head (so the final address pass,
-which pushes after APPROVE, is what covers the head). Markers with any malformed field are
-ignored, so a typo silently costs you the round: copy the values, don't retype them.
+The gate passes when the **latest review marker** is `APPROVE` with ≥2 personas **and** the PR
+head is covered by that review's `sha` or by an address marker posted after it with
+`round=final` (or the same or a later round). That's how the final address pass, which pushes
+after APPROVE, covers the head. Markers with any malformed field are ignored, and the bot only
+reports how many it couldn't use, so copy the values rather than retyping them.
 
-**Markers are evidence.** Never post one for a round that didn't run, never change a verdict, and
-never edit a posted marker to make the gate pass. If a round's comment was wrong, post a
-correction comment and re-run the round.
+**Markers are evidence.** Never post one for a round that didn't run, never change a verdict or
+SHA, and never edit a posted marker to make the gate pass. Fixing a *typo* so the marker
+faithfully records what ran is fine; edit the comment in place and the gate re-checks. If the
+round itself was wrong (wrong target, missing reviewers), re-run it instead.
 
 ---
 
