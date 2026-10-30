@@ -1,0 +1,45 @@
+# Warn-then-close for PRs still waiting on an OCR review loop (CONTRIBUTING.md,
+# "Inactivity"). Scoped to PRs carrying `needs-ocr-review`; issues and every
+# other PR are untouched. Any activity on the PR (a push, a comment) resets the
+# clock, and the gate removes both labels once the loop is approved.
+
+name: OCR review reminders
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  remind:
+    name: Remind, then close inactive PRs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@v11
+        with:
+          only-pr-labels: needs-ocr-review
+          exempt-pr-labels: ocr-review-exempt
+          exempt-draft-pr: true
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          days-before-pr-stale: 14
+          days-before-pr-close: 14
+          stale-pr-label: ocr-review-stale
+          stale-pr-message: >-
+            👋 Friendly check-in: this PR is still waiting on an approved OCR review loop
+            (see the gate comment above for exactly what's left). No rush, we'd love to get it reviewed.
+            If there's no activity in the next 14 days it will be closed to keep the queue tidy,
+            but it can be reopened any time once the loop is done. If you're stuck, or don't have
+            AI tooling to run the loop, just say so here and a maintainer will help.
+          close-pr-message: >-
+            Closing this for now: it has been inactive for 28 days and the OCR review loop isn't complete yet.
+            This isn't a judgment on the change, and thank you for the contribution! You're very
+            welcome to reopen it any time once the loop is approved (if GitHub doesn't offer you the
+            Reopen button, just comment here and a maintainer will reopen it; the gate re-checks on reopen),
+            or to open an issue if you'd like a maintainer to pick it up instead.
