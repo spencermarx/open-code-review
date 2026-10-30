@@ -1,0 +1,60 @@
+# OCR review gate: labels PRs that haven't completed an approved OCR review
+# loop yet (see CONTRIBUTING.md, "Required: OCR review loop before maintainer
+# review"). It's a label plus one sticky comment, not a required status check.
+#
+# SECURITY: this runs on `pull_request_target`, so it has a write-capable token
+# even for fork PRs. It therefore NEVER checks out or executes PR code: the only
+# checkout is the base ref's `.github/scripts` (sparse, no persisted
+# credentials), and the script talks to the GitHub API only. PR titles, bodies
+# and comments are untrusted data; the script validates every marker field with
+# strict patterns and never echoes raw text back. Nothing untrusted is
+# interpolated into `run:`; the PR number is passed through env.
+#
+# Comments and labels written with GITHUB_TOKEN don't trigger workflows, so the
+# gate's own sticky comment and label changes can't cause a loop.
+
+name: OCR review gate
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, edited, labeled, unlabeled]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions: {}
+
+concurrency:
+  group: ocr-review-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Check OCR review loop
+    # Comment events only matter on PRs, and only when a loop marker was added,
+    # edited (old or new body) or deleted.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request &&
+        (contains(github.event.comment.body, 'ocr-review-loop:') ||
+         contains(github.event.changes.body.from, 'ocr-review-loop:')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      # No `ref:` on purpose: for both events the default is the base/default
+      # branch, never the PR head.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Evaluate and label
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: node .github/scripts/ocr-review-gate.ts

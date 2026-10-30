@@ -29,6 +29,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm nx run-many -t typecheck
+      # The workflow scripts aren't an Nx project; Node runs them via type
+      # stripping, so tsc is the only thing that checks their types.
+      - name: Typecheck workflow scripts
+        run: pnpm exec tsc -p .github/scripts/tsconfig.json
 
   lint:
     name: Lint (module boundaries)
@@ -59,6 +63,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm nx run-many -t test
+      # Dependency-free node:test suite for the OCR review gate's evaluation
+      # logic (run by Node's native type stripping).
+      - name: Workflow script tests
+        run: node --test ".github/scripts/*.test.ts"
 
   # Unit tests on the non-Linux OSes. This job exists because issue #41
   # shipped through a green PR: units ran on ubuntu only and the OS matrix

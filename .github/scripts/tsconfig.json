@@ -1,0 +1,21 @@
+{
+  // Typecheck-only config for the workflow scripts, which Node runs directly via
+  // native type stripping. `erasableSyntaxOnly` rejects TS-only runtime syntax
+  // (enums, parameter properties, namespaces) that type stripping can't handle.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["*.ts"]
+}
