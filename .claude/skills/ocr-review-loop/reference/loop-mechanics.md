@@ -68,11 +68,14 @@ PR_HEAD="$(pr_head)"
 [ "$SHA" = "$PR_HEAD" ] || { sleep 5; PR_HEAD="$(pr_head)"; }
 [ "$SHA" = "$PR_HEAD" ] || { echo "PR head ($PR_HEAD) != local HEAD ($SHA); push or pull first."; exit 1; }
 
-# The PR's base commit, from the base repository (a fork's local main may be stale).
+# The PR's base commit, fetched from the repository the PR targets (a fork's
+# local main may be stale). The base repo comes from the PR's own URL, not from
+# gh's default-repo guess, which can resolve to the fork.
 BASE_SHA="$(gh pr view "$PR" --json baseRefOid -q .baseRefOid)"
 BASE_REF="$(gh pr view "$PR" --json baseRefName -q .baseRefName)"
-BASE_REPO="$(gh repo view --json url -q .url)"   # gh resolves the upstream repo for forks
+BASE_REPO="$(gh pr view "$PR" --json url -q .url | sed 's#/pull/[0-9]*$##').git"
 git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --quiet "$BASE_REPO" "$BASE_REF"
+git cat-file -e "$BASE_SHA^{commit}" || { echo "Base commit $BASE_SHA not available after fetching $BASE_REPO"; exit 1; }
 ```
 
 Then invoke `/ocr:review` with the **full PR range as the target**, `"$BASE_SHA...HEAD"`, passing
