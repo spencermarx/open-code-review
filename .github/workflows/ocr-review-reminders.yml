@@ -27,7 +27,8 @@ jobs:
       - uses: actions/stale@v11
         with:
           only-pr-labels: needs-ocr-review
-          exempt-pr-labels: ocr-review-exempt
+          # needs-accepted-issue: the next step is a maintainer's, so the clock pauses.
+          exempt-pr-labels: ocr-review-exempt,needs-accepted-issue
           exempt-draft-pr: true
           days-before-issue-stale: -1
           days-before-issue-close: -1
