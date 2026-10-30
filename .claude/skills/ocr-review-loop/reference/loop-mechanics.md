@@ -1,9 +1,9 @@
 # Loop Mechanics (detailed reference)
 
 Read this when executing the OCR Review-to-Approval Loop. It captures the exact
-session/round handling, how to read the verdict, the address-pass policy, and the
-GitHub comment templates. The `/ocr:review` and `/ocr:address` skills own their own
-internals — this file only covers the **orchestration** around them.
+session/round handling, how to read the verdict, the address-pass policy, the evidence
+markers, and the GitHub comment templates. The `/ocr:review` and `/ocr:address` skills own
+their own internals — this file only covers the **orchestration** around them.
 
 ---
 
@@ -25,13 +25,45 @@ PR="${ARG_PR:-$(gh pr view --json number -q .number 2>/dev/null)}"   # needs gh 
 - Resolve the team: default is `ocr team resolve --json`; with `--team`, forward the spec
   verbatim to `/ocr:review` (it calls `ocr team resolve --team "<spec>" --json`).
 
+### Team policy check (STOP if it fails)
+
+`ocr team resolve --json` returns one entry per reviewer instance:
+`[{ "persona": "principal", "instance_index": 1, "name": "principal-1", "model": null }, ...]`.
+Count **distinct `persona` values**:
+
+```bash
+# With --team: ocr team resolve --team "$TEAM" --json
+TEAM_JSON="$(ocr team resolve --json)"
+PERSONAS="$(printf '%s' "$TEAM_JSON" | jq -r '[.[].persona] | unique | join(",")')"
+COUNT="$(printf '%s' "$TEAM_JSON" | jq '[.[].persona] | unique | length')"
+```
+
+If `COUNT < 2`, **stop before any review** and tell the user, in plain words:
+
+> This repo's contribution policy needs the OCR review loop to run with at least **2 distinct
+> reviewer personas** (the default team `principal:2, quality:2` qualifies), so one perspective
+> can't approve its own blind spots. 3 or more are encouraged, e.g.
+> `--team principal:2,quality:2,security:1`. Re-run with a team like that.
+
+Keep `PERSONAS` (sorted, comma-separated, no spaces) for the review markers. Ephemeral
+`--reviewer` personas have no persona id, so they never appear in the marker or the count.
+
 ---
 
 ## 1. Per-round mechanics
 
-### a. Review
+### a. Push, then review
 
-Invoke `/ocr:review` (pass `--team <spec>` only if the user supplied one). It runs the full
+The reviewed commit must be the PR's commit, so push first and verify:
+
+```bash
+git push                                  # (git push -u origin "$BRANCH" the first time)
+SHA="$(git rev-parse HEAD)"               # full 40-hex
+PR_HEAD="$(gh pr view "$PR" --json headRefOid -q .headRefOid)"
+[ "$SHA" = "$PR_HEAD" ] || { echo "PR head ($PR_HEAD) != local HEAD ($SHA); push or pull first."; exit 1; }
+```
+
+Then invoke `/ocr:review` (pass `--team <spec>` only if the user supplied one). It runs the full
 8-phase pipeline and finalizes the round, writing:
 
 - `.ocr/sessions/{YYYY-MM-DD}-{branch}/rounds/round-{n}/final.md`
@@ -55,6 +87,7 @@ same session**:
 ```bash
 META=".ocr/sessions/{id}/rounds/round-{n}/round-meta.json"
 VERDICT="$(jq -r .verdict "$META")"   # "APPROVE" | "REQUEST CHANGES" | "NEEDS DISCUSSION"
+MARKER_VERDICT="$(printf '%s' "$VERDICT" | tr ' ' '_')"   # APPROVE | REQUEST_CHANGES | NEEDS_DISCUSSION
 ```
 
 The verdict is the **merge gate** and the loop condition:
@@ -81,6 +114,8 @@ suboptimal.
   `pnpm nx run-many -t typecheck lint`, the relevant `nx test`/`nx e2e`). Fix until green.
 - **Commit** atomically with conventional messages (see the repo's `/atomic-commits` style),
   then **push**. End commit bodies with the repo's required `Co-Authored-By` trailer.
+- Record `ADDRESS_SHA="$(git rev-parse HEAD)"` **after** the push, for the address marker. If
+  every item was declined and nothing was committed, it is simply the unchanged `HEAD`.
 
 ---
 
@@ -88,7 +123,8 @@ suboptimal.
 
 Never push red. For this repo specifically, the relevant gates per change are typically:
 `nx typecheck`, `nx lint`, plus the affected `nx test <project>` / `nx e2e <project>` (rebuild
-the CLI with `nx build cli` before running `*-e2e` if CLI source changed). Mirror whatever the
+the CLI with `nx build cli` before running `*-e2e` if CLI source changed), and
+`node --test ".github/scripts/*.test.ts"` if the workflow scripts changed. Mirror whatever the
 underlying address pass touched.
 
 ---
@@ -97,13 +133,44 @@ underlying address pass touched.
 
 Once a round returns `APPROVE`, run `/ocr:address` **one more time** against the approving
 round's `final.md` to clear remaining **suggestions** (the items deferred during the loop).
-Verify, commit, push. Then post the final comment with the loop-summary table (template below).
+Verify, commit, push. Then post the final comment (marker `round=final`) with the loop-summary
+table (template below).
 
-Skip this pass if `--no-final-suggestions` was given.
+Skip this pass if `--no-final-suggestions` was given. Note that if you skip it and later push
+anything, the approving review no longer covers the PR head and the loop must run again.
 
 ---
 
-## 4. GitHub comment templates
+## 4. Evidence markers
+
+Every posted comment carries **exactly one** hidden marker, as its **first line**, outside any
+code block. The `ocr-review-gate` workflow reads these (only from the PR author and maintainers)
+to decide whether the PR keeps its `needs-ocr-review` label:
+
+```text
+<!-- ocr-review-loop:review round=<n> verdict=<APPROVE|REQUEST_CHANGES|NEEDS_DISCUSSION> personas=<comma-separated distinct persona ids> sha=<full 40-hex HEAD reviewed> -->
+<!-- ocr-review-loop:address round=<n|final> sha=<full 40-hex commit pushed> -->
+```
+
+| Field | Value | Rule the gate enforces |
+|---|---|---|
+| `round` | review round number, or `final` (address only) | `^(\d{1,3}\|final)$` |
+| `verdict` | `round-meta.json` verdict, spaces → underscores | one of the three values |
+| `personas` | `$PERSONAS` from the team check, e.g. `principal,quality,security` | each `^[a-z0-9][a-z0-9-]{0,63}$`, ≥2 distinct to pass |
+| `sha` | `git rev-parse HEAD` after the push | `^[0-9a-f]{7,40}$` (always write the full 40) |
+
+The gate passes when the **latest review marker** is `APPROVE` with ≥2 personas **and** the
+**latest marker of either kind** has a `sha` equal to the PR head (so the final address pass,
+which pushes after APPROVE, is what covers the head). Markers with any malformed field are
+ignored, so a typo silently costs you the round: copy the values, don't retype them.
+
+**Markers are evidence.** Never post one for a round that didn't run, never change a verdict, and
+never edit a posted marker to make the gate pass. If a round's comment was wrong, post a
+correction comment and re-run the round.
+
+---
+
+## 5. GitHub comment templates
 
 Post with `gh pr comment <PR> --body-file <file>`. Write bodies to a temp file rather than
 inline `-m` to avoid shell-escaping issues with backticks/`$()`.
@@ -111,6 +178,7 @@ inline `-m` to avoid shell-escaping issues with backticks/`$()`.
 ### Review comment (each round)
 
 ````markdown
+<!-- ocr-review-loop:review round={n} verdict={MARKER_VERDICT} personas={PERSONAS} sha={SHA} -->
 🤖 **OCR multi-agent review — Round {n}** ({team summary, e.g. principal×2, quality×2}, independent parallel sub-agents)
 
 {paste the round's final.md verbatim}
@@ -119,7 +187,8 @@ inline `-m` to avoid shell-escaping issues with backticks/`$()`.
 ### Address comment (each round)
 
 ````markdown
-## 🔧 OCR Address — Round {n} response (commit {sha})
+<!-- ocr-review-loop:address round={n} sha={ADDRESS_SHA} -->
+## 🔧 OCR Address — Round {n} response (commit {short sha})
 
 Addressed the round-{n} review. Each point corroborated against the code before acting.
 
@@ -139,7 +208,8 @@ Addressed the round-{n} review. Each point corroborated against the code before 
 ### Final comment (after APPROVE)
 
 ````markdown
-## 🔧 OCR Address — Final pass (commit {sha})
+<!-- ocr-review-loop:address round=final sha={ADDRESS_SHA} -->
+## 🔧 OCR Address — Final pass (commit {short sha})
 
 Cleared the remaining suggestions from the approving review (comments/tests only — no behavior change):
 {list}
@@ -162,8 +232,12 @@ Left as-is by reviewer consensus: {items the reviewers explicitly said to leave}
 
 ---
 
-## 5. Stop conditions & edge cases
+## 6. Stop conditions & edge cases
 
+- **Team has fewer than 2 distinct personas** → stop in preconditions with the policy
+  explanation; don't run a round.
+- **PR head ≠ local HEAD before a review** → push (or pull, if someone else pushed) first; never
+  review a commit the PR doesn't point at.
 - **Approved on round 1** → skip the loop body; go straight to the final suggestions pass.
 - **`max-rounds` reached without APPROVE** → stop, post/print the outstanding blockers, and
   hand back to the user. Do not loop indefinitely.
@@ -171,6 +245,8 @@ Left as-is by reviewer consensus: {items the reviewers explicitly said to leave}
 - **A blocker that can't be auto-fixed** (needs a product/architecture decision) → stop and
   say so; do not force an APPROVE by mis-categorizing it.
 - **`--no-post`** → run the whole loop locally and present the review/address trail (and the
-  summary table) in-chat instead of on the PR.
+  summary table) in-chat instead of on the PR. This does not satisfy the contribution policy.
 - **Convergence sanity** → if a re-review reintroduces the *same* blocker the prior address
   claimed to fix, treat the fix as unverified: re-open it, don't just loop.
+- **New commits after the loop finished** → the loop no longer covers the head; run it again
+  (typically one round plus a final pass).
