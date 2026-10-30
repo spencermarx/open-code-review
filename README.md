@@ -116,6 +116,7 @@ When you ask an AI to "review my code," you get a single perspective — one pas
 - [Updating OCR](#updating-ocr)
 - [Supported AI Tools](#supported-ai-tools)
 - [Requirements](#requirements)
+- [Contributing](#contributing)
 
 ---
 
@@ -661,6 +662,12 @@ Reviews are persisted to `.ocr/sessions/{date}-{branch}/`:
 ```
 
 Sessions are gitignored by default.
+
+---
+
+## Contributing
+
+Contributions are welcome! We use OCR on OCR: before a maintainer reviews a PR, contributors run the repo's OCR review loop (`/ocr-review-loop` in Claude Code, or `/ocr:review` + `/ocr:address` round by round in other tools) until it comes back **APPROVE**, with each round posted to the PR. Larger changes (`feat`, `refactor`, `perf`, breaking) start with an accepted issue. See [CONTRIBUTING.md](CONTRIBUTING.md) for the why, the how, and what to do if you don't have AI tooling.
 
 ---
 
