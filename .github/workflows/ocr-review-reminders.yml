@@ -1,7 +1,8 @@
 # Warn-then-close for PRs still waiting on an OCR review loop (CONTRIBUTING.md,
 # "Inactivity"). Scoped to PRs carrying `needs-ocr-review`; issues and every
-# other PR are untouched. Any activity on the PR (a push, a comment) resets the
-# clock, and the gate removes both labels once the loop is approved.
+# other PR are untouched, including PRs only waiting on `needs-accepted-issue`
+# (a maintainer-owned wait). Any activity on the PR (a push, a comment) resets
+# the clock, and the gate removes both labels once the loop is approved.
 
 name: OCR review reminders
 
@@ -18,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      # actions/stale keeps its progress in the Actions cache between runs.
+      actions: write
       issues: write
       pull-requests: write
     steps:
