@@ -17,7 +17,8 @@ In this repo the loop is **required before maintainer review** (CONTRIBUTING.md 
 review loop before maintainer review"). Each posted comment carries a hidden marker that the
 `ocr-review-gate` workflow reads to decide whether the PR keeps its `needs-ocr-review` label. The
 policy needs: the latest review verdict is APPROVE, the team had **at least 2 distinct personas**
-(3+ encouraged), and the latest loop comment covers the PR's **current head commit**.
+(3+ encouraged), and the PR's **current head commit** is the one that APPROVE review covered, or
+the one pushed by an address pass posted after it (normally the final pass, `round=final`).
 
 It is a thin **orchestrator** over two skills it does not reimplement:
 - **`/ocr:review`** → `.ocr/commands/review.md` (the 8-phase multi-agent review that emits a verdict)
@@ -41,7 +42,9 @@ It is a thin **orchestrator** over two skills it does not reimplement:
 - On a **non-default** git branch with an **open GitHub PR** (the loop commits + pushes each round).
 - `gh` CLI installed and authenticated (for posting; skip with `--no-post`).
 - OCR set up in the repo (`.ocr/` exists, `ocr` CLI available). Run `/ocr:doctor` if unsure.
-- A green-ish working tree: any uncommitted changes will become part of what is reviewed.
+- A clean working tree. If there are uncommitted or untracked changes, **ask the user** whether
+  they belong in the PR before committing anything; never `git add -A` blindly, since this skill
+  pushes to a public PR.
 
 ## Arguments
 
@@ -82,12 +85,15 @@ persona), and ephemeral `--reviewer` personas don't count because they have no p
 the session), which continues across same-day re-runs, so never assume it equals `iteration`.
 While the verdict is not `APPROVE` and `iteration <= max-rounds`:
 
-1. **Push, then review the whole PR** — commit anything pending, `git push`, and confirm the PR's
-   head SHA equals local `HEAD` (retry once if GitHub hasn't caught up), so the reviewed commit
-   is the PR's commit. Record that full 40-hex SHA. Invoke `/ocr:review` with the **full PR range
-   as the target** (`<base>...HEAD`, e.g. `main...HEAD`; never the default staged changes, never
-   only the commits since the last round) plus `--team` if given. It runs the full pipeline and
-   finalizes `rounds/round-{n}/final.md` + `round-meta.json` with a `verdict`.
+1. **Push, then review the whole PR** — make sure the tree is clean (ask before committing
+   anything the loop didn't produce), `git push`, and confirm the PR's head SHA equals local
+   `HEAD` (retry once if GitHub hasn't caught up), so the reviewed commit is the PR's commit.
+   Record that full 40-hex SHA. Invoke `/ocr:review` with the **full PR range as the target**:
+   the PR's base commit (`baseRefOid`, fetched so it exists locally) to `HEAD`. Never the default
+   staged changes, never only the commits since the last round, and never a possibly stale local
+   `main` (in a fork it would pull upstream commits into the review). Pass `--team` if given. It
+   runs the full pipeline and finalizes `rounds/round-{n}/final.md` + `round-meta.json` with a
+   `verdict`.
 2. **Post the review** to the PR, headed `OCR multi-agent review — Round {n}`, with the review
    marker (`<!-- ocr-review-loop:review round=… verdict=… personas=… sha=… -->`) as its first
    line. Take `personas` from the reviewers that actually ran this round (the persona part of

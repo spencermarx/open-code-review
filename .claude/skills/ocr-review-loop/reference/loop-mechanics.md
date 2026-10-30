@@ -55,23 +55,31 @@ Ephemeral `--reviewer` personas have no persona id, so they never appear in the 
 
 ### a. Push, then review the whole PR
 
-The reviewed commit must be the PR's commit, so push first and verify (GitHub can lag a moment
-behind a push, so retry once before giving up):
+The working tree must be clean first. If `git status --porcelain` shows anything the loop didn't
+produce, **ask the user** whether it belongs in the PR; never `git add -A` untracked files into a
+public PR. Then push and verify that the reviewed commit is the PR's commit (GitHub can lag a
+moment behind a push, so check twice):
 
 ```bash
 git push                                  # (git push -u origin "$BRANCH" the first time)
 SHA="$(git rev-parse HEAD)"               # full 40-hex
-PR_HEAD="$(gh pr view "$PR" --json headRefOid -q .headRefOid)"
+pr_head() { gh pr view "$PR" --json headRefOid -q .headRefOid; }
+PR_HEAD="$(pr_head)"
+[ "$SHA" = "$PR_HEAD" ] || { sleep 5; PR_HEAD="$(pr_head)"; }
 [ "$SHA" = "$PR_HEAD" ] || { echo "PR head ($PR_HEAD) != local HEAD ($SHA); push or pull first."; exit 1; }
-BASE="$(gh pr view "$PR" --json baseRefName -q .baseRefName)"
+
+# The PR's base commit, from the base repository (a fork's local main may be stale).
+BASE_SHA="$(gh pr view "$PR" --json baseRefOid -q .baseRefOid)"
+BASE_REF="$(gh pr view "$PR" --json baseRefName -q .baseRefName)"
+BASE_REPO="$(gh repo view --json url -q .url)"   # gh resolves the upstream repo for forks
+git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --quiet "$BASE_REPO" "$BASE_REF"
 ```
 
-Then invoke `/ocr:review` with the **full PR range as the target**, `"$BASE...HEAD"` (for
-example `/ocr:review main...HEAD --team principal:2,quality:2`), passing `--team <spec>` only if
-the user supplied one. `/ocr:review`'s default target is *staged changes*, which is empty right
-after a push, and reviewing only the commits since the last round would leave the marker claiming
-more coverage than the review had. It runs the full 8-phase pipeline and finalizes the round,
-writing:
+Then invoke `/ocr:review` with the **full PR range as the target**, `"$BASE_SHA...HEAD"`, passing
+`--team <spec>` only if the user supplied one. `/ocr:review`'s default target is *staged
+changes*, which is empty right after a push; reviewing only the commits since the last round, or
+against a stale local `main`, would leave the marker claiming different coverage than the review
+had. It runs the full 8-phase pipeline and finalizes the round, writing:
 
 - `.ocr/sessions/{YYYY-MM-DD}-{branch}/rounds/round-{n}/final.md`
 - `.ocr/sessions/{YYYY-MM-DD}-{branch}/rounds/round-{n}/round-meta.json`  (verdict + counts)
@@ -87,7 +95,7 @@ same session**:
   step at a time** (`context → change-context → analysis → reviews …`) — the CLI rejects
   illegal jumps. Reuse the existing `discovered-standards.md` and `context.md`; only the
   `rounds/round-{n+1}/` artifacts are new.
-- Regenerate the full `"$BASE...HEAD"` diff each round (the branch has new commits from the
+- Regenerate the full `"$BASE_SHA...HEAD"` diff each round (the branch has new commits from the
   prior address pass).
 - `{n}` is **OCR's** round number, not the loop's iteration count. A same-day re-run of the
   loop continues the session at `round-{n+1}`, so read `n` from the round that was just
