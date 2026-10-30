@@ -8,7 +8,7 @@ This guide covers how to set up the repo, how a change goes from idea to merged 
 
 A change goes through three steps, and each one answers a single question:
 
-1. **Start with an issue**, unless the change is trivial (a typo, a small docs fix, a small obvious bug fix). Describe the problem and the approach you have in mind, and a maintainer replies with a go-ahead or a redirect. *Should we do this, and what's the approach?* ([details](#start-with-an-issue))
+1. **Start with an issue**, unless the change is trivial (a typo, a small docs fix, a small obvious bug fix). Describe the problem and the approach you have in mind, and a maintainer replies with a go-ahead or a redirect. *Do we want this change, and is the approach right?* ([details](#start-with-an-issue))
 2. **Build it, then run the OCR review loop** on your PR until the latest round is **APPROVE**, with at least 2 distinct reviewer personas, covering the PR's head commit. *Is the implementation sound?* This is the only step a bot checks: it keeps a `needs-ocr-review` label on the PR until the loop is done. ([details](#required-ocr-review-loop-before-maintainer-review))
 3. **A maintainer reviews** the PR against what was agreed (in the issue, when there is one). *Does it do what we agreed, and is it ready to merge?* ([why three steps](#why))
 
@@ -25,7 +25,7 @@ Along the way, you [own your change](#you-own-your-change): read and understand 
 
 ## Start with an issue
 
-For anything beyond a trivial change, please open an issue before you write code. It's where we agree on *whether* to make a change and *how*, before anyone spends time building or reviewing it. Many well-loved projects work this way in one form or another (Go, Rust, Kubernetes, React, Ghostty), and it saves everyone the disappointment of a finished PR that we'd have steered differently.
+For anything beyond a trivial change, please open an issue before you write code. It lets a maintainer confirm that we want the change, and that your approach fits, before you spend time building it. Many well-loved projects work this way in one form or another (Go, Rust, Kubernetes, React, Ghostty), and it saves everyone the disappointment of a finished PR that we'd have steered differently.
 
 **Trivial changes can go straight to a PR:** typo fixes, small docs fixes, and small, obvious bug fixes where there's really only one sensible way to do it. Not sure? Open the issue; that's never the wrong call. Skipping the issue doesn't skip the [OCR review loop](#required-ocr-review-loop-before-maintainer-review); for the very smallest changes, a maintainer can [exempt](#exemptions) the PR from it instead.
 
@@ -60,7 +60,7 @@ The PR template has a short **AI use** section: which tools you used (if any) an
 
 Each of the three steps answers a different question, so no single review has to answer all of them at once:
 
-- **The issue** settles *whether* to make the change and *what approach* to take. That's a conversation between people, and it's cheapest before any code exists.
+- **The issue** settles *whether we want the change and whether the approach is right*. That's a conversation between people, and it's cheapest before any code exists.
 - **The OCR review loop** checks *whether the implementation is sound*: bugs, missing tests, unhandled edge cases, and the project's conventions. That's the line-by-line part of a review, and a multi-perspective review (architecture, code quality, and optionally security) does it well. Running it first means those findings are already fixed, or declined with reasons, by the time a human looks, and the posted rounds show what was found and how it was handled.
 - **Maintainer review** checks *whether the PR does what was agreed and is ready to merge*. The maintainer compares the PR with the approach that was agreed (in the issue, when there is one): is the scope what we discussed, does it behave the way we expected, does anything the loop declined or couldn't judge matter? It's a check against an agreement, not a fresh design debate. Design questions can still come up when the PR reveals something nobody knew at issue time, but that's the exception.
 
