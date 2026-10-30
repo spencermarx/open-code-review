@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import type { GateComment, GateInput, GatePullRequest, GateResult, RenderContext } from './ocr-review-gate-evaluate.ts'
 import {
@@ -9,7 +9,10 @@ import {
   collectTrustedMarkers,
   evaluateGate,
   gateLabels,
+  isTrustedComment,
+  nextPageUrl,
   parseClosingRefs,
+  pickStickyComment,
   parseCommentMarker,
   parseMarkerLine,
   renderStickyComment,
@@ -242,6 +245,11 @@ describe('evaluateGate: review loop', () => {
     assert.equal(evaluate({ comments: [comment(review(1, 'APPROVE', 'martin-fowler,quality'))] }).status, 'pass')
   })
 
+  it('does not count ephemeral reviewers as a persona', () => {
+    assert.deepEqual(reasonCodes(evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,ephemeral-1'))] })), ['too-few-personas'])
+    assert.deepEqual(reasonCodes(evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,ephemeral'))] })), ['too-few-personas'])
+  })
+
   it('ignores an earlier-round address marker posted after the approving review', () => {
     const result = evaluate({
       comments: [comment(review(3, 'APPROVE', 'principal,quality', OLD)), comment(address(1, HEAD))],
@@ -403,11 +411,70 @@ describe('gateLabels', () => {
     assert.deepEqual(gateLabels(evaluate({ pr: pr({ draft: true }) })), { needsReview: false, needsIssue: false })
   })
 
-  it('separates the maintainer-owned issue wait from contributor-owned work', () => {
-    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), comments: approved() })), { needsReview: false, needsIssue: true })
-    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }) })), { needsReview: true, needsIssue: true })
+  it('marks only a linked-but-unaccepted issue as a maintainer wait', () => {
+    const linked = [{ number: 12, labels: [] }]
+    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: linked })), { needsReview: false, needsIssue: true })
+    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), linkedIssues: linked })), { needsReview: true, needsIssue: true })
+  })
+
+  it('keeps contributor-owned work, including linking an issue at all, on needs-ocr-review', () => {
+    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), comments: approved() })), { needsReview: true, needsIssue: false })
     assert.deepEqual(gateLabels(evaluate()), { needsReview: true, needsIssue: false })
     assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'Update stuff' }), comments: approved() })), { needsReview: true, needsIssue: false })
+  })
+})
+
+describe('API helpers', () => {
+  const api = 'https://api.github.com'
+
+  it('follows only next links on the same API origin', () => {
+    assert.equal(nextPageUrl(`<${api}/x?page=2>; rel="next", <${api}/x?page=9>; rel="last"`, api), `${api}/x?page=2`)
+    assert.equal(nextPageUrl(`<https://evil.example/x?page=2>; rel="next"`, api), null)
+    assert.equal(nextPageUrl(`<${api}.evil.example/x>; rel="next"`, api), null)
+    assert.equal(nextPageUrl(`<${api}/x?page=9>; rel="last"`, api), null)
+    assert.equal(nextPageUrl(null, api), null)
+  })
+
+  it('picks only the Actions bot comment that carries the gate marker', () => {
+    const comments = [
+      { id: 1, body: `${STICKY_MARKER}\nfake`, user: { login: 'mallory', type: 'User' } },
+      { id: 2, body: `${STICKY_MARKER}\nfake`, user: { login: 'github-actions[bot]', type: 'User' } },
+      { id: 3, body: 'no marker', user: { login: 'github-actions[bot]', type: 'Bot' } },
+      { id: 4, body: `${STICKY_MARKER}\nreal`, user: { login: 'github-actions[bot]', type: 'Bot' } },
+    ]
+    assert.equal(pickStickyComment(comments, 'github-actions[bot]')?.id, 4)
+    assert.equal(pickStickyComment(comments.slice(0, 3), 'github-actions[bot]'), undefined)
+  })
+})
+
+describe('workflow and repo contracts', () => {
+  const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
+
+  it("keeps the gate workflow's comment filter in step with isTrustedComment", () => {
+    const workflow = read('.github/workflows/ocr-review-gate.yml')
+    assert.match(workflow, /github\.event\.comment\.user\.login == github\.event\.issue\.user\.login/)
+    const associations = JSON.parse(/fromJSON\('(\[[^\]]*\])'\)/.exec(workflow)?.[1] ?? '[]') as string[]
+    assert.deepEqual([...associations].sort(), ['COLLABORATOR', 'MEMBER', 'OWNER'])
+    for (const association of associations) {
+      assert.ok(isTrustedComment(comment('x', { authorLogin: 'someone', authorAssociation: association }), AUTHOR))
+    }
+    assert.ok(!isTrustedComment(comment('x', { authorLogin: 'someone', authorAssociation: 'CONTRIBUTOR' }), AUTHOR))
+  })
+
+  it('stale-closes only needs-ocr-review PRs and never a maintainer wait', () => {
+    const reminders = read('.github/workflows/ocr-review-reminders.yml')
+    assert.match(reminders, new RegExp(`only-pr-labels: ${LABELS.needsReview}\\n`))
+    assert.match(reminders, new RegExp(`exempt-pr-labels: .*${LABELS.needsIssue}`))
+    assert.match(reminders, new RegExp(`exempt-pr-labels: .*${LABELS.exempt}`))
+  })
+
+  it('never lets an issue form apply a label the gate trusts', () => {
+    const forms = readdirSync(new URL('../ISSUE_TEMPLATE/', import.meta.url)).filter((f) => /\.ya?ml$/.test(f) && f !== 'config.yml')
+    assert.ok(forms.length > 0)
+    for (const form of forms) {
+      const labels = /^labels:\s*(.*)$/m.exec(read(`.github/ISSUE_TEMPLATE/${form}`))?.[1] ?? ''
+      for (const trusted of [LABELS.accepted, LABELS.exempt]) assert.ok(!labels.includes(trusted), `${form} applies ${trusted}`)
+    }
   })
 })
 
@@ -426,6 +493,16 @@ describe('rejected markers', () => {
     const body = renderStickyComment(result, ctx) ?? ''
     assert.match(body, /2 comments have an `ocr-review-loop:` marker I couldn't use/)
     assert.ok(!body.includes('APPROVED'))
+  })
+
+  it('clears the count once a corrected marker is posted in a new comment', () => {
+    const result = evaluate({
+      comments: [
+        comment(`<!-- ocr-review-loop:review round=1 verdict=APPROVED personas=principal,quality sha=${HEAD} -->`),
+        comment(review(1, 'REQUEST_CHANGES', 'principal,quality')),
+      ],
+    })
+    assert.equal(result.status === 'fail' && result.evidence.rejectedMarkers, 0)
   })
 
   it('does not count a comment whose marker was accepted', () => {
@@ -509,11 +586,12 @@ describe('rendering', () => {
 
   it('renders a specific message for every failure reason', () => {
     const cases: [GateResult, RegExp][] = [
-      [evaluate(), /couldn't find an OCR review round/],
+      [evaluate(), /couldn't find an OCR review round with an `ocr-review-loop:` marker .* `\/ocr:post` doesn't add the marker/],
       [evaluate({ comments: [comment(review(1, 'NEEDS_DISCUSSION', 'principal,quality'))] }), /round 1\) ended in \*\*NEEDS_DISCUSSION\*\*/],
       [evaluate({ comments: [comment(review(1, 'APPROVE', 'principal'))] }), /Round 1 used 1 distinct reviewer persona \(`principal`\); the loop needs at least 2/],
-      [evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,quality', OLD))] }), /covers `bbbbbbb`, but the PR head is now `aaaaaaa`/],
-      [evaluate({ pr: pr({ title: 'Update stuff' }) }), /doesn't start with a \[Conventional Commits\]/],
+      [evaluate({ comments: [comment(review(1, 'APPROVE', 'ephemeral-1,ephemeral-2'))] }), /Round 1 didn't list any reviewer personas \(ephemeral/],
+      [evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,quality', OLD))] }), /covers `bbbbbbb`, but the PR head is now `aaaaaaa`\. Commits pushed after the loop need another review round/],
+      [evaluate({ pr: pr({ title: 'Update stuff' }) }), /should look like `type: summary` \(with a space after the colon\) using one of `feat`, .*`revert`/],
       [evaluate({ pr: pr({ title: 'feat: x' }) }), /`feat:` PRs need a linked issue .* Link one with `Closes #<number>`/],
       [evaluate({ pr: pr({ title: 'fix!: x' }), linkedIssues: [{ number: 12, labels: [] }] }), /Breaking changes need .* The linked issue \(#12\) doesn't have/],
       [evaluate({ pr: pr({ title: 'feat: x' }), linkedIssues: [{ number: 1, labels: [] }, { number: 2, labels: [] }] }), /The linked issues \(#1, #2\) don't have/],
@@ -521,15 +599,39 @@ describe('rendering', () => {
     for (const [result, pattern] of cases) assert.match(renderStickyComment(result, ctx) ?? '', pattern)
   })
 
-  it('says accurately when it re-checks, and that an issue wait is not stale-closed', () => {
+  it('says accurately when it re-checks, and shows loop steps only when the loop is missing', () => {
     const loop = renderStickyComment(evaluate(), ctx) ?? ''
     assert.match(loop, /re-check automatically when you push, edit the PR, or comment here/)
     assert.ok(!loop.includes('every push and comment'))
     assert.match(loop, /### OCR review loop: not complete yet/)
-    const issueOnly = renderStickyComment(evaluate({ pr: pr({ title: 'feat: x' }), comments: [comment(review(1, 'APPROVE', 'principal,quality'))] }), ctx) ?? ''
-    assert.match(issueOnly, /### OCR review loop: waiting on an accepted issue/)
-    assert.match(issueOnly, /won't be closed for inactivity/)
-    assert.match(issueOnly, /Once it's accepted, comment here or edit the PR/)
+    assert.match(loop, /\*\*How to finish\*\*/)
+    assert.match(loop, /14 days/)
+  })
+
+  it('tells a contributor with an approved loop that only the issue decision is left', () => {
+    const approvedLoop = [comment(review(1, 'APPROVE', 'principal,quality'))]
+    const body = renderStickyComment(evaluate({ pr: pr({ title: 'feat: x' }), comments: approvedLoop, linkedIssues: [{ number: 12, labels: [] }] }), ctx) ?? ''
+    assert.match(body, /### OCR review gate: waiting on an accepted issue/)
+    assert.match(body, /Your OCR review loop is complete ✅/)
+    assert.match(body, /won't be closed for inactivity/)
+    assert.match(body, /Once it's accepted, comment here or edit the PR/)
+    assert.ok(!body.includes('How to finish'))
+    assert.ok(!body.includes('/ocr-review-loop'))
+  })
+
+  it('does not ask an approved loop to re-run for a title or a missing issue link', () => {
+    const approvedLoop = [comment(review(1, 'APPROVE', 'principal,quality'))]
+    for (const result of [
+      evaluate({ pr: pr({ title: 'Update stuff' }), comments: approvedLoop }),
+      evaluate({ pr: pr({ title: 'feat: x' }), comments: approvedLoop }),
+    ]) {
+      const body = renderStickyComment(result, ctx) ?? ''
+      assert.match(body, /### OCR review gate: almost there/)
+      assert.match(body, /Your OCR review loop is complete ✅/)
+      assert.ok(!body.includes('How to finish'))
+      assert.ok(!body.includes('OCR review loop: not complete yet'))
+      assert.match(body, /14 days/)
+    }
   })
 
   it('names both command styles for non-Claude-Code tools', () => {

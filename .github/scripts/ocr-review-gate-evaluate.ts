@@ -191,7 +191,9 @@ function parsePersonas(raw: string): string[] | null {
     // Instance names (`principal-1`, `principal-2`) are what contributors see
     // in review file names; without this, two instances of one persona would
     // count as two personas. No shipped reviewer id ends in `-<digits>`.
-    distinct.add(part.replace(/-\d+$/, ''))
+    const persona = part.replace(/-\d+$/, '')
+    // Ephemeral `--reviewer` reviewers have no persona of their own.
+    if (persona !== 'ephemeral') distinct.add(persona)
   }
   return [...distinct]
 }
@@ -217,8 +219,9 @@ export function isTrustedComment(comment: GateComment, prAuthorLogin: string): b
 const MARKER_LIKE_RE = /^ {0,3}<!--[ \t]*ocr-review-loop:/
 
 /**
- * Trusted markers, oldest first, plus how many trusted comments look like they
- * carry a marker but have none the gate accepts (a typo, a bad field). Only the
+ * Trusted markers, oldest first, plus how many trusted comments since the last
+ * accepted marker look like they carry one but have none the gate accepts (a
+ * typo, a bad field). Re-posting a corrected marker clears the count. Only the
  * count is ever surfaced, never the rejected text.
  */
 export function collectTrustedMarkers(
@@ -232,8 +235,10 @@ export function collectTrustedMarkers(
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id - b.id)
   for (const comment of trusted) {
     const marker = parseCommentMarker(comment.body)
-    if (marker) markers.push(marker)
-    else if (stripFencedCode(comment.body).some((line) => MARKER_LIKE_RE.test(line))) rejected++
+    if (marker) {
+      markers.push(marker)
+      rejected = 0
+    } else if (stripFencedCode(comment.body).some((line) => MARKER_LIKE_RE.test(line))) rejected++
   }
   return { markers, rejected }
 }
@@ -261,12 +266,23 @@ export function coveringMarker(latestReview: ReviewMarker, after: LoopMarker[]):
   return addresses.at(-1) ?? latestReview
 }
 
-/** Which gate-managed labels a result calls for. */
+/** A linked issue waiting for `accepted` is the one failure a maintainer owes. */
+function isMaintainerWait(reason: GateReason): boolean {
+  return reason.code === 'issue-required' && reason.linkedIssues.length > 0
+}
+
+const LOOP_REASONS: ReadonlySet<GateReason['code']> = new Set(['no-review', 'not-approved', 'too-few-personas', 'head-not-covered'])
+
+/**
+ * Which gate-managed labels a result calls for: `needsReview` whenever the
+ * contributor owes the next step (including linking an issue at all), and
+ * `needsIssue` only while a linked issue waits on a maintainer.
+ */
 export function gateLabels(result: GateResult): { needsReview: boolean; needsIssue: boolean } {
   if (result.status !== 'fail') return { needsReview: false, needsIssue: false }
   return {
-    needsReview: result.reasons.some((r) => r.code !== 'issue-required'),
-    needsIssue: result.reasons.some((r) => r.code === 'issue-required'),
+    needsReview: result.reasons.some((r) => !isMaintainerWait(r)),
+    needsIssue: result.reasons.some(isMaintainerWait),
   }
 }
 
@@ -381,19 +397,23 @@ function docsLink(ctx: RenderContext, anchor: string): string {
 function renderReason(reason: GateReason, ctx: RenderContext): string {
   switch (reason.code) {
     case 'no-review':
-      return "I couldn't find an OCR review round on this PR yet. Run the review loop and post each round here (the loop does this for you)."
+      return "I couldn't find an OCR review round with an `ocr-review-loop:` marker on this PR yet. Run the review loop and post each round here; `/ocr-review-loop` does this for you (OCR's `/ocr:post` doesn't add the marker)."
     case 'not-approved':
       return reason.verdict === 'NEEDS_DISCUSSION'
         ? `The latest review (round ${reason.round}) ended in **NEEDS_DISCUSSION**. Work through its open questions (feel free to ask us here), then run another round.`
         : `The latest review (round ${reason.round}) is **REQUEST_CHANGES**. Address the findings and keep looping until a round comes back **APPROVE**.`
     case 'too-few-personas': {
+      const needed = `the loop needs at least ${MIN_DISTINCT_PERSONAS}, e.g. \`--team principal:2,quality:2\``
+      if (reason.personas.length === 0) {
+        return `Round ${reason.round} didn't list any reviewer personas (ephemeral \`--reviewer\` reviewers don't count); ${needed}.`
+      }
       const team = reason.personas.map((p) => `\`${p}\``).join(', ')
-      return `Round ${reason.round} used ${reason.personas.length} distinct reviewer persona (${team}); the loop needs at least ${MIN_DISTINCT_PERSONAS}, e.g. \`--team principal:2,quality:2\`.`
+      return `Round ${reason.round} used ${reason.personas.length} distinct reviewer persona${reason.personas.length === 1 ? '' : 's'} (${team}); ${needed}.`
     }
     case 'head-not-covered':
-      return `The latest loop round covers \`${short(reason.markerSha)}\`, but the PR head is now \`${short(reason.headSha)}\`. Commits pushed after the loop need another pass (it's usually a quick one).`
+      return `The latest loop round covers \`${short(reason.markerSha)}\`, but the PR head is now \`${short(reason.headSha)}\`. Commits pushed after the loop need another review round (it's usually a quick one).`
     case 'unconventional-title':
-      return `The PR title doesn't start with a [Conventional Commits](https://www.conventionalcommits.org/) type (\`feat:\`, \`fix:\`, \`docs:\`, ...), so I can't tell whether an accepted issue is needed. Please retitle the PR.`
+      return `The PR title should look like \`type: summary\` (with a space after the colon) using one of ${TITLE_TYPES}, so I can tell whether an accepted issue is needed. Please retitle the PR.`
     case 'issue-required': {
       const kind = reason.breaking ? 'Breaking changes' : `\`${reason.type}:\` PRs`
       const refs = reason.linkedIssues.map((n) => `#${n}`).join(', ')
@@ -408,9 +428,11 @@ function renderReason(reason: GateReason, ctx: RenderContext): string {
   }
 }
 
+const TITLE_TYPES = [...ISSUE_REQUIRED_TYPES, ...ISSUE_OPTIONAL_TYPES].map((t) => `\`${t}\``).join(', ')
+
 function renderRejectedHint(count: number, ctx: RenderContext): string {
   const what = count === 1 ? '1 comment has' : `${count} comments have`
-  return `${what} an \`ocr-review-loop:\` marker I couldn't use. Markers are strict: check each field against the [format](${docsLink(ctx, 'other-ai-tools-manual-fallback')}) (case-sensitive, no spaces after commas, full SHA). Fixing a typo in place is fine; I re-check when the comment is edited.`
+  return `${what} an \`ocr-review-loop:\` marker I couldn't use. Markers are strict: check each field against the [format](${docsLink(ctx, 'other-ai-tools-manual-fallback')}) (case-sensitive, verdicts use underscores like \`REQUEST_CHANGES\`, no spaces after commas, full SHA). Fixing a typo in place is fine; I re-check when the comment is edited.`
 }
 
 export function renderStickyComment(result: GateResult, ctx: RenderContext): string | null {
@@ -419,27 +441,41 @@ export function renderStickyComment(result: GateResult, ctx: RenderContext): str
 
   if (result.status === 'fail') {
     const labels = gateLabels(result)
+    const loopMissing = result.reasons.some((r) => LOOP_REASONS.has(r.code)) || result.evidence.rejectedMarkers > 0
     const reasons = result.reasons.map((r) => `- ${renderReason(r, ctx)}`)
     if (result.evidence.rejectedMarkers > 0) reasons.push(`- ${renderRejectedHint(result.evidence.rejectedMarkers, ctx)}`)
+    const heading = loopMissing
+      ? '### OCR review loop: not complete yet'
+      : labels.needsReview
+        ? '### OCR review gate: almost there'
+        : '### OCR review gate: waiting on an accepted issue'
+    const intro = loopMissing
+      ? `${greeting} for contributing! Before a maintainer reviews a PR, we ask contributors to run OCR's own review loop on it and post the rounds here. It catches most issues before a human spends time on them, and it's how we [dogfood the tool](${policy}).`
+      : `${greeting} for contributing! Your OCR review loop is complete ✅, so only the item below is left before a maintainer reviews this PR.`
+    const howToFinish = loopMissing
+      ? [
+          '**How to finish**',
+          '',
+          '- **Claude Code:** run `/ocr-review-loop` on this branch (`--team principal:2,quality:2,security:1` is a great choice). It posts every round for you.',
+          `- **Other AI tools:** run \`/ocr:review\` and \`/ocr:address\` (\`/ocr-review\` and \`/ocr-address\` in Windsurf and other tools with flat command names) round by round, and post each round with the markers described in the [manual fallback](${docsLink(ctx, 'other-ai-tools-manual-fallback')}).`,
+          `- **No AI tooling?** No problem. [Open an issue](${ctx.repoUrl}/issues/new/choose) describing the change and a maintainer can pick it up or exempt this PR.`,
+          '',
+        ]
+      : []
     const inactivity = labels.needsReview
-      ? ` While \`${LABELS.needsReview}\` is on this PR it won't be queued for maintainer review. If it sits inactive for 14 days I'll send a friendly reminder, and 14 days after that it will be closed; it can be reopened any time once the loop is done.`
-      : ` \`${LABELS.needsIssue}\` means we're waiting on a maintainer, so this PR won't be closed for inactivity while it's the only thing left.`
+      ? ` While \`${LABELS.needsReview}\` is on this PR it won't be queued for maintainer review. If it sits inactive for 14 days I'll send a friendly reminder, and 14 days after that it will be closed; it can be reopened any time once everything above is done.`
+      : ` \`${LABELS.needsIssue}\` means we're waiting on a maintainer, so this PR won't be closed for inactivity.`
     return [
       STICKY_MARKER,
-      labels.needsReview ? '### OCR review loop: not complete yet' : '### OCR review loop: waiting on an accepted issue',
+      heading,
       '',
-      `${greeting} for contributing! Before a maintainer reviews a PR, we ask contributors to run OCR's own review loop on it and post the rounds here. It catches most issues before a human spends time on them, and it's how we [dogfood the tool](${policy}).`,
+      intro,
       '',
       "**What's still needed**",
       '',
       ...reasons,
       '',
-      '**How to finish**',
-      '',
-      '- **Claude Code:** run `/ocr-review-loop` on this branch (`--team principal:2,quality:2,security:1` is a great choice). It posts every round for you.',
-      `- **Other AI tools:** run \`/ocr:review\` and \`/ocr:address\` (\`/ocr-review\` and \`/ocr-address\` in Windsurf and other tools with flat command names) round by round, and post each round with the markers described in the [manual fallback](${docsLink(ctx, 'other-ai-tools-manual-fallback')}).`,
-      `- **No AI tooling?** No problem. [Open an issue](${ctx.repoUrl}/issues/new/choose) describing the change and a maintainer can pick it up or exempt this PR.`,
-      '',
+      ...howToFinish,
       `I re-check automatically when you push, edit the PR, or comment here (comments from you or a maintainer).${inactivity}`,
       '',
       `<sub>Checked head \`${short(result.evidence.headSha)}\`. This is a label, not a required status check.</sub>`,
@@ -463,6 +499,28 @@ export function renderStickyComment(result: GateResult, ctx: RenderContext): str
   }
 
   return null
+}
+
+// ---------------------------------------------------------------------------
+// API helpers (pure, so the runner's trust-sensitive choices are testable)
+// ---------------------------------------------------------------------------
+
+/** The `rel="next"` URL from a Link header, followed only back to the same API origin. */
+export function nextPageUrl(link: string | null, apiUrl: string): string | null {
+  const match = link?.split(',').find((part) => part.includes('rel="next"'))?.match(/<([^>]+)>/)
+  const url = match?.[1]
+  return url && url.startsWith(`${apiUrl}/`) ? url : null
+}
+
+export interface StickyCandidate {
+  id: number
+  body: string | null
+  user: { login: string; type: string } | null
+}
+
+/** The gate's own sticky comment: authored by the Actions bot and carrying the gate marker. */
+export function pickStickyComment<T extends StickyCandidate>(comments: T[], botLogin: string): T | undefined {
+  return comments.find((c) => c.user?.login === botLogin && c.user.type === 'Bot' && c.body?.includes(STICKY_MARKER))
 }
 
 export function renderSummary(result: GateResult, ctx: RenderContext): string {

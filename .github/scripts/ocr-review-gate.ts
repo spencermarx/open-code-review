@@ -10,11 +10,12 @@ import { appendFileSync } from 'node:fs'
 import type { GateComment, GatePullRequest, GateResult, LinkedIssue, RenderContext } from './ocr-review-gate-evaluate.ts'
 import {
   LABELS,
-  STICKY_MARKER,
   classifyTitle,
   evaluateGate,
   gateLabels,
+  nextPageUrl,
   parseClosingRefs,
+  pickStickyComment,
   renderStickyComment,
   renderSummary,
 } from './ocr-review-gate-evaluate.ts'
@@ -67,6 +68,9 @@ async function request(method: string, url: string, body?: unknown): Promise<Res
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
+    // Never follow a redirect: e.g. a transferred issue would otherwise be read
+    // from another repository and its labels trusted as if they were local.
+    redirect: 'error',
   })
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 500)
@@ -82,13 +86,6 @@ async function rest<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   const res = await request(method, `${apiUrl}${path}`, body)
   return (res.status === 204 ? undefined : await res.json()) as T
-}
-
-function nextPage(link: string | null): string | null {
-  const match = link?.split(',').find((part) => part.includes('rel="next"'))?.match(/<([^>]+)>/)
-  const url = match?.[1]
-  // Only follow pagination links back to the API we started on.
-  return url && url.startsWith(`${apiUrl}/`) ? url : null
 }
 
 interface ApiUser {
@@ -122,30 +119,29 @@ interface ApiIssue {
   pull_request?: unknown
 }
 
-async function listComments(): Promise<ApiComment[]> {
-  const all: ApiComment[] = []
-  let url: string | null = `${apiUrl}/repos/${owner}/${name}/issues/${prNumber}/comments?per_page=100`
-  for (let page = 0; url && page < MAX_COMMENT_PAGES; page++) {
+async function listAll<T>(path: string, maxPages: number): Promise<T[]> {
+  const all: T[] = []
+  let url: string | null = `${apiUrl}${path}${path.includes('?') ? '&' : '?'}per_page=100`
+  for (let page = 0; url && page < maxPages; page++) {
     const res = await request('GET', url)
-    all.push(...((await res.json()) as ApiComment[]))
-    url = nextPage(res.headers.get('link'))
+    all.push(...((await res.json()) as T[]))
+    url = nextPageUrl(res.headers.get('link'), apiUrl)
   }
   return all
 }
 
 async function ensureLabels(): Promise<void> {
+  // One listing instead of a GET per label keeps each run cheap on the
+  // repository's shared GITHUB_TOKEN budget.
+  const existing = new Set((await listAll<ApiLabel>(`/repos/${owner}/${name}/labels`, 10)).map((l) => l.name))
   for (const [label, spec] of Object.entries(LABEL_SPECS)) {
+    if (existing.has(label)) continue
     try {
-      await rest('GET', `/repos/${owner}/${name}/labels/${encodeURIComponent(label)}`)
+      await rest('POST', `/repos/${owner}/${name}/labels`, { name: label, ...spec })
+      if (!dryRun) console.log(`Created label ${label}`)
     } catch (err) {
-      if (!(err instanceof HttpError) || err.status !== 404) throw err
-      try {
-        await rest('POST', `/repos/${owner}/${name}/labels`, { name: label, ...spec })
-        if (!dryRun) console.log(`Created label ${label}`)
-      } catch (createErr) {
-        // 422 = created concurrently by another run.
-        if (!(createErr instanceof HttpError) || createErr.status !== 422) throw createErr
-      }
+      // 422 = created concurrently by another run.
+      if (!(err instanceof HttpError) || err.status !== 422) throw err
     }
   }
 }
@@ -217,7 +213,7 @@ async function linkedIssues(body: string): Promise<LinkedIssue[]> {
 
 async function syncStickyComment(comments: ApiComment[], body: string | null, allowCreate: boolean): Promise<void> {
   if (body === null) return
-  const existing = comments.find((c) => c.user?.login === BOT_LOGIN && c.user.type === 'Bot' && c.body?.includes(STICKY_MARKER))
+  const existing = pickStickyComment(comments, BOT_LOGIN)
   if (existing) {
     if (existing.body === body) return
     await rest('PATCH', `/repos/${owner}/${name}/issues/comments/${existing.id}`, { body })
@@ -261,7 +257,7 @@ async function main(): Promise<void> {
   labelOnCrash = early.status !== 'exempt'
 
   await ensureLabels()
-  const apiComments = await listComments()
+  const apiComments = await listAll<ApiComment>(`/repos/${owner}/${name}/issues/${prNumber}/comments`, MAX_COMMENT_PAGES)
   const comments: GateComment[] = apiComments
     .filter((c): c is ApiComment & { user: ApiUser } => c.user !== null)
     .map((c) => ({
@@ -281,6 +277,8 @@ async function main(): Promise<void> {
   await (want.needsReview ? addLabel : removeLabel)(labels, LABELS.needsReview)
   await (want.needsIssue ? addLabel : removeLabel)(labels, LABELS.needsIssue)
   if (!want.needsReview) await removeLabel(labels, LABELS.stale)
+  // Labels now reflect this evaluation; a later crash must not overwrite them.
+  labelOnCrash = false
   // Never post a fresh comment just to say "pass"; only update one we left.
   await syncStickyComment(apiComments, sticky, result.status === 'fail')
 
