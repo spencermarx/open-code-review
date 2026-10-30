@@ -8,9 +8,9 @@ This guide covers how to set up the repo, how a change goes from idea to merged 
 
 A change goes through three steps, and each one answers a single question:
 
-1. **Start with an issue**, unless the change is trivial (a typo, docs, a small obvious fix). Describe the problem and the approach you have in mind, and a maintainer replies with a go-ahead or a redirect. *Should we do this, and what's the approach?* ([details](#start-with-an-issue))
+1. **Start with an issue**, unless the change is trivial (a typo, a small docs fix, a small obvious bug fix). Describe the problem and the approach you have in mind, and a maintainer replies with a go-ahead or a redirect. *Should we do this, and what's the approach?* ([details](#start-with-an-issue))
 2. **Build it, then run the OCR review loop** on your PR until the latest round is **APPROVE**, with at least 2 distinct reviewer personas, covering the PR's head commit. *Is the implementation sound?* This is the only step a bot checks: it keeps a `needs-ocr-review` label on the PR until the loop is done. ([details](#required-ocr-review-loop-before-maintainer-review))
-3. **A maintainer reviews** the PR against what was agreed in the issue. *Does it do what we agreed, and is it ready to merge?*
+3. **A maintainer reviews** the PR against what was agreed (in the issue, when there is one). *Does it do what we agreed, and is it ready to merge?* ([why three steps](#why))
 
 Along the way, you [own your change](#you-own-your-change): read and understand every line, whoever (or whatever) wrote it, and fill in the PR template, including the short [AI-use disclosure](#ai-use-disclosure). No AI tooling? That's fine, see [No AI tooling?](#no-ai-tooling).
 
@@ -27,7 +27,7 @@ Along the way, you [own your change](#you-own-your-change): read and understand 
 
 For anything beyond a trivial change, please open an issue before you write code. It's where we agree on *whether* to make a change and *how*, before anyone spends time building or reviewing it. Many well-loved projects work this way in one form or another (Go, Rust, Kubernetes, React, Ghostty), and it saves everyone the disappointment of a finished PR that we'd have steered differently.
 
-**Trivial changes can go straight to a PR:** typo fixes, docs improvements, and small, obvious bug fixes where there's really only one sensible way to do it. Not sure? Open the issue; that's never the wrong call.
+**Trivial changes can go straight to a PR:** typo fixes, small docs fixes, and small, obvious bug fixes where there's really only one sensible way to do it. Not sure? Open the issue; that's never the wrong call. Skipping the issue doesn't skip the [OCR review loop](#required-ocr-review-loop-before-maintainer-review); for the very smallest changes, a maintainer can [exempt](#exemptions) the PR from it instead.
 
 **What to put in the issue:**
 
@@ -36,7 +36,7 @@ For anything beyond a trivial change, please open an issue before you write code
 
 A maintainer will reply with a go-ahead or a redirect: a different approach, a smaller scope, or a reason it doesn't fit the project. **A maintainer's go-ahead in the issue thread is your signal to start building.** When you open the PR, link the issue with `Closes #123`.
 
-Whether a change needed an issue is a maintainer's judgment call, and no bot checks it. If a larger PR arrives without one, we may kindly ask to step back to an issue first, to settle the approach before more of your time goes in. That isn't a rejection.
+Whether a change needed an issue is a maintainer's judgment call, and no bot checks it. If a larger PR arrives without one, we may kindly ask to step back to an issue first, to settle the approach before more of your time goes in. That isn't a rejection: feel free to convert the PR to a draft while we talk, since drafts are never closed for inactivity.
 
 Use the [bug report](https://github.com/spencermarx/open-code-review/issues/new?template=bug_report.yml) and [feature request](https://github.com/spencermarx/open-code-review/issues/new?template=feature_request.yml) templates. For open-ended ideas that aren't a concrete proposal yet, start a [Discussion](https://github.com/spencermarx/open-code-review/discussions).
 

@@ -12,7 +12,7 @@ A bot keeps a `needs-ocr-review` label on the PR until the loop is done.
 
 <!--
 Link the issue where the approach was agreed (CONTRIBUTING.md → "Start with an issue").
-Trivial changes (a typo, docs, a small obvious fix) can skip this.
+Trivial changes (a typo, a small docs fix, a small obvious bug fix) can skip this.
 -->
 
 Closes #
