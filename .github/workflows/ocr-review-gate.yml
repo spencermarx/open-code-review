@@ -58,10 +58,9 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      # Labels and the sticky comment go through the issues API, and
-      # ensureLabels creates missing repository labels. GitHub documents
-      # `pull-requests: write` as enough for the PR-scoped calls; `issues: write`
-      # stays until label creation is verified to work without it.
+      # Needed for ensureLabels to create missing repository labels
+      # (actions/labeler documents the same requirement). Labelling the PR and
+      # its sticky comment also go through the issues API.
       issues: write
       pull-requests: write
     steps:
