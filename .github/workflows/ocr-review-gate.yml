@@ -1,0 +1,78 @@
+# OCR review gate: labels PRs that haven't completed an approved OCR review
+# loop yet (see CONTRIBUTING.md, "Required: OCR review loop before maintainer
+# review"). It's a label plus one sticky comment, not a required status check.
+#
+# SECURITY: this runs on `pull_request_target`, so it has a write-capable token
+# even for fork PRs. It therefore NEVER checks out or executes PR code: the only
+# checkout is the base ref's `.github/scripts` (sparse, no persisted
+# credentials), and the script talks to the GitHub API only. PR titles, bodies
+# and comments are untrusted data; the script validates every marker field with
+# strict patterns and never echoes raw text back. Nothing untrusted is
+# interpolated into `run:`; the PR number is passed through env.
+#
+# `pull_request_target` runs this file from the PR's *base* branch, and a PR
+# author can retarget the base to any branch here. Treat every branch's copy of
+# this workflow and `.github/scripts` as privileged: never push debugging
+# changes to them on a shared branch, and delete merged head branches.
+# Manual runs (`workflow_dispatch`) use the branch the dispatcher picks, so run
+# them from the default branch.
+#
+# Comments and labels written with GITHUB_TOKEN don't trigger workflows, so the
+# gate's own sticky comment and label changes can't cause a loop.
+
+name: OCR review gate
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, edited, labeled, unlabeled]
+  issue_comment:
+    types: [created, edited, deleted]
+  # Manual re-check (e.g. after a linked issue is accepted, or to backfill a PR
+  # that predates the gate). Only users with write access can dispatch.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'PR number to re-check'
+        required: true
+        type: number
+
+permissions: {}
+
+jobs:
+  gate:
+    name: Check OCR review loop
+    # Comment events only matter on PRs, and only from people whose markers the
+    # gate trusts (the PR author or a maintainer, mirroring isTrustedComment).
+    # Untrusted comments can't change the result, so they start no run at all.
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request &&
+        (github.event.comment.user.login == github.event.issue.user.login ||
+         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
+    # Job-level on purpose: a run whose job is skipped by `if:` never joins the
+    # group, so it can't cancel a gate run that is actually evaluating.
+    concurrency:
+      group: ocr-review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      # No `ref:` on purpose: for PR and comment events the default is the
+      # base/default branch, never the PR head (for manual runs it is the branch
+      # the dispatcher picked).
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Evaluate and label
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+        run: node .github/scripts/ocr-review-gate.ts

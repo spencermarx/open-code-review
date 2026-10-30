@@ -29,6 +29,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm nx run-many -t typecheck
+      # The workflow scripts aren't an Nx project; Node runs them via type
+      # stripping, so tsc is the only thing that checks their types.
+      - name: Typecheck workflow scripts
+        run: pnpm exec tsc -p .github/scripts/tsconfig.json
 
   lint:
     name: Lint (module boundaries)
@@ -59,6 +63,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm nx run-many -t test
+      # Dependency-free node:test suite for the OCR review gate's evaluation
+      # logic (run by Node's native type stripping).
+      - name: Workflow script tests
+        run: node --test ".github/scripts/*.test.ts"
 
   # Unit tests on the non-Linux OSes. This job exists because issue #41
   # shipped through a green PR: units ran on ubuntu only and the OS matrix
@@ -126,7 +134,13 @@ jobs:
     name: UI E2E (Playwright)
     needs: [typecheck, test]
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    # Pinned, unlike the Node-only jobs: Playwright ships browser builds and
+    # `--with-deps` package lists per OS release, so a floating label lets
+    # GitHub change the OS under an unchanged lockfile. That is how
+    # `ubuntu-latest` moving to 26.04 broke this job on Playwright 1.59
+    # ("does not support chromium on ubuntu26.04-x64"). Move this label only
+    # together with a @playwright/test version that supports the new OS.
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
