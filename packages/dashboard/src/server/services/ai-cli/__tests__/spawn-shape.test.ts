@@ -27,7 +27,7 @@ vi.mock('@open-code-review/platform', async (importOriginal) => {
   return { ...original, spawnBinary: vi.fn(), execBinary: vi.fn() }
 })
 
-import { spawnBinary } from '@open-code-review/platform'
+import { execBinary, spawnBinary } from '@open-code-review/platform'
 import { ClaudeCodeAdapter } from '../claude-adapter.js'
 import { OpenCodeAdapter } from '../opencode-adapter.js'
 import {
@@ -36,6 +36,7 @@ import {
 } from '../../../child-env.js'
 
 const spawnMock = vi.mocked(spawnBinary)
+const execMock = vi.mocked(execBinary)
 
 type FakeChild = {
   proc: ChildProcess
@@ -79,14 +80,22 @@ describe.each([
     make: () => new ClaudeCodeAdapter(),
     binary: 'claude',
     resumeArgs: (id: string) => ['--resume', id],
+    version: '2.1.308 (Claude Code)',
   },
   {
     name: 'opencode',
     make: () => new OpenCodeAdapter(),
     binary: 'opencode',
     resumeArgs: (id: string) => ['--session', id, '--continue'],
+    version: '1.19.5',
   },
-])('$name adapter spawn shape', ({ make, binary, resumeArgs }) => {
+])('$name adapter spawn shape', ({ make, binary, resumeArgs, version }) => {
+  // A supported CLI version, so query-mode spawns pass the containment gate
+  // (pinned separately in query-containment.test.ts).
+  beforeEach(() => {
+    execMock.mockReturnValue(version)
+  })
+
   it('never puts the prompt (or any part of it) in argv; delivers it on stdin and ends the stream', () => {
     const child = fakeChild()
     spawnMock.mockReturnValue(child.proc)

@@ -1029,6 +1029,35 @@ The dashboard SHALL provide an "Ask the Team" chat feature that allows users to 
 - **WHEN** the AI attempts to use tools
 - **THEN** only read-only tools SHALL be permitted: `Read`, `Grep`, `Glob`
 - **AND** any tool not in the allowed list MUST be rejected
+- **AND** this SHALL hold whatever the user-level, project-level, or inherited-environment configuration of the active AI CLI says (permission modes, allow rules, hooks, MCP servers, plugins, custom agents), on every chat turn including resumed ones
+- **AND** the adapter SHALL enforce it with restrictions the child process cannot override: an explicit tool set rather than a pre-approval list, a permission mode that denies anything not pre-approved, and isolation from the reviewed repository's own CLI configuration
+
+#### Scenario: Allowed tools — Claude Code enforcement
+
+- **GIVEN** the active adapter is Claude Code
+- **WHEN** it spawns a chat turn
+- **THEN** the turn SHALL pass `--tools=Read,Grep,Glob`, `--permission-mode=dontAsk`, `--setting-sources=user`, `--strict-mcp-config`, `--disable-slash-commands`, and `--settings` disabling all hooks and blocking reads outside the working directory
+- **AND** the tool set SHALL be given by `--tools`, not by a pre-approval list
+
+#### Scenario: Allowed tools — OpenCode enforcement
+
+- **GIVEN** the active adapter is OpenCode
+- **WHEN** it spawns a chat turn
+- **THEN** the turn SHALL run a per-spawn agent whose permission denies every tool (`"*": "deny"`) except `read` (keeping OpenCode's default `.env` read rule), `grep` and `glob`, and denies directories outside the project (`external_directory`), made the default agent with `build` and `plan` disabled, delivered via `OPENCODE_CONFIG_CONTENT`, with project configuration, external plugins and Claude Code compatibility disabled (`OPENCODE_DISABLE_PROJECT_CONFIG`, `OPENCODE_PURE`, `OPENCODE_DISABLE_CLAUDE_CODE`)
+
+#### Scenario: Allowed tools — unsupported CLI version
+
+- **GIVEN** the active AI CLI's detected version cannot enforce the restriction (Claude Code below 2.1.295; OpenCode below 1.3.4 or 2.0.0 and above), or its version cannot be determined
+- **WHEN** the user sends a chat message
+- **THEN** the server SHALL NOT spawn the AI CLI
+- **AND** it SHALL emit a `chat:error` naming the required version
+
+#### Scenario: Allowed tools — runtime backstop
+
+- **GIVEN** a chat turn is running
+- **WHEN** the AI CLI reports a call to a tool other than `Read`, `Grep` or `Glob`, or a tool result for a call it never reported
+- **THEN** the server SHALL terminate the AI CLI process tree and emit a `chat:error`
+- **AND** it SHALL NOT store that turn's answer, and SHALL clear the conversation's stored session so the next message starts a new one
 
 ---
 

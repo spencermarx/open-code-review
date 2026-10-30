@@ -8,14 +8,21 @@
  *
  * Key differences from Claude Code:
  * - `--format json` for NDJSON output (different event schema from Claude)
- * - Agent-based tool control (`--agent build` for full tools, `--agent plan` for read-only)
+ * - Agent-based tool control (`--agent build` for full tools; query mode runs a
+ *   per-spawn read-only agent — see {@link queryContainment})
  * - Session resume via `--session <id> --continue` (not `--resume`)
  * - Tool events arrive as complete objects (not separate start/stop deltas)
  * - Tool names are lowercase (bash, read, write) — normalized to PascalCase for formatToolDetail
  */
 
-import { execBinary, spawnBinary } from '@open-code-review/platform'
-import { buildFileStdio, closeFileStdio, deliverPrompt, assertNonEmptyPrompt } from './helpers.js'
+import { execBinary, spawnBinary, type ChildEnvInject } from '@open-code-review/platform'
+import {
+  buildFileStdio,
+  closeFileStdio,
+  deliverPrompt,
+  assertNonEmptyPrompt,
+  assertVersionSupported,
+} from './helpers.js'
 import type {
   AiCliAdapter,
   DetectionResult,
@@ -25,11 +32,77 @@ import type {
   SpawnResult,
 } from './types.js'
 import { writeSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { childEnv, formatChildEnvHeader } from '../../child-env.js'
 import {
   buildResumeArgs as buildResumeArgsShared,
   buildResumeCommand as buildResumeCommandShared,
 } from '@open-code-review/persistence/vendor-resume'
+
+// ── Query-mode containment ──
+
+/**
+ * OpenCode 1.x range in which {@link queryContainment} is authoritative: 1.3.4
+ * is the first release that applies `OPENCODE_CONFIG_CONTENT` after the
+ * `.opencode/` directories and honours `OPENCODE_PURE`. 2.x is a different
+ * CLI (`run` talks to a shared background service), so it is refused until
+ * assessed. Inside this range the version gate is what guarantees the
+ * contained agent below exists.
+ */
+export const QUERY_CONTAINMENT_VERSION_RANGE = { min: '1.3.4', below: '2.0.0' } as const
+
+/**
+ * Query-mode (Ask the Team) restriction. OpenCode scopes tools per agent and
+ * neither built-in agent matches the read-only set, so each query spawn runs
+ * an agent of its own:
+ *
+ * - its `permission` denies everything (`"*"`) except read, grep and glob,
+ *   and denies directories outside the project; rules evaluate last-match,
+ *   and agent rules come after user and top-level ones. `read` keeps
+ *   OpenCode's default `.env` rule;
+ * - the name is per-spawn, so no other configuration layer defines it;
+ * - it is the `default_agent`, and `build`/`plan` are disabled;
+ * - `OPENCODE_DISABLE_PROJECT_CONFIG` leaves the repository's own OpenCode
+ *   configuration unloaded, `OPENCODE_PURE` loads no external plugins, and
+ *   `OPENCODE_DISABLE_CLAUDE_CODE` skips `.claude/` compatibility.
+ *
+ * Delivered via env, which also replaces any value of these names inherited
+ * from the launch shell. Keys are limited to ones valid under 1.3.4's strict
+ * config schema.
+ */
+function queryContainment(): { agent: string; env: ChildEnvInject } {
+  const agent = `ocr-ask-${randomUUID().slice(0, 8)}`
+  const config = {
+    default_agent: agent,
+    agent: {
+      build: { disable: true },
+      plan: { disable: true },
+      [agent]: {
+        mode: 'primary',
+        permission: {
+          '*': 'deny',
+          read: { '*': 'allow', '*.env': 'deny', '*.env.*': 'deny', '*.env.example': 'allow' },
+          grep: 'allow',
+          glob: 'allow',
+          external_directory: 'deny',
+        },
+      },
+    },
+    lsp: false,
+    formatter: false,
+    share: 'disabled',
+    autoupdate: false,
+  }
+  return {
+    agent,
+    env: {
+      OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
+      OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+      OPENCODE_PURE: '1',
+      OPENCODE_DISABLE_CLAUDE_CODE: '1',
+    },
+  }
+}
 
 // ── Helpers ──
 
@@ -51,6 +124,9 @@ export class OpenCodeAdapter implements AiCliAdapter {
   // can be spawned in-agent (uniform model — see supportsPerTaskModel above).
   readonly supportsSubagentSpawn = true
 
+  /** Startup detection, reused by the query gate; see {@link assertVersionSupported}. */
+  private detection: DetectionResult | undefined
+
   buildResumeArgs(vendorSessionId: string): string[] {
     return buildResumeArgsShared('opencode', vendorSessionId)
   }
@@ -71,10 +147,11 @@ export class OpenCodeAdapter implements AiCliAdapter {
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       const match = output.match(/\d+\.\d+[\.\d]*/)
-      return { found: true, version: match?.[0] }
+      this.detection = { found: true, version: match?.[0] }
     } catch {
-      return { found: false }
+      this.detection = { found: false }
     }
+    return this.detection
   }
 
   spawn(opts: SpawnOptions): SpawnResult {
@@ -83,13 +160,19 @@ export class OpenCodeAdapter implements AiCliAdapter {
     assertNonEmptyPrompt(opts.prompt)
 
     const isWorkflow = opts.mode === 'workflow'
+    if (!isWorkflow) {
+      assertVersionSupported({
+        binary: this.binary,
+        purpose: 'Ask the Team',
+        version: (this.detection ?? this.detect()).version,
+        ...QUERY_CONTAINMENT_VERSION_RANGE,
+      })
+    }
 
-    // OpenCode uses agent-based tool control instead of allowlists:
-    //   build = full tool access (write, edit, bash, etc.)
-    //   plan  = read-only analysis (file edits and bash require approval)
-    const agent = opts.allowedTools
-      ? undefined // caller specified tools — skip agent flag and let OpenCode defaults apply
-      : isWorkflow ? 'build' : 'plan'
+    // OpenCode controls tools per agent, not per allowlist flag: workflows
+    // run the full-access `build` agent; queries run a contained agent.
+    const containment = isWorkflow ? undefined : queryContainment()
+    const agent = containment?.agent ?? 'build'
 
     // The prompt is NOT an argv element — it is delivered on stdin below
     // (issue #43): argv embedded user input + review content in process
@@ -102,9 +185,7 @@ export class OpenCodeAdapter implements AiCliAdapter {
       '--format', 'json',
     ]
 
-    if (agent) {
-      args.push('--agent', agent)
-    }
+    args.push('--agent', agent)
 
     // Session resume: --session <id> --continue
     //
@@ -146,7 +227,7 @@ export class OpenCodeAdapter implements AiCliAdapter {
     // closed inject channel (e.g. OCR_DASHBOARD_EXECUTION_UID for the
     // late-linking workflow_id flow), applied by the builder AFTER the deny
     // step — mirrors the Claude adapter.
-    const envResult = childEnv(opts.env)
+    const envResult = childEnv({ ...opts.env, ...containment?.env })
     // Provenance header into the exec log (human-only; parsers drop
     // non-JSON lines). Names only — never values.
     if (logFd !== null) {

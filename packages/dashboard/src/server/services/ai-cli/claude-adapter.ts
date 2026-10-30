@@ -18,7 +18,15 @@ import type {
   SpawnOptions,
   SpawnResult,
 } from './types.js'
-import { extractAssistantText, buildFileStdio, closeFileStdio, deliverPrompt, assertNonEmptyPrompt } from './helpers.js'
+import {
+  extractAssistantText,
+  buildFileStdio,
+  closeFileStdio,
+  deliverPrompt,
+  assertNonEmptyPrompt,
+  assertVersionSupported,
+  READ_ONLY_QUERY_TOOLS,
+} from './helpers.js'
 import { writeSync } from 'node:fs'
 import { childEnv, formatChildEnvHeader } from '../../child-env.js'
 import {
@@ -29,7 +37,42 @@ import {
 // ── Default Tool Sets ──
 
 const WORKFLOW_TOOLS = ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'TodoWrite', 'TodoRead', 'Task']
-const QUERY_TOOLS = ['Read', 'Grep', 'Glob']
+
+/**
+ * Oldest CLI whose `--tools` also covers built-in tools that register after
+ * launch (2.1.295 changelog), so the gate is by version, not by flag
+ * presence. 2.1.314 later tightened which settings `--setting-sources`
+ * excludes (auto-mode rules, saved permission consents); neither can add a
+ * tool outside `--tools` or a mode other than `dontAsk`, so it is not
+ * required here.
+ */
+export const MIN_QUERY_CONTAINMENT_VERSION = '2.1.295'
+
+/**
+ * Query-mode (Ask the Team) restriction. Each flag is explicit, so the result
+ * does not depend on the user's or the repository's Claude Code settings:
+ *
+ * - `--tools`: the complete tool set offered to the model.
+ * - `--permission-mode=dontAsk`: anything not pre-approved is denied.
+ * - `--setting-sources=user`: repository-level settings are not loaded.
+ * - `--strict-mcp-config`: no MCP servers are loaded.
+ * - `--disable-slash-commands`: messages are never expanded as commands.
+ * - `--settings`: no hooks; reads stay inside the working directory.
+ *
+ * `--flag=value` form throughout: these options take variadic values, and a
+ * space-separated list would absorb whatever argv follows it.
+ */
+const QUERY_CONTAINMENT_FLAGS = [
+  `--tools=${READ_ONLY_QUERY_TOOLS.join(',')}`,
+  '--permission-mode=dontAsk',
+  '--setting-sources=user',
+  '--strict-mcp-config',
+  '--disable-slash-commands',
+  `--settings=${JSON.stringify({
+    disableAllHooks: true,
+    permissions: { blockReadsOutsideWorkingDirectories: true },
+  })}`,
+]
 
 export class ClaudeCodeAdapter implements AiCliAdapter {
   readonly name = 'Claude Code'
@@ -39,6 +82,9 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
   readonly supportsPerTaskModel = true
   // Claude Code can spawn reviewer sub-agents via its Task tool.
   readonly supportsSubagentSpawn = true
+
+  /** Startup detection, reused by the query gate; see {@link assertVersionSupported}. */
+  private detection: DetectionResult | undefined
 
   buildResumeArgs(vendorSessionId: string): string[] {
     return buildResumeArgsShared('claude', vendorSessionId)
@@ -60,10 +106,11 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       const match = output.match(/\d+\.\d+[\.\d]*/)
-      return { found: true, version: match?.[0] }
+      this.detection = { found: true, version: match?.[0] }
     } catch {
-      return { found: false }
+      this.detection = { found: false }
     }
+    return this.detection
   }
 
   spawn(opts: SpawnOptions): SpawnResult {
@@ -72,6 +119,14 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
     assertNonEmptyPrompt(opts.prompt)
 
     const isWorkflow = opts.mode === 'workflow'
+    if (!isWorkflow) {
+      assertVersionSupported({
+        binary: this.binary,
+        purpose: 'Ask the Team',
+        version: (this.detection ?? this.detect()).version,
+        min: MIN_QUERY_CONTAINMENT_VERSION,
+      })
+    }
     // Workflow turn budget needs to cover the whole 8-phase orchestration
     // plus per-reviewer fan-out. A 6-reviewer round measured at roughly
     // 45–50 turns just to reach `synthesis` (every `ocr state advance`,
@@ -86,7 +141,6 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
     // and multi-round flows. Still bounded so a runaway loop terminates,
     // but high enough that real workflows complete in one shot.
     const maxTurns = opts.maxTurns ?? (isWorkflow ? 500 : 1)
-    const tools = opts.allowedTools ?? (isWorkflow ? WORKFLOW_TOOLS : QUERY_TOOLS)
 
     // Build Claude CLI flags
     const flags: string[] = [
@@ -95,7 +149,7 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
       '--verbose',
       '--include-partial-messages',
       '--max-turns', String(maxTurns),
-      '--allowedTools', ...tools,
+      ...(isWorkflow ? ['--allowedTools', ...WORKFLOW_TOOLS] : QUERY_CONTAINMENT_FLAGS),
     ]
 
     // Chat resume support

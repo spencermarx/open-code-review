@@ -32,7 +32,14 @@ export type {
   StreamEvent,
 } from './types.js'
 export { EventJournalAppender, eventJournalPath, eventsDir, readEventJournal } from '../event-journal.js'
-export { formatToolDetail, extractAssistantText, writeTempPrompt, cleanupTempFile } from './helpers.js'
+export {
+  formatToolDetail,
+  extractAssistantText,
+  writeTempPrompt,
+  cleanupTempFile,
+  isReadOnlyQueryTool,
+  UnsupportedCliVersionError,
+} from './helpers.js'
 export { ClaudeCodeAdapter } from './claude-adapter.js'
 export { OpenCodeAdapter } from './opencode-adapter.js'
 

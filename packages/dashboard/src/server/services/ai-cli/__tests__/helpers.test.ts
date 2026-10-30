@@ -2,7 +2,14 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { formatToolDetail, extractAssistantText, buildFileStdio, closeFileStdio } from '../helpers.js'
+import {
+  formatToolDetail,
+  extractAssistantText,
+  buildFileStdio,
+  closeFileStdio,
+  compareVersions,
+  isReadOnlyQueryTool,
+} from '../helpers.js'
 
 // ── formatToolDetail ─────────────────────────────────────────────────────────
 
@@ -212,5 +219,26 @@ describe('buildFileStdio', () => {
     expect(stdio).toEqual(['pipe', 'pipe', 'pipe'])
     expect(logFd).toBeNull()
     expect(logPath).toBeUndefined()
+  })
+})
+
+describe('compareVersions', () => {
+  it('compares numerically per dot segment', () => {
+    expect(compareVersions('2.1.295', '2.1.295')).toBe(0)
+    expect(compareVersions('2.1.300', '2.1.295')).toBe(1)
+    expect(compareVersions('2.1.29', '2.1.295')).toBe(-1)
+    expect(compareVersions('1.10.0', '1.9.9')).toBe(1)
+    expect(compareVersions('2.0', '2.0.0')).toBe(0)
+  })
+})
+
+describe('isReadOnlyQueryTool', () => {
+  it('accepts exactly Read, Grep and Glob, in either vendor casing', () => {
+    for (const tool of ['Read', 'Grep', 'Glob', 'read', 'grep', 'glob']) {
+      expect(isReadOnlyQueryTool(tool)).toBe(true)
+    }
+    for (const tool of ['Bash', 'bash', 'Write', 'Edit', 'Task', 'WebFetch', 'mcp__x__read', 'ReadFile']) {
+      expect(isReadOnlyQueryTool(tool)).toBe(false)
+    }
   })
 })
