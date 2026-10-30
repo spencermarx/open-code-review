@@ -106,7 +106,8 @@ export function formatChildEnvHeader(result: ChildEnvResult): string {
  * of the frozen base and the compiled-in constants, so the recomputation is
  * identical by construction. Injections are deliberately not reported here —
  * they are irrelevant to a "why didn't my variable reach the child"
- * diagnosis (they only ever ADD the execution UID).
+ * diagnosis (they only ever add OCR-owned values: the execution UID, or a
+ * chat spawn's OpenCode restriction).
  */
 export function childEnvFailureHint(): string {
   const base = getChildEnvBase()

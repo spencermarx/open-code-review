@@ -83,9 +83,17 @@ const NODE_OPTIONS = "NODE_OPTIONS";
  * at runtime — the closed TypeScript type on `inject` erases at compile
  * time and reviewers rotate; the throw does not. Additions require the same
  * OpenSpec amendment path as denylist entries.
+ *
+ * The `OPENCODE_*` keys carry the OpenCode adapter's read-only containment
+ * for Ask the Team; injecting them also overrides any ambient value the
+ * user's shell exported.
  */
 export const ALLOWED_INJECT_KEYS = Object.freeze([
   "OCR_DASHBOARD_EXECUTION_UID",
+  "OPENCODE_CONFIG_CONTENT",
+  "OPENCODE_DISABLE_PROJECT_CONFIG",
+  "OPENCODE_PURE",
+  "OPENCODE_DISABLE_CLAUDE_CODE",
 ] as const);
 
 type AllowedInjectKey = (typeof ALLOWED_INJECT_KEYS)[number];
@@ -187,6 +195,15 @@ export function buildChildEnvForPlatform(
       }
       const value = inject[key as AllowedInjectKey];
       if (value === undefined) continue;
+      if (windows) {
+        // A case variant of an injected name would be read as the same
+        // variable by the child; drop it so the injection is the only value.
+        for (const existing of Object.keys(env)) {
+          if (existing !== key && existing.toLowerCase() === key.toLowerCase()) {
+            delete env[existing];
+          }
+        }
+      }
       env[key] = value;
       injected.push(key);
     }

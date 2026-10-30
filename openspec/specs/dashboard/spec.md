@@ -1892,12 +1892,20 @@ Secret-shaped and third-party provider names are categorically inadmissible.
 Every child-carrying spawn SHALL construct its environment through the
 single builder function (documented argument-only probe exceptions per the
 Shell-Parity requirement). Injected keys SHALL be limited to a
-compile-time-frozen allowed set (currently `OCR_DASHBOARD_EXECUTION_UID`),
+compile-time-frozen allowed set (see Scenario: Registered injections),
 enforced by a runtime error at the builder. Injected entries with undefined
 values SHALL be omitted from both the output env and the injected-names
 list. No socket-, HTTP-, or agent-derived value SHALL become or override
 child env. Lint SHALL flag both divergence vectors: direct `process.env`
 reads in spawn modules, and spawn calls whose arguments omit `env`.
+
+#### Scenario: Registered injections
+
+- **GIVEN** a spawn path injects variables into a child's environment
+- **WHEN** the child env is built
+- **THEN** only these registered names SHALL be injectable: `OCR_DASHBOARD_EXECUTION_UID` (workflow linking) and, for the OpenCode adapter's chat containment, `OPENCODE_CONFIG_CONTENT`, `OPENCODE_DISABLE_PROJECT_CONFIG`, `OPENCODE_PURE` and `OPENCODE_DISABLE_CLAUDE_CODE`
+- **AND** an injected value SHALL replace any inherited value of the same name (on Windows, any case variant of it)
+- **AND** any other injection key SHALL be rejected at runtime
 
 #### Scenario: Unregistered inject key rejected at runtime
 
