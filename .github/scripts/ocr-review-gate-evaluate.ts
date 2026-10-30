@@ -77,6 +77,7 @@ export interface GatePullRequest {
 export interface LinkedIssue {
   number: number
   labels: string[]
+  open: boolean
 }
 
 export interface GateInput {
@@ -92,7 +93,15 @@ export type GateReason =
   | { code: 'too-few-personas'; round: number; personas: string[] }
   | { code: 'head-not-covered'; markerSha: string; headSha: string }
   | { code: 'unconventional-title' }
-  | { code: 'issue-required'; type: string; breaking: boolean; linkedIssues: number[] }
+  | {
+      code: 'issue-required'
+      type: string
+      breaking: boolean
+      /** Open linked issues still awaiting `accepted`: a wait on maintainers. */
+      waitingIssues: number[]
+      /** Closed linked issues without `accepted` (e.g. declined). */
+      closedIssues: number[]
+    }
 
 export interface GateEvidence {
   headSha: string
@@ -266,9 +275,12 @@ export function coveringMarker(latestReview: ReviewMarker, after: LoopMarker[]):
   return addresses.at(-1) ?? latestReview
 }
 
-/** A linked issue waiting for `accepted` is the one failure a maintainer owes. */
+/**
+ * An open linked issue waiting for `accepted` is the one failure a maintainer
+ * owes. A closed one (declined) is back on the contributor.
+ */
 function isMaintainerWait(reason: GateReason): boolean {
-  return reason.code === 'issue-required' && reason.linkedIssues.length > 0
+  return reason.code === 'issue-required' && reason.waitingIssues.length > 0
 }
 
 const LOOP_REASONS: ReadonlySet<GateReason['code']> = new Set(['no-review', 'not-approved', 'too-few-personas', 'head-not-covered'])
@@ -366,7 +378,8 @@ export function evaluateGate({ pr, comments, linkedIssues }: GateInput): GateRes
       code: 'issue-required',
       type: title.type,
       breaking: title.breaking,
-      linkedIssues: linkedIssues.map((i) => i.number),
+      waitingIssues: linkedIssues.filter((i) => i.open).map((i) => i.number),
+      closedIssues: linkedIssues.filter((i) => !i.open).map((i) => i.number),
     })
   }
 
@@ -416,14 +429,19 @@ function renderReason(reason: GateReason, ctx: RenderContext): string {
       return `The PR title should look like \`type: summary\` (with a space after the colon) using one of ${TITLE_TYPES}, so I can tell whether an accepted issue is needed. Please retitle the PR.`
     case 'issue-required': {
       const kind = reason.breaking ? 'Breaking changes' : `\`${reason.type}:\` PRs`
-      const refs = reason.linkedIssues.map((n) => `#${n}`).join(', ')
-      const linked =
-        reason.linkedIssues.length === 0
-          ? ' Link one with `Closes #<number>` in the description.'
-          : reason.linkedIssues.length === 1
-            ? ` The linked issue (${refs}) doesn't have the \`${LABELS.accepted}\` label yet.`
-            : ` The linked issues (${refs}) don't have the \`${LABELS.accepted}\` label yet.`
-      return `${kind} need a linked issue a maintainer has marked \`${LABELS.accepted}\` ([why](${docsLink(ctx, 'open-an-issue-first-for-non-trivial-changes')})).${linked} Once it's accepted, comment here or edit the PR and I'll re-check.`
+      const refs = (numbers: number[]) => numbers.map((n) => `#${n}`).join(', ')
+      const plural = (numbers: number[]) => numbers.length > 1
+      let linked: string
+      if (reason.waitingIssues.length > 0) {
+        const w = reason.waitingIssues
+        linked = ` The linked issue${plural(w) ? 's' : ''} (${refs(w)}) ${plural(w) ? "don't" : "doesn't"} have the \`${LABELS.accepted}\` label yet. Once it's accepted, comment here or edit the PR and I'll re-check.`
+      } else if (reason.closedIssues.length > 0) {
+        const c = reason.closedIssues
+        linked = ` The linked issue${plural(c) ? 's' : ''} (${refs(c)}) ${plural(c) ? 'are' : 'is'} closed without the \`${LABELS.accepted}\` label. Link an open issue instead, or ask us here if you think it should be reopened.`
+      } else {
+        linked = " Link one with `Closes #<number>` in the description; once it's accepted, I'll re-check."
+      }
+      return `${kind} need a linked issue a maintainer has marked \`${LABELS.accepted}\` ([why](${docsLink(ctx, 'open-an-issue-first-for-non-trivial-changes')})).${linked}`
     }
   }
 }
@@ -441,7 +459,7 @@ export function renderStickyComment(result: GateResult, ctx: RenderContext): str
 
   if (result.status === 'fail') {
     const labels = gateLabels(result)
-    const loopMissing = result.reasons.some((r) => LOOP_REASONS.has(r.code)) || result.evidence.rejectedMarkers > 0
+    const loopMissing = result.reasons.some((r) => LOOP_REASONS.has(r.code))
     const reasons = result.reasons.map((r) => `- ${renderReason(r, ctx)}`)
     if (result.evidence.rejectedMarkers > 0) reasons.push(`- ${renderRejectedHint(result.evidence.rejectedMarkers, ctx)}`)
     const heading = loopMissing
@@ -462,9 +480,11 @@ export function renderStickyComment(result: GateResult, ctx: RenderContext): str
           '',
         ]
       : []
-    const inactivity = labels.needsReview
-      ? ` While \`${LABELS.needsReview}\` is on this PR it won't be queued for maintainer review. If it sits inactive for 14 days I'll send a friendly reminder, and 14 days after that it will be closed; it can be reopened any time once everything above is done.`
-      : ` \`${LABELS.needsIssue}\` means we're waiting on a maintainer, so this PR won't be closed for inactivity.`
+    // Mirrors the reminders workflow, which exempts needs-accepted-issue even
+    // when needs-ocr-review is also present.
+    const inactivity = labels.needsIssue
+      ? ` \`${LABELS.needsIssue}\` means we're waiting on a maintainer, so this PR won't be closed for inactivity while that's pending.`
+      : ` While \`${LABELS.needsReview}\` is on this PR it won't be queued for maintainer review. If it sits inactive for 14 days I'll send a friendly reminder, and 14 days after that it will be closed; it can be reopened any time once everything above is done.`
     return [
       STICKY_MARKER,
       heading,

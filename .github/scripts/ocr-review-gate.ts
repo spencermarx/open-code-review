@@ -24,7 +24,7 @@ const BOT_LOGIN = 'github-actions[bot]'
 const MAX_COMMENT_PAGES = 30
 
 const LABEL_SPECS: Record<string, { color: string; description: string }> = {
-  [LABELS.needsReview]: { color: 'fbca04', description: 'Waiting on an approved OCR review loop before maintainer review' },
+  [LABELS.needsReview]: { color: 'fbca04', description: 'Contributor step left before maintainer review: OCR review loop, PR title or linked issue' },
   [LABELS.needsIssue]: { color: 'fef2c0', description: 'Waiting on a maintainer to accept the linked issue (issue-first)' },
   [LABELS.exempt]: { color: 'c5def5', description: 'Maintainer-applied: OCR review loop not required (typos, trivial docs)' },
   [LABELS.accepted]: { color: '0e8a16', description: 'Maintainer-accepted: ready for a pull request' },
@@ -57,21 +57,31 @@ class HttpError extends Error {
   }
 }
 
-async function request(method: string, url: string, body?: unknown): Promise<Response> {
-  const res = await fetch(url, {
-    method,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'User-Agent': 'ocr-review-gate',
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    // Never follow a redirect: e.g. a transferred issue would otherwise be read
-    // from another repository and its labels trusted as if they were local.
-    redirect: 'error',
-  })
+/**
+ * Never follows a redirect: e.g. a transferred issue would otherwise be read
+ * from another repository and its labels trusted as if they were local.
+ * `'error'` (the default) fails the run; `'manual'` surfaces the 3xx as an
+ * HttpError so a caller can treat it as "not here".
+ */
+async function request(method: string, url: string, body?: unknown, redirect: 'error' | 'manual' = 'error'): Promise<Response> {
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'ocr-review-gate',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      redirect,
+    })
+  } catch (err) {
+    // fetch's own errors ("fetch failed") don't say which call failed.
+    throw new Error(`${method} ${url} failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 500)
     throw new HttpError(res.status, `${method} ${url} -> ${res.status}: ${detail}`)
@@ -115,6 +125,7 @@ interface ApiComment {
 }
 interface ApiIssue {
   number: number
+  state: string
   labels: ApiLabel[]
   pull_request?: unknown
 }
@@ -165,7 +176,7 @@ interface ClosingIssuesResponse {
     repository?: {
       pullRequest?: {
         closingIssuesReferences?: {
-          nodes: { number: number; repository: { nameWithOwner: string }; labels: { nodes: ApiLabel[] } }[]
+          nodes: { number: number; state: string; repository: { nameWithOwner: string }; labels: { nodes: ApiLabel[] } }[]
         }
       }
     }
@@ -185,7 +196,7 @@ async function linkedIssues(body: string): Promise<LinkedIssue[]> {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
           closingIssuesReferences(first: 10) {
-            nodes { number repository { nameWithOwner } labels(first: 50) { nodes { name } } }
+            nodes { number state repository { nameWithOwner } labels(first: 50) { nodes { name } } }
           }
         }
       }
@@ -196,16 +207,20 @@ async function linkedIssues(body: string): Promise<LinkedIssue[]> {
   if (json.errors) console.log(`::warning::closingIssuesReferences query returned errors; falling back to the PR body`)
   for (const node of json.data?.repository?.pullRequest?.closingIssuesReferences?.nodes ?? []) {
     if (node.repository.nameWithOwner.toLowerCase() !== repo.toLowerCase()) continue
-    found.set(node.number, { number: node.number, labels: node.labels.nodes.map((l) => l.name) })
+    found.set(node.number, { number: node.number, labels: node.labels.nodes.map((l) => l.name), open: node.state === 'OPEN' })
   }
   for (const number of parseClosingRefs(body)) {
     if (found.has(number)) continue
     try {
-      const issue = await rest<ApiIssue>('GET', `/repos/${owner}/${name}/issues/${number}`)
+      const res = await request('GET', `${apiUrl}/repos/${owner}/${name}/issues/${number}`, undefined, 'manual')
+      const issue = (await res.json()) as ApiIssue
       if (issue.pull_request) continue
-      found.set(number, { number, labels: issue.labels.map((l) => l.name) })
+      found.set(number, { number, labels: issue.labels.map((l) => l.name), open: issue.state === 'open' })
     } catch (err) {
-      if (!(err instanceof HttpError) || (err.status !== 404 && err.status !== 410)) throw err
+      // 404/410: no such issue. 3xx: transferred to another repository, so not
+      // linked here (and its labels must not be trusted).
+      const notHere = err instanceof HttpError && (err.status === 404 || err.status === 410 || (err.status >= 300 && err.status < 400))
+      if (!notHere) throw err
     }
   }
   return [...found.values()]

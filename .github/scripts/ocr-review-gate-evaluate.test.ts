@@ -354,15 +354,15 @@ describe('classifyTitle and issue-first', () => {
   })
 
   it('fails a feat PR whose linked issue is not accepted', () => {
-    const result = evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: [{ number: 12, labels: ['enhancement'] }] })
-    assert.equal(result.status === 'fail' && result.reasons[0]?.code === 'issue-required' && result.reasons[0].linkedIssues[0], 12)
+    const result = evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: [{ number: 12, labels: ['enhancement'], open: true }] })
+    assert.equal(result.status === 'fail' && result.reasons[0]?.code === 'issue-required' && result.reasons[0].waitingIssues[0], 12)
   })
 
   it('passes a feat PR linked to an accepted issue', () => {
     const result = evaluate({
       pr: pr({ title: 'feat: x' }),
       comments: approved(),
-      linkedIssues: [{ number: 3, labels: [] }, { number: 12, labels: ['enhancement', LABELS.accepted] }],
+      linkedIssues: [{ number: 3, labels: [], open: true }, { number: 12, labels: ['enhancement', LABELS.accepted], open: true }],
     })
     assert.equal(result.status, 'pass')
   })
@@ -412,9 +412,23 @@ describe('gateLabels', () => {
   })
 
   it('marks only a linked-but-unaccepted issue as a maintainer wait', () => {
-    const linked = [{ number: 12, labels: [] }]
+    const linked = [{ number: 12, labels: [], open: true }]
     assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: linked })), { needsReview: false, needsIssue: true })
     assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), linkedIssues: linked })), { needsReview: true, needsIssue: true })
+  })
+
+  it('puts a PR whose only linked issue is closed (declined) back on the contributor', () => {
+    const closed = [{ number: 9, labels: [], open: false }]
+    const result = evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: closed })
+    assert.deepEqual(gateLabels(result), { needsReview: true, needsIssue: false })
+    assert.match(renderStickyComment(result, ctx) ?? '', /The linked issue \(#9\) is closed without the `accepted` label\. Link an open issue instead/)
+    const mixed = [...closed, { number: 10, labels: [], open: true }]
+    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: mixed })), { needsReview: false, needsIssue: true })
+  })
+
+  it('still accepts an accepted issue that has since been closed', () => {
+    const result = evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: [{ number: 9, labels: [LABELS.accepted], open: false }] })
+    assert.equal(result.status, 'pass')
   })
 
   it('keeps contributor-owned work, including linking an issue at all, on needs-ocr-review', () => {
@@ -468,13 +482,27 @@ describe('workflow and repo contracts', () => {
     assert.match(reminders, new RegExp(`exempt-pr-labels: .*${LABELS.exempt}`))
   })
 
-  it('never lets an issue form apply a label the gate trusts', () => {
-    const forms = readdirSync(new URL('../ISSUE_TEMPLATE/', import.meta.url)).filter((f) => /\.ya?ml$/.test(f) && f !== 'config.yml')
-    assert.ok(forms.length > 0)
-    for (const form of forms) {
-      const labels = /^labels:\s*(.*)$/m.exec(read(`.github/ISSUE_TEMPLATE/${form}`))?.[1] ?? ''
-      for (const trusted of [LABELS.accepted, LABELS.exempt]) assert.ok(!labels.includes(trusted), `${form} applies ${trusted}`)
+  it('never lets an issue template apply a label the gate trusts', () => {
+    const templates = readdirSync(new URL('../ISSUE_TEMPLATE/', import.meta.url)).filter((f) => /\.(ya?ml|md)$/.test(f) && f !== 'config.yml')
+    assert.ok(templates.length > 0)
+    for (const template of templates) {
+      // The whole `labels:` value: inline (`[a, b]` / `a, b`) or a block list
+      // of indented `- item` lines (YAML forms and Markdown front matter alike).
+      const labels = /^labels:[^\n]*(?:\n[ \t]+-[^\n]*)*/m.exec(read(`.github/ISSUE_TEMPLATE/${template}`))?.[0] ?? ''
+      for (const trusted of [LABELS.accepted, LABELS.exempt]) assert.ok(!labels.includes(trusted), `${template} applies ${trusted}`)
     }
+  })
+
+  it('reads labels from block-style lists too', () => {
+    const block = 'name: x\nlabels:\n  - bug\n  - accepted\nbody: []'
+    assert.ok((/^labels:[^\n]*(?:\n[ \t]+-[^\n]*)*/m.exec(block)?.[0] ?? '').includes('accepted'))
+  })
+
+  it('lets only the linked-issue lookup see a redirect; every other call refuses them', () => {
+    const runner = read('.github/scripts/ocr-review-gate.ts')
+    assert.match(runner, /redirect: 'error' \| 'manual' = 'error'/)
+    assert.equal(runner.match(/'manual'\)/g)?.length, 1, 'exactly one call site may opt into manual redirects')
+    assert.match(runner, /\/issues\/\$\{number\}`, undefined, 'manual'\)/)
   })
 })
 
@@ -593,8 +621,8 @@ describe('rendering', () => {
       [evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,quality', OLD))] }), /covers `bbbbbbb`, but the PR head is now `aaaaaaa`\. Commits pushed after the loop need another review round/],
       [evaluate({ pr: pr({ title: 'Update stuff' }) }), /should look like `type: summary` \(with a space after the colon\) using one of `feat`, .*`revert`/],
       [evaluate({ pr: pr({ title: 'feat: x' }) }), /`feat:` PRs need a linked issue .* Link one with `Closes #<number>`/],
-      [evaluate({ pr: pr({ title: 'fix!: x' }), linkedIssues: [{ number: 12, labels: [] }] }), /Breaking changes need .* The linked issue \(#12\) doesn't have/],
-      [evaluate({ pr: pr({ title: 'feat: x' }), linkedIssues: [{ number: 1, labels: [] }, { number: 2, labels: [] }] }), /The linked issues \(#1, #2\) don't have/],
+      [evaluate({ pr: pr({ title: 'fix!: x' }), linkedIssues: [{ number: 12, labels: [], open: true }] }), /Breaking changes need .* The linked issue \(#12\) doesn't have/],
+      [evaluate({ pr: pr({ title: 'feat: x' }), linkedIssues: [{ number: 1, labels: [], open: true }, { number: 2, labels: [], open: true }] }), /The linked issues \(#1, #2\) don't have/],
     ]
     for (const [result, pattern] of cases) assert.match(renderStickyComment(result, ctx) ?? '', pattern)
   })
@@ -610,7 +638,7 @@ describe('rendering', () => {
 
   it('tells a contributor with an approved loop that only the issue decision is left', () => {
     const approvedLoop = [comment(review(1, 'APPROVE', 'principal,quality'))]
-    const body = renderStickyComment(evaluate({ pr: pr({ title: 'feat: x' }), comments: approvedLoop, linkedIssues: [{ number: 12, labels: [] }] }), ctx) ?? ''
+    const body = renderStickyComment(evaluate({ pr: pr({ title: 'feat: x' }), comments: approvedLoop, linkedIssues: [{ number: 12, labels: [], open: true }] }), ctx) ?? ''
     assert.match(body, /### OCR review gate: waiting on an accepted issue/)
     assert.match(body, /Your OCR review loop is complete ✅/)
     assert.match(body, /won't be closed for inactivity/)
@@ -632,6 +660,24 @@ describe('rendering', () => {
       assert.ok(!body.includes('OCR review loop: not complete yet'))
       assert.match(body, /14 days/)
     }
+  })
+
+  it('keeps "almost there" when a stray malformed marker follows an approved loop', () => {
+    const comments = [
+      comment(review(1, 'APPROVE', 'principal,quality')),
+      comment(`<!-- ocr-review-loop:address round=final sha=NOTASHA -->`),
+    ]
+    const body = renderStickyComment(evaluate({ pr: pr({ title: 'Update stuff' }), comments }), ctx) ?? ''
+    assert.match(body, /### OCR review gate: almost there/)
+    assert.match(body, /1 comment has an `ocr-review-loop:` marker I couldn't use/)
+    assert.ok(!body.includes('How to finish'))
+  })
+
+  it('never promises a close when a maintainer wait pauses the clock, even with the loop missing', () => {
+    const body = renderStickyComment(evaluate({ pr: pr({ title: 'feat: x' }), linkedIssues: [{ number: 12, labels: [], open: true }] }), ctx) ?? ''
+    assert.match(body, /### OCR review loop: not complete yet/)
+    assert.match(body, /won't be closed for inactivity while that's pending/)
+    assert.ok(!body.includes('14 days'))
   })
 
   it('names both command styles for non-Claude-Code tools', () => {
