@@ -1,7 +1,8 @@
 <!--
 Thanks for contributing! Before a maintainer reviews this PR, please complete the
 OCR review loop (see CONTRIBUTING.md → "Required: OCR review loop before maintainer review").
-A bot keeps a `needs-ocr-review` label on the PR until the loop is approved and covers the latest commit.
+A bot keeps a `needs-ocr-review` label on the PR while something is on your side (the loop, the title or
+linking an issue), and `needs-accepted-issue` while a linked issue is waiting on a maintainer.
 -->
 
 ## Summary
