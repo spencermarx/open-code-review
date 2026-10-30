@@ -7,8 +7,8 @@
 # checkout is the base ref's `.github/scripts` (sparse, no persisted
 # credentials), and the script talks to the GitHub API only. PR comments are
 # untrusted data; the script validates every marker field with strict patterns
-# and never echoes raw text back. Nothing untrusted is
-# interpolated into `run:`; the PR number is passed through env.
+# and never echoes raw text back. Nothing untrusted is interpolated into `run:`;
+# the PR number is passed through env.
 #
 # `pull_request_target` runs this file from the PR's *base* branch, and a PR
 # author can retarget the base to any branch here. Treat every branch's copy of
@@ -58,6 +58,10 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      # Labels and the sticky comment go through the issues API, and
+      # ensureLabels creates missing repository labels. GitHub documents
+      # `pull-requests: write` as enough for the PR-scoped calls; `issues: write`
+      # stays until label creation is verified to work without it.
       issues: write
       pull-requests: write
     steps:

@@ -44,7 +44,7 @@ class HttpError extends Error {
   }
 }
 
-/** Never follows a redirect: every call must be answered by this repository's API. */
+/** Never follows a redirect: a 3xx fails the run instead of sending the token elsewhere. */
 async function request(method: string, url: string, body?: unknown): Promise<Response> {
   let res: Response
   try {

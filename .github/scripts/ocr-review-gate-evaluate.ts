@@ -337,6 +337,15 @@ export function renderStickyComment(result: GateResult, ctx: RenderContext): str
   if (result.status === 'fail') {
     const reasons = result.reasons.map((r) => `- ${renderReason(r)}`)
     if (result.evidence.rejectedMarkers > 0) reasons.push(`- ${renderRejectedHint(result.evidence.rejectedMarkers, ctx)}`)
+    // Advice only, and only before the first round: once the loop is under
+    // way it's too late to help, and whether a change needed an issue is a
+    // maintainer's call.
+    const issueHint = result.evidence.latestReview
+      ? []
+      : [
+          `Bigger change that hasn't been discussed in an issue yet? It's worth [starting with one](${docsLink(ctx, 'start-with-an-issue')}) so we can agree on the approach before you put more time in. That's a conversation with a maintainer, not something I check.`,
+          '',
+        ]
     return [
       STICKY_MARKER,
       '### OCR review loop: not complete yet',
@@ -353,9 +362,7 @@ export function renderStickyComment(result: GateResult, ctx: RenderContext): str
       `- **Other AI tools:** run \`/ocr:review\` and \`/ocr:address\` (\`/ocr-review\` and \`/ocr-address\` in Windsurf and other tools with flat command names) round by round, and post each round with the markers described in the [manual fallback](${docsLink(ctx, 'other-ai-tools-manual-fallback')}).`,
       `- **No AI tooling?** No problem. [Open an issue](${ctx.repoUrl}/issues/new/choose) describing the change and a maintainer can pick it up or exempt this PR.`,
       '',
-      // Advice only: whether a change needed an issue is a maintainer's call.
-      `Bigger change that hasn't been discussed in an issue yet? It's worth [starting with one](${docsLink(ctx, 'start-with-an-issue')}) so we can agree on the approach before you put more time in. That's a conversation with a maintainer, not something I check.`,
-      '',
+      ...issueHint,
       `I re-check automatically when you push or comment here (comments from you or a maintainer). While \`${LABELS.needsReview}\` is on this PR it won't be queued for maintainer review. If it sits inactive for 14 days I'll send a friendly reminder, and 14 days after that it will be closed; it can be reopened any time once the loop is done.`,
       '',
       `<sub>Checked head \`${short(result.evidence.headSha)}\`. This is a label, not a required status check.</sub>`,

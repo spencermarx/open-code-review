@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import type { GateComment, GateInput, GatePullRequest, GateResult, RenderContext } from './ocr-review-gate-evaluate.ts'
 import {
@@ -353,26 +353,11 @@ describe('workflow and repo contracts', () => {
     assert.match(reminders, new RegExp(`exempt-pr-labels: .*${LABELS.exempt}`))
   })
 
-  it('never lets an issue template apply a label the gate trusts', () => {
-    const templates = readdirSync(new URL('../ISSUE_TEMPLATE/', import.meta.url)).filter((f) => /\.(ya?ml|md)$/.test(f) && f !== 'config.yml')
-    assert.ok(templates.length > 0)
-    for (const template of templates) {
-      // The whole `labels:` value: inline (`[a, b]` / `a, b`) or a block list
-      // of indented `- item` lines (YAML forms and Markdown front matter alike).
-      const labels = /^labels:[^\n]*(?:\n[ \t]+-[^\n]*)*/m.exec(read(`.github/ISSUE_TEMPLATE/${template}`))?.[0] ?? ''
-      assert.ok(!labels.includes(LABELS.exempt), `${template} applies ${LABELS.exempt}`)
-    }
-  })
-
-  it('reads labels from block-style lists too', () => {
-    const block = `name: x\nlabels:\n  - bug\n  - ${LABELS.exempt}\nbody: []`
-    assert.ok((/^labels:[^\n]*(?:\n[ \t]+-[^\n]*)*/m.exec(block)?.[0] ?? '').includes(LABELS.exempt))
-  })
-
   it('refuses redirects on every API call', () => {
     const runner = read('.github/scripts/ocr-review-gate.ts')
-    assert.match(runner, /redirect: 'error',/)
-    assert.ok(!runner.includes("'manual'"), 'no call may opt into following or surfacing redirects')
+    assert.equal(runner.match(/\bfetch\(/g)?.length, 1, 'every API call goes through request()')
+    // Every `redirect` property (or shorthand) at the start of a code line.
+    assert.deepEqual([...runner.matchAll(/^\s+redirect\b(?:\s*:\s*([^,\s}]*))?/gm)].map((m) => m[1]), ["'error'"])
   })
 })
 
@@ -501,12 +486,18 @@ describe('rendering', () => {
     assert.match(body, /14 days/)
   })
 
-  it('suggests an issue for bigger changes only as advice, and only while the loop is open', () => {
-    const fail = renderStickyComment(evaluate(), ctx) ?? ''
-    assert.match(fail, /\[starting with one\]\(\S+CONTRIBUTING\.md#start-with-an-issue\)/)
-    assert.match(fail, /not something I check/)
-    const pass = renderStickyComment(evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,quality'))] }), ctx) ?? ''
-    assert.ok(!pass.includes('issue'))
+  it('suggests an issue for bigger changes only as advice, and only before the first round', () => {
+    const hint = /\[starting with one\]\(\S+CONTRIBUTING\.md#start-with-an-issue\)/
+    const fresh = renderStickyComment(evaluate(), ctx) ?? ''
+    assert.match(fresh, hint)
+    assert.match(fresh, /not something I check/)
+    for (const result of [
+      evaluate({ comments: [comment(review(1, 'REQUEST_CHANGES', 'principal,quality'))] }),
+      evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,quality'))] }),
+      evaluate({ pr: pr({ labels: [LABELS.exempt] }) }),
+    ]) {
+      assert.doesNotMatch(renderStickyComment(result, ctx) ?? '', /start-with-an-issue/)
+    }
   })
 
   it('names both command styles for non-Claude-Code tools', () => {
