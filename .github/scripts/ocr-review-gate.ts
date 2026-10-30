@@ -13,6 +13,7 @@ import {
   STICKY_MARKER,
   classifyTitle,
   evaluateGate,
+  gateLabels,
   parseClosingRefs,
   renderStickyComment,
   renderSummary,
@@ -23,6 +24,7 @@ const MAX_COMMENT_PAGES = 30
 
 const LABEL_SPECS: Record<string, { color: string; description: string }> = {
   [LABELS.needsReview]: { color: 'fbca04', description: 'Waiting on an approved OCR review loop before maintainer review' },
+  [LABELS.needsIssue]: { color: 'fef2c0', description: 'Waiting on a maintainer to accept the linked issue (issue-first)' },
   [LABELS.exempt]: { color: 'c5def5', description: 'Maintainer-applied: OCR review loop not required (typos, trivial docs)' },
   [LABELS.accepted]: { color: '0e8a16', description: 'Maintainer-accepted: ready for a pull request' },
   [LABELS.stale]: { color: 'd4c5f9', description: 'Reminder sent: OCR review loop still pending' },
@@ -256,6 +258,7 @@ async function main(): Promise<void> {
     writeSummary(renderSummary(early, ctx))
     return
   }
+  labelOnCrash = early.status !== 'exempt'
 
   await ensureLabels()
   const apiComments = await listComments()
@@ -274,24 +277,33 @@ async function main(): Promise<void> {
   const result: GateResult = evaluateGate({ pr, comments, linkedIssues: issues })
   const sticky = renderStickyComment(result, ctx)
 
-  if (result.status === 'fail') {
-    await addLabel(labels, LABELS.needsReview)
-    await syncStickyComment(apiComments, sticky, true)
-  } else {
-    await removeLabel(labels, LABELS.needsReview)
-    await removeLabel(labels, LABELS.stale)
-    // Never post a fresh comment just to say "pass"; only update one we left.
-    await syncStickyComment(apiComments, sticky, false)
-  }
+  const want = gateLabels(result)
+  await (want.needsReview ? addLabel : removeLabel)(labels, LABELS.needsReview)
+  await (want.needsIssue ? addLabel : removeLabel)(labels, LABELS.needsIssue)
+  if (!want.needsReview) await removeLabel(labels, LABELS.stale)
+  // Never post a fresh comment just to say "pass"; only update one we left.
+  await syncStickyComment(apiComments, sticky, result.status === 'fail')
 
   console.log(`OCR review gate for #${prNumber}: ${result.status}`)
   writeSummary(renderSummary(result, ctx))
 }
 
-main().catch((err: unknown) => {
+// Set once the PR is known to be one the gate acts on (not skipped or exempt).
+let labelOnCrash = false
+
+main().catch(async (err: unknown) => {
   // A crash (API outage, bug) should be visible to maintainers, unlike a
   // gate "fail", which is just a label and always exits 0.
   const message = err instanceof Error ? err.message : String(err)
   console.log(`::error::OCR review gate crashed: ${message.replace(/[\r\n]+/g, ' ')}`)
   process.exitCode = 1
+  // Fail closed: a PR the gate couldn't evaluate shouldn't look ready for
+  // review. The next successful run removes the label if it isn't warranted.
+  if (labelOnCrash) {
+    try {
+      await rest('POST', `/repos/${owner}/${name}/issues/${prNumber}/labels`, { labels: [LABELS.needsReview] })
+    } catch {
+      console.log('::warning::Could not apply needs-ocr-review after the crash')
+    }
+  }
 })

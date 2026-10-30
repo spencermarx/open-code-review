@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import type { GateComment, GateInput, GatePullRequest, GateResult, RenderContext } from './ocr-review-gate-evaluate.ts'
 import {
@@ -7,6 +8,7 @@ import {
   classifyTitle,
   collectTrustedMarkers,
   evaluateGate,
+  gateLabels,
   parseClosingRefs,
   parseCommentMarker,
   parseMarkerLine,
@@ -177,7 +179,7 @@ describe('collectTrustedMarkers', () => {
       comment(address(7), { authorLogin: 'github-actions[bot]', authorAssociation: 'NONE' }),
     ]
     assert.deepEqual(
-      collectTrustedMarkers(comments, AUTHOR).map((m) => m.round),
+      collectTrustedMarkers(comments, AUTHOR).markers.map((m) => m.round),
       [1, 2, 3, 4],
     )
   })
@@ -188,7 +190,7 @@ describe('collectTrustedMarkers', () => {
     const tieA = comment(address(3), { id: 1000, createdAt: '2026-10-03T00:00:00Z' })
     const tieB = comment(address(4), { id: 1001, createdAt: '2026-10-03T00:00:00Z' })
     assert.deepEqual(
-      collectTrustedMarkers([tieB, later, tieA, earlier], AUTHOR).map((m) => m.round),
+      collectTrustedMarkers([tieB, later, tieA, earlier], AUTHOR).markers.map((m) => m.round),
       [1, 2, 3, 4],
     )
   })
@@ -214,7 +216,7 @@ describe('evaluateGate: review loop', () => {
       ],
     })
     assert.equal(result.status, 'pass')
-    assert.equal(result.status === 'pass' && result.evidence.rounds, 2)
+    assert.equal(result.status === 'pass' && result.evidence.latestReview?.round, 2)
   })
 
   it('uses the latest review verdict, not any earlier APPROVE', () => {
@@ -232,6 +234,30 @@ describe('evaluateGate: review loop', () => {
   it('requires at least two distinct personas', () => {
     assert.deepEqual(reasonCodes(evaluate({ comments: [comment(review(1, 'APPROVE', 'principal'))] })), ['too-few-personas'])
     assert.deepEqual(reasonCodes(evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,principal'))] })), ['too-few-personas'])
+  })
+
+  it('counts instance names as their persona, so two instances of one persona are still one', () => {
+    assert.deepEqual(reasonCodes(evaluate({ comments: [comment(review(1, 'APPROVE', 'principal-1,principal-2'))] })), ['too-few-personas'])
+    assert.equal(evaluate({ comments: [comment(review(1, 'APPROVE', 'principal-1,quality-2'))] }).status, 'pass')
+    assert.equal(evaluate({ comments: [comment(review(1, 'APPROVE', 'martin-fowler,quality'))] }).status, 'pass')
+  })
+
+  it('ignores an earlier-round address marker posted after the approving review', () => {
+    const result = evaluate({
+      comments: [comment(review(3, 'APPROVE', 'principal,quality', OLD)), comment(address(1, HEAD))],
+    })
+    assert.deepEqual(reasonCodes(result), ['head-not-covered'])
+  })
+
+  it('accepts a same-or-later-round address marker after the approving review', () => {
+    const result = evaluate({
+      comments: [comment(review(2, 'APPROVE', 'principal,quality', OLD)), comment(address(2, HEAD))],
+    })
+    assert.equal(result.status, 'pass')
+  })
+
+  it('judges coverage only once a review exists', () => {
+    assert.deepEqual(reasonCodes(evaluate({ comments: [comment(address(1, OLD))] })), ['no-review'])
   })
 
   it('fails when commits were pushed after the loop', () => {
@@ -305,9 +331,13 @@ describe('classifyTitle and issue-first', () => {
     })
   }
 
-  for (const title of ['Add a thing', 'feature: add', 'feat:no space', 'feat(): empty scope', 'feat(a)(b): double', ': nothing', '']) {
+  for (const title of ['Add a thing', 'feature: add', 'feat:no space', 'feat(): empty scope', 'feat(a)(b): double', ': nothing', '', 'Revert feat: x']) {
     it(`rejects unconventional title ${JSON.stringify(title)}`, () => assert.deepEqual(classifyTitle(title), { kind: 'unconventional' }))
   }
+
+  it("treats GitHub's Revert-button titles as revert", () => {
+    assert.deepEqual(classifyTitle('Revert "feat(cli): add flag"'), { kind: 'conventional', type: 'revert', breaking: false, requiresIssue: false })
+  })
 
   const approved = () => [comment(review(1, 'APPROVE', 'principal,quality'))]
 
@@ -351,6 +381,57 @@ describe('parseClosingRefs', () => {
   it('caps the number of references it returns', () => {
     const body = Array.from({ length: 50 }, (_, i) => `Closes #${i + 1}`).join('\n')
     assert.equal(parseClosingRefs(body).length, 10)
+  })
+
+  it('accepts optional colons and extra whitespace', () => {
+    assert.deepEqual(parseClosingRefs('Closes:  #4\nresolves \t#5\nfixes : #6'), [4, 5, 6])
+  })
+
+  it('stays linear on a maximum-size body of whitespace after a keyword', () => {
+    const start = performance.now()
+    assert.deepEqual(parseClosingRefs(`close${' '.repeat(65_000)}`), [])
+    assert.ok(performance.now() - start < 100, 'parseClosingRefs backtracked on hostile whitespace')
+  })
+})
+
+describe('gateLabels', () => {
+  const approved = () => [comment(review(1, 'APPROVE', 'principal,quality'))]
+
+  it('asks for no labels on pass, exempt or skip', () => {
+    assert.deepEqual(gateLabels(evaluate({ comments: approved() })), { needsReview: false, needsIssue: false })
+    assert.deepEqual(gateLabels(evaluate({ pr: pr({ labels: [LABELS.exempt] }) })), { needsReview: false, needsIssue: false })
+    assert.deepEqual(gateLabels(evaluate({ pr: pr({ draft: true }) })), { needsReview: false, needsIssue: false })
+  })
+
+  it('separates the maintainer-owned issue wait from contributor-owned work', () => {
+    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), comments: approved() })), { needsReview: false, needsIssue: true })
+    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }) })), { needsReview: true, needsIssue: true })
+    assert.deepEqual(gateLabels(evaluate()), { needsReview: true, needsIssue: false })
+    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'Update stuff' }), comments: approved() })), { needsReview: true, needsIssue: false })
+  })
+})
+
+describe('rejected markers', () => {
+  it('counts trusted comments whose marker the gate could not use', () => {
+    const result = evaluate({
+      comments: [
+        comment(`<!-- ocr-review-loop:review round=1 verdict=APPROVED personas=principal,quality sha=${HEAD} -->`),
+        comment(`<!-- ocr-review-loop:review round=1 verdict=APPROVE personas=principal, quality sha=${HEAD} -->`),
+        comment(`<!-- ocr-review-loop:review round=1 verdict=APPROVE personas=principal,quality sha=${HEAD} -->`, { authorLogin: 'stranger', authorAssociation: 'NONE' }),
+        comment(['```', `<!-- ocr-review-loop:address round=1 sha=${HEAD} -->`, '```'].join('\n')),
+        comment('just chatting'),
+      ],
+    })
+    assert.equal(result.status === 'fail' && result.evidence.rejectedMarkers, 2)
+    const body = renderStickyComment(result, ctx) ?? ''
+    assert.match(body, /2 comments have an `ocr-review-loop:` marker I couldn't use/)
+    assert.ok(!body.includes('APPROVED'))
+  })
+
+  it('does not count a comment whose marker was accepted', () => {
+    const result = evaluate({ comments: [comment(review(1, 'REQUEST_CHANGES', 'principal,quality'))] })
+    assert.equal(result.status === 'fail' && result.evidence.rejectedMarkers, 0)
+    assert.ok(!(renderStickyComment(result, ctx) ?? '').includes("couldn't use"))
   })
 })
 
@@ -424,6 +505,59 @@ describe('rendering', () => {
     const body = renderStickyComment(evaluate(), { ...ctx, authorLogin: 'bad login @everyone' }) ?? ''
     assert.ok(!body.includes('@everyone'))
     assert.match(body, /^Thanks for contributing/m)
+  })
+
+  it('renders a specific message for every failure reason', () => {
+    const cases: [GateResult, RegExp][] = [
+      [evaluate(), /couldn't find an OCR review round/],
+      [evaluate({ comments: [comment(review(1, 'NEEDS_DISCUSSION', 'principal,quality'))] }), /round 1\) ended in \*\*NEEDS_DISCUSSION\*\*/],
+      [evaluate({ comments: [comment(review(1, 'APPROVE', 'principal'))] }), /Round 1 used 1 distinct reviewer persona \(`principal`\); the loop needs at least 2/],
+      [evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,quality', OLD))] }), /covers `bbbbbbb`, but the PR head is now `aaaaaaa`/],
+      [evaluate({ pr: pr({ title: 'Update stuff' }) }), /doesn't start with a \[Conventional Commits\]/],
+      [evaluate({ pr: pr({ title: 'feat: x' }) }), /`feat:` PRs need a linked issue .* Link one with `Closes #<number>`/],
+      [evaluate({ pr: pr({ title: 'fix!: x' }), linkedIssues: [{ number: 12, labels: [] }] }), /Breaking changes need .* The linked issue \(#12\) doesn't have/],
+      [evaluate({ pr: pr({ title: 'feat: x' }), linkedIssues: [{ number: 1, labels: [] }, { number: 2, labels: [] }] }), /The linked issues \(#1, #2\) don't have/],
+    ]
+    for (const [result, pattern] of cases) assert.match(renderStickyComment(result, ctx) ?? '', pattern)
+  })
+
+  it('says accurately when it re-checks, and that an issue wait is not stale-closed', () => {
+    const loop = renderStickyComment(evaluate(), ctx) ?? ''
+    assert.match(loop, /re-check automatically when you push, edit the PR, or comment here/)
+    assert.ok(!loop.includes('every push and comment'))
+    assert.match(loop, /### OCR review loop: not complete yet/)
+    const issueOnly = renderStickyComment(evaluate({ pr: pr({ title: 'feat: x' }), comments: [comment(review(1, 'APPROVE', 'principal,quality'))] }), ctx) ?? ''
+    assert.match(issueOnly, /### OCR review loop: waiting on an accepted issue/)
+    assert.match(issueOnly, /won't be closed for inactivity/)
+    assert.match(issueOnly, /Once it's accepted, comment here or edit the PR/)
+  })
+
+  it('names both command styles for non-Claude-Code tools', () => {
+    assert.match(renderStickyComment(evaluate(), ctx) ?? '', /`\/ocr:review` and `\/ocr:address` \(`\/ocr-review` and `\/ocr-address`/)
+  })
+
+  it('links only to CONTRIBUTING.md headings that exist', () => {
+    const contributing = readFileSync(new URL('../../CONTRIBUTING.md', import.meta.url), 'utf8')
+    const slugs = new Set(
+      [...contributing.matchAll(/^#{1,6} (.+)$/gm)].map((m) =>
+        (m[1] ?? '').trim().toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, '').replace(/ /g, '-'),
+      ),
+    )
+    const rendered = [
+      evaluate(),
+      evaluate({ pr: pr({ title: 'feat: x' }) }),
+      evaluate({ comments: [comment(`<!-- ocr-review-loop:review round=1 -->`)] }),
+    ].map((r) => renderStickyComment(r, ctx) ?? '')
+    const anchors = new Set(rendered.flatMap((body) => [...body.matchAll(/CONTRIBUTING\.md#([a-z0-9-]+)/g)].map((m) => m[1] ?? '')))
+    assert.ok(anchors.size >= 3)
+    for (const anchor of anchors) assert.ok(slugs.has(anchor), `CONTRIBUTING.md has no heading for #${anchor}`)
+  })
+
+  it('accepts the example marker documented in CONTRIBUTING.md', () => {
+    const contributing = readFileSync(new URL('../../CONTRIBUTING.md', import.meta.url), 'utf8')
+    const example = contributing.split('\n').find((line) => line.startsWith('<!-- ocr-review-loop:review round=2'))
+    assert.ok(example, 'CONTRIBUTING.md lost its example review marker')
+    assert.deepEqual(parseMarkerLine(example)?.kind, 'review')
   })
 
   it('never emits a loop marker of its own, so the bot cannot feed the gate', () => {

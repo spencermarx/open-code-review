@@ -6,8 +6,12 @@
 // field and only validated values (or values GitHub itself guarantees, like
 // SHAs and logins from the API) are ever echoed back into the bot comment.
 
+// `needsReview` marks work the contributor owes (the loop, a conventional
+// title) and is what the reminders workflow acts on. `needsIssue` marks a wait
+// on maintainers accepting an issue, so it is deliberately never stale-closed.
 export const LABELS = {
   needsReview: 'needs-ocr-review',
+  needsIssue: 'needs-accepted-issue',
   exempt: 'ocr-review-exempt',
   accepted: 'accepted',
   stale: 'ocr-review-stale',
@@ -93,8 +97,8 @@ export type GateReason =
 export interface GateEvidence {
   headSha: string
   latestReview: ReviewMarker | null
-  latestMarker: LoopMarker | null
-  rounds: number
+  /** Trusted comments that contain a loop marker the gate could not use. */
+  rejectedMarkers: number
 }
 
 export type GateResult =
@@ -180,11 +184,14 @@ export function parseMarkerLine(line: string): LoopMarker | null {
 
 function parsePersonas(raw: string): string[] | null {
   const parts = raw.split(',')
-  if (parts.length === 0 || parts.length > MAX_PERSONAS) return null
+  if (parts.length > MAX_PERSONAS) return null
   const distinct = new Set<string>()
   for (const part of parts) {
     if (!PERSONA_RE.test(part)) return null
-    distinct.add(part)
+    // Instance names (`principal-1`, `principal-2`) are what contributors see
+    // in review file names; without this, two instances of one persona would
+    // count as two personas. No shipped reviewer id ends in `-<digits>`.
+    distinct.add(part.replace(/-\d+$/, ''))
   }
   return [...distinct]
 }
@@ -207,14 +214,28 @@ export function isTrustedComment(comment: GateComment, prAuthorLogin: string): b
   return TRUSTED_ASSOCIATIONS.has(comment.authorAssociation)
 }
 
-/** Trusted markers, oldest first. */
-export function collectTrustedMarkers(comments: GateComment[], prAuthorLogin: string): LoopMarker[] {
-  return comments
+const MARKER_LIKE_RE = /^ {0,3}<!--[ \t]*ocr-review-loop:/
+
+/**
+ * Trusted markers, oldest first, plus how many trusted comments look like they
+ * carry a marker but have none the gate accepts (a typo, a bad field). Only the
+ * count is ever surfaced, never the rejected text.
+ */
+export function collectTrustedMarkers(
+  comments: GateComment[],
+  prAuthorLogin: string,
+): { markers: LoopMarker[]; rejected: number } {
+  const markers: LoopMarker[] = []
+  let rejected = 0
+  const trusted = comments
     .filter((c) => isTrustedComment(c, prAuthorLogin))
-    .slice()
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id - b.id)
-    .map((c) => parseCommentMarker(c.body))
-    .filter((m): m is LoopMarker => m !== null)
+  for (const comment of trusted) {
+    const marker = parseCommentMarker(comment.body)
+    if (marker) markers.push(marker)
+    else if (stripFencedCode(comment.body).some((line) => MARKER_LIKE_RE.test(line))) rejected++
+  }
+  return { markers, rejected }
 }
 
 export function isBotAuthor(pr: Pick<GatePullRequest, 'authorLogin' | 'authorType'>): boolean {
@@ -226,6 +247,29 @@ export function shaCovers(markerSha: string, headSha: string): boolean {
   return headSha.toLowerCase().startsWith(markerSha)
 }
 
+/**
+ * The marker whose SHA must match the PR head. The final address pass
+ * legitimately pushes after APPROVE, so an address marker posted after the
+ * latest review covers the head, but only one that belongs to this point in the
+ * loop (`final`, or a round no earlier than the review's). A stray address
+ * marker from an earlier round can't vouch for later commits.
+ */
+export function coveringMarker(latestReview: ReviewMarker, after: LoopMarker[]): LoopMarker {
+  const addresses = after.filter(
+    (m): m is AddressMarker => m.kind === 'address' && (m.round === 'final' || m.round >= latestReview.round),
+  )
+  return addresses.at(-1) ?? latestReview
+}
+
+/** Which gate-managed labels a result calls for. */
+export function gateLabels(result: GateResult): { needsReview: boolean; needsIssue: boolean } {
+  if (result.status !== 'fail') return { needsReview: false, needsIssue: false }
+  return {
+    needsReview: result.reasons.some((r) => r.code !== 'issue-required'),
+    needsIssue: result.reasons.some((r) => r.code === 'issue-required'),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Issue-first
 // ---------------------------------------------------------------------------
@@ -235,6 +279,10 @@ export type TitleRule =
   | { kind: 'conventional'; type: string; breaking: boolean; requiresIssue: boolean }
 
 export function classifyTitle(title: string): TitleRule {
+  // GitHub's Revert button titles PRs `Revert "<original title>"`.
+  if (/^Revert "/.test(title.trim())) {
+    return { kind: 'conventional', type: 'revert', breaking: false, requiresIssue: false }
+  }
   const match = /^([A-Za-z]+)(?:\([^()\r\n]{1,64}\))?(!)?: \S/.exec(title.trim())
   const type = match?.[1]?.toLowerCase()
   if (!type || !(ISSUE_OPTIONAL_TYPES.has(type) || ISSUE_REQUIRED_TYPES.has(type))) {
@@ -251,7 +299,9 @@ export function classifyTitle(title: string): TitleRule {
  */
 export function parseClosingRefs(body: string): number[] {
   const refs = new Set<number>()
-  const re = /(?:^|[^\w/#-])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[ \t]*:?[ \t]+#(\d{1,7})\b/gi
+  // The optional colon group only consumes whitespace when a `:` follows, so
+  // the separator can't backtrack quadratically on long runs of spaces.
+  const re = /(?:^|[^\w/#-])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)(?:[ \t]*:)?[ \t]+#(\d{1,7})\b/gi
   for (const line of stripFencedCode(body)) {
     for (const m of line.matchAll(re)) {
       refs.add(Number(m[1]))
@@ -271,11 +321,10 @@ export function evaluateGate({ pr, comments, linkedIssues }: GateInput): GateRes
   if (isBotAuthor(pr)) return { status: 'exempt', why: 'bot' }
   if (pr.labels.includes(LABELS.exempt)) return { status: 'exempt', why: 'label' }
 
-  const markers = collectTrustedMarkers(comments, pr.authorLogin)
-  const reviews = markers.filter((m): m is ReviewMarker => m.kind === 'review')
-  const latestReview = reviews.at(-1) ?? null
-  const latestMarker = markers.at(-1) ?? null
-  const evidence: GateEvidence = { headSha: pr.headSha, latestReview, latestMarker, rounds: reviews.length }
+  const { markers, rejected } = collectTrustedMarkers(comments, pr.authorLogin)
+  const reviewIndex = markers.findLastIndex((m) => m.kind === 'review')
+  const latestReview = reviewIndex >= 0 ? (markers[reviewIndex] as ReviewMarker) : null
+  const evidence: GateEvidence = { headSha: pr.headSha, latestReview, rejectedMarkers: rejected }
 
   const reasons: GateReason[] = []
   if (!latestReview) {
@@ -287,11 +336,10 @@ export function evaluateGate({ pr, comments, linkedIssues }: GateInput): GateRes
     if (latestReview.personas.length < MIN_DISTINCT_PERSONAS) {
       reasons.push({ code: 'too-few-personas', round: latestReview.round, personas: latestReview.personas })
     }
-  }
-  // The final address pass legitimately pushes after APPROVE, so coverage is
-  // judged on the latest marker of either kind, not the latest review.
-  if (latestMarker && !shaCovers(latestMarker.sha, pr.headSha)) {
-    reasons.push({ code: 'head-not-covered', markerSha: latestMarker.sha, headSha: pr.headSha })
+    const covering = coveringMarker(latestReview, markers.slice(reviewIndex + 1))
+    if (!shaCovers(covering.sha, pr.headSha)) {
+      reasons.push({ code: 'head-not-covered', markerSha: covering.sha, headSha: pr.headSha })
+    }
   }
 
   const title = classifyTitle(pr.title)
@@ -348,13 +396,21 @@ function renderReason(reason: GateReason, ctx: RenderContext): string {
       return `The PR title doesn't start with a [Conventional Commits](https://www.conventionalcommits.org/) type (\`feat:\`, \`fix:\`, \`docs:\`, ...), so I can't tell whether an accepted issue is needed. Please retitle the PR.`
     case 'issue-required': {
       const kind = reason.breaking ? 'Breaking changes' : `\`${reason.type}:\` PRs`
+      const refs = reason.linkedIssues.map((n) => `#${n}`).join(', ')
       const linked =
-        reason.linkedIssues.length > 0
-          ? ` The linked issue${reason.linkedIssues.length > 1 ? 's' : ''} (${reason.linkedIssues.map((n) => `#${n}`).join(', ')}) ${reason.linkedIssues.length > 1 ? "don't" : "doesn't"} have the \`${LABELS.accepted}\` label yet.`
-          : ` Link one with \`Closes #<number>\` in the description.`
-      return `${kind} need a linked issue a maintainer has marked \`${LABELS.accepted}\` ([why](${docsLink(ctx, 'open-an-issue-first-for-non-trivial-changes')})).${linked}`
+        reason.linkedIssues.length === 0
+          ? ' Link one with `Closes #<number>` in the description.'
+          : reason.linkedIssues.length === 1
+            ? ` The linked issue (${refs}) doesn't have the \`${LABELS.accepted}\` label yet.`
+            : ` The linked issues (${refs}) don't have the \`${LABELS.accepted}\` label yet.`
+      return `${kind} need a linked issue a maintainer has marked \`${LABELS.accepted}\` ([why](${docsLink(ctx, 'open-an-issue-first-for-non-trivial-changes')})).${linked} Once it's accepted, comment here or edit the PR and I'll re-check.`
     }
   }
+}
+
+function renderRejectedHint(count: number, ctx: RenderContext): string {
+  const what = count === 1 ? '1 comment has' : `${count} comments have`
+  return `${what} an \`ocr-review-loop:\` marker I couldn't use. Markers are strict: check each field against the [format](${docsLink(ctx, 'other-ai-tools-manual-fallback')}) (case-sensitive, no spaces after commas, full SHA). Fixing a typo in place is fine; I re-check when the comment is edited.`
 }
 
 export function renderStickyComment(result: GateResult, ctx: RenderContext): string | null {
@@ -362,24 +418,29 @@ export function renderStickyComment(result: GateResult, ctx: RenderContext): str
   const policy = docsLink(ctx, 'required-ocr-review-loop-before-maintainer-review')
 
   if (result.status === 'fail') {
-    const reasons = result.reasons.map((r) => `- ${renderReason(r, ctx)}`).join('\n')
+    const labels = gateLabels(result)
+    const reasons = result.reasons.map((r) => `- ${renderReason(r, ctx)}`)
+    if (result.evidence.rejectedMarkers > 0) reasons.push(`- ${renderRejectedHint(result.evidence.rejectedMarkers, ctx)}`)
+    const inactivity = labels.needsReview
+      ? ` While \`${LABELS.needsReview}\` is on this PR it won't be queued for maintainer review. If it sits inactive for 14 days I'll send a friendly reminder, and 14 days after that it will be closed; it can be reopened any time once the loop is done.`
+      : ` \`${LABELS.needsIssue}\` means we're waiting on a maintainer, so this PR won't be closed for inactivity while it's the only thing left.`
     return [
       STICKY_MARKER,
-      '### OCR review loop: not complete yet',
+      labels.needsReview ? '### OCR review loop: not complete yet' : '### OCR review loop: waiting on an accepted issue',
       '',
       `${greeting} for contributing! Before a maintainer reviews a PR, we ask contributors to run OCR's own review loop on it and post the rounds here. It catches most issues before a human spends time on them, and it's how we [dogfood the tool](${policy}).`,
       '',
       "**What's still needed**",
       '',
-      reasons,
+      ...reasons,
       '',
       '**How to finish**',
       '',
       '- **Claude Code:** run `/ocr-review-loop` on this branch (`--team principal:2,quality:2,security:1` is a great choice). It posts every round for you.',
-      `- **Other AI tools:** run \`/ocr:review\` and \`/ocr:address\` round by round and post each round with the markers described in the [manual fallback](${docsLink(ctx, 'other-ai-tools-manual-fallback')}).`,
+      `- **Other AI tools:** run \`/ocr:review\` and \`/ocr:address\` (\`/ocr-review\` and \`/ocr-address\` in Windsurf and other tools with flat command names) round by round, and post each round with the markers described in the [manual fallback](${docsLink(ctx, 'other-ai-tools-manual-fallback')}).`,
       `- **No AI tooling?** No problem. [Open an issue](${ctx.repoUrl}/issues/new/choose) describing the change and a maintainer can pick it up or exempt this PR.`,
       '',
-      `I re-check automatically on every push and comment. While \`${LABELS.needsReview}\` is on this PR it won't be queued for maintainer review. If it sits inactive for 14 days I'll send a friendly reminder, and 14 days after that it will be closed; it can be reopened any time once the loop is done.`,
+      `I re-check automatically when you push, edit the PR, or comment here (comments from you or a maintainer).${inactivity}`,
       '',
       `<sub>Checked head \`${short(result.evidence.headSha)}\`. This is a label, not a required status check.</sub>`,
     ].join('\n')
