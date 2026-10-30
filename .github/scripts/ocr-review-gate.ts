@@ -1,33 +1,21 @@
 // I/O runner for the OCR review gate. Run by .github/workflows/ocr-review-gate.yml
 // with Node's native type stripping: `node .github/scripts/ocr-review-gate.ts`.
 //
-// It only ever talks to the GitHub REST/GraphQL API with the workflow token. It
+// It only ever talks to the GitHub REST API with the workflow token. It
 // never checks out, imports or executes anything from the PR. The only input
 // taken from the triggering event is the PR number (via env), and everything
 // else is re-fetched fresh so re-runs and comment events see current state.
 
 import { appendFileSync } from 'node:fs'
-import type { GateComment, GatePullRequest, GateResult, LinkedIssue, RenderContext } from './ocr-review-gate-evaluate.ts'
-import {
-  LABELS,
-  classifyTitle,
-  evaluateGate,
-  gateLabels,
-  nextPageUrl,
-  parseClosingRefs,
-  pickStickyComment,
-  renderStickyComment,
-  renderSummary,
-} from './ocr-review-gate-evaluate.ts'
+import type { GateComment, GatePullRequest, GateResult, RenderContext } from './ocr-review-gate-evaluate.ts'
+import { LABELS, evaluateGate, labelPlan, nextPageUrl, pickStickyComment, renderStickyComment, renderSummary } from './ocr-review-gate-evaluate.ts'
 
 const BOT_LOGIN = 'github-actions[bot]'
 const MAX_COMMENT_PAGES = 30
 
 const LABEL_SPECS: Record<string, { color: string; description: string }> = {
-  [LABELS.needsReview]: { color: 'fbca04', description: 'Contributor step left before maintainer review: OCR review loop, PR title or linked issue' },
-  [LABELS.needsIssue]: { color: 'fef2c0', description: 'Waiting on a maintainer to accept the linked issue (issue-first)' },
+  [LABELS.needsReview]: { color: 'fbca04', description: 'Contributor step left before maintainer review: an approved OCR review loop' },
   [LABELS.exempt]: { color: 'c5def5', description: 'Maintainer-applied: OCR review loop not required (typos, trivial docs)' },
-  [LABELS.accepted]: { color: '0e8a16', description: 'Maintainer-accepted: ready for a pull request' },
   [LABELS.stale]: { color: 'd4c5f9', description: 'Reminder sent: OCR review loop still pending' },
 }
 
@@ -40,7 +28,6 @@ function requireEnv(name: string): string {
 const token = requireEnv('GITHUB_TOKEN')
 const repo = requireEnv('GITHUB_REPOSITORY')
 const apiUrl = process.env.GITHUB_API_URL ?? 'https://api.github.com'
-const graphqlUrl = process.env.GITHUB_GRAPHQL_URL ?? `${apiUrl}/graphql`
 const serverUrl = process.env.GITHUB_SERVER_URL ?? 'https://github.com'
 const rawPrNumber = requireEnv('PR_NUMBER')
 if (!/^\d{1,9}$/.test(rawPrNumber)) throw new Error('PR_NUMBER must be a positive integer')
@@ -57,13 +44,8 @@ class HttpError extends Error {
   }
 }
 
-/**
- * Never follows a redirect: e.g. a transferred issue would otherwise be read
- * from another repository and its labels trusted as if they were local.
- * `'error'` (the default) fails the run; `'manual'` surfaces the 3xx as an
- * HttpError so a caller can treat it as "not here".
- */
-async function request(method: string, url: string, body?: unknown, redirect: 'error' | 'manual' = 'error'): Promise<Response> {
+/** Never follows a redirect: every response must come from the exact URL requested. */
+async function request(method: string, url: string, body?: unknown): Promise<Response> {
   let res: Response
   try {
     res = await fetch(url, {
@@ -76,7 +58,7 @@ async function request(method: string, url: string, body?: unknown, redirect: 'e
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
-      redirect,
+      redirect: 'error',
     })
   } catch (err) {
     // fetch's own errors ("fetch failed") don't say which call failed.
@@ -109,8 +91,6 @@ interface ApiPull {
   number: number
   state: string
   draft: boolean
-  title: string
-  body: string | null
   user: ApiUser
   head: { sha: string }
   labels: ApiLabel[]
@@ -122,12 +102,6 @@ interface ApiComment {
   created_at: string
   author_association: string
   user: ApiUser | null
-}
-interface ApiIssue {
-  number: number
-  state: string
-  labels: ApiLabel[]
-  pull_request?: unknown
 }
 
 async function listAll<T>(path: string, maxPages: number): Promise<T[]> {
@@ -171,61 +145,6 @@ async function removeLabel(current: string[], label: string): Promise<void> {
   }
 }
 
-interface ClosingIssuesResponse {
-  data?: {
-    repository?: {
-      pullRequest?: {
-        closingIssuesReferences?: {
-          nodes: { number: number; state: string; repository: { nameWithOwner: string }; labels: { nodes: ApiLabel[] } }[]
-        }
-      }
-    }
-  }
-  errors?: unknown[]
-}
-
-/**
- * Linked same-repo issues from both GitHub's closing references (covers the
- * sidebar "Development" links) and `Closes #N` in the body (covers PRs whose
- * base isn't the default branch, where GitHub doesn't populate the former).
- */
-async function linkedIssues(body: string): Promise<LinkedIssue[]> {
-  const found = new Map<number, LinkedIssue>()
-  const res = await request('POST', graphqlUrl, {
-    query: `query($owner: String!, $name: String!, $number: Int!) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          closingIssuesReferences(first: 10) {
-            nodes { number state repository { nameWithOwner } labels(first: 50) { nodes { name } } }
-          }
-        }
-      }
-    }`,
-    variables: { owner, name, number: prNumber },
-  })
-  const json = (await res.json()) as ClosingIssuesResponse
-  if (json.errors) console.log(`::warning::closingIssuesReferences query returned errors; falling back to the PR body`)
-  for (const node of json.data?.repository?.pullRequest?.closingIssuesReferences?.nodes ?? []) {
-    if (node.repository.nameWithOwner.toLowerCase() !== repo.toLowerCase()) continue
-    found.set(node.number, { number: node.number, labels: node.labels.nodes.map((l) => l.name), open: node.state === 'OPEN' })
-  }
-  for (const number of parseClosingRefs(body)) {
-    if (found.has(number)) continue
-    try {
-      const res = await request('GET', `${apiUrl}/repos/${owner}/${name}/issues/${number}`, undefined, 'manual')
-      const issue = (await res.json()) as ApiIssue
-      if (issue.pull_request) continue
-      found.set(number, { number, labels: issue.labels.map((l) => l.name), open: issue.state === 'open' })
-    } catch (err) {
-      // 404/410: no such issue. 3xx: transferred to another repository, so not
-      // linked here (and its labels must not be trusted).
-      const notHere = err instanceof HttpError && (err.status === 404 || err.status === 410 || (err.status >= 300 && err.status < 400))
-      if (!notHere) throw err
-    }
-  }
-  return [...found.values()]
-}
-
 async function syncStickyComment(comments: ApiComment[], body: string | null, allowCreate: boolean): Promise<void> {
   if (body === null) return
   const existing = pickStickyComment(comments, BOT_LOGIN)
@@ -252,8 +171,6 @@ async function main(): Promise<void> {
     draft: pull.draft,
     authorLogin: pull.user.login,
     authorType: pull.user.type,
-    title: pull.title,
-    body: pull.body ?? '',
     headSha: pull.head.sha,
     labels,
   }
@@ -264,7 +181,7 @@ async function main(): Promise<void> {
   }
 
   // Short-circuit before any API writes for PRs the gate doesn't act on.
-  const early = evaluateGate({ pr, comments: [], linkedIssues: [] })
+  const early = evaluateGate({ pr, comments: [] })
   if (early.status === 'skip') {
     writeSummary(renderSummary(early, ctx))
     return
@@ -282,16 +199,13 @@ async function main(): Promise<void> {
       createdAt: c.created_at,
       body: c.body ?? '',
     }))
-  const title = classifyTitle(pr.title)
-  const issues = title.kind === 'conventional' && title.requiresIssue ? await linkedIssues(pr.body) : []
 
-  const result: GateResult = evaluateGate({ pr, comments, linkedIssues: issues })
+  const result: GateResult = evaluateGate({ pr, comments })
   const sticky = renderStickyComment(result, ctx)
 
-  const want = gateLabels(result)
-  await (want.needsReview ? addLabel : removeLabel)(labels, LABELS.needsReview)
-  await (want.needsIssue ? addLabel : removeLabel)(labels, LABELS.needsIssue)
-  if (!want.needsReview) await removeLabel(labels, LABELS.stale)
+  const plan = labelPlan(result)
+  for (const label of plan.add) await addLabel(labels, label)
+  for (const label of plan.remove) await removeLabel(labels, label)
   // Labels now reflect this evaluation; a later crash must not overwrite them.
   labelOnCrash = false
   // Never post a fresh comment just to say "pass"; only update one we left.

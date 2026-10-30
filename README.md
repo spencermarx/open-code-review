@@ -667,7 +667,7 @@ Sessions are gitignored by default.
 
 ## Contributing
 
-Contributions are welcome! We use OCR on OCR: before a maintainer reviews a PR, contributors run the repo's OCR review loop (`/ocr-review-loop` in Claude Code, or `/ocr:review` + `/ocr:address` round by round in other tools, `/ocr-review` + `/ocr-address` where commands are flat) until it comes back **APPROVE**, with each round posted to the PR. Larger changes (`feat`, `refactor`, `perf`, breaking) start with an accepted issue. See [CONTRIBUTING.md](CONTRIBUTING.md) for the why, the how, and what to do if you don't have AI tooling.
+Contributions are welcome! We use OCR on OCR: before a maintainer reviews a PR, contributors run the repo's OCR review loop (`/ocr-review-loop` in Claude Code, or `/ocr:review` + `/ocr:address` round by round in other tools, `/ocr-review` + `/ocr-address` where commands are flat) until it comes back **APPROVE**, with each round posted to the PR. Non-trivial changes start with an issue, so we can agree on the approach before you build. See [CONTRIBUTING.md](CONTRIBUTING.md) for the why, the how, and what to do if you don't have AI tooling.
 
 ---
 

@@ -5,10 +5,10 @@
 # SECURITY: this runs on `pull_request_target`, so it has a write-capable token
 # even for fork PRs. It therefore NEVER checks out or executes PR code: the only
 # checkout is the base ref's `.github/scripts` (sparse, no persisted
-# credentials), and the script talks to the GitHub API only. PR titles, bodies
-# and comments are untrusted data; the script validates every marker field with
-# strict patterns and never echoes raw text back. Nothing untrusted is
-# interpolated into `run:`; the PR number is passed through env.
+# credentials), and the script talks to the GitHub API only. PR comments are
+# untrusted data; the script validates every marker field with strict patterns
+# and never echoes raw text back. Nothing untrusted is interpolated into `run:`;
+# the PR number is passed through env.
 #
 # `pull_request_target` runs this file from the PR's *base* branch, and a PR
 # author can retarget the base to any branch here. Treat every branch's copy of
@@ -24,11 +24,11 @@ name: OCR review gate
 
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review, edited, labeled, unlabeled]
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
   issue_comment:
     types: [created, edited, deleted]
-  # Manual re-check (e.g. after a linked issue is accepted, or to backfill a PR
-  # that predates the gate). Only users with write access can dispatch.
+  # Manual re-check (e.g. to backfill a PR that predates the gate). Only users
+  # with write access can dispatch.
   workflow_dispatch:
     inputs:
       pr:
@@ -58,6 +58,9 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      # Creating missing repository labels (ensureLabels) needs issues: write,
+      # and labelling the PR needs pull-requests: write; actions/labeler
+      # documents both. The sticky comment is written with these as well.
       issues: write
       pull-requests: write
     steps:

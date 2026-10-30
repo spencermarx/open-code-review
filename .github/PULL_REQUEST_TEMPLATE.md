@@ -1,8 +1,7 @@
 <!--
 Thanks for contributing! Before a maintainer reviews this PR, please complete the
 OCR review loop (see CONTRIBUTING.md → "Required: OCR review loop before maintainer review").
-A bot keeps a `needs-ocr-review` label on the PR while something is on your side (the loop, the title or
-linking an issue), and `needs-accepted-issue` while a linked issue is waiting on a maintainer.
+A bot keeps a `needs-ocr-review` label on the PR until the loop is done.
 -->
 
 ## Summary
@@ -12,22 +11,21 @@ linking an issue), and `needs-accepted-issue` while a linked issue is waiting on
 ## Related Issue
 
 <!--
-`feat:`, `refactor:`, `perf:` and breaking (`!`) PRs must link an issue a maintainer has labelled `accepted`.
-`fix:` PRs need a clear reproduction (here or in a linked issue). `docs:`, `test:`, `chore:`, `ci:`, `build:`, `style:`, `revert:` can skip this.
-Use "Closes #123" so the issue is linked and closed on merge.
+Link the issue where the approach was agreed (CONTRIBUTING.md → "Start with an issue").
+Trivial changes (a typo, a small docs fix, a small obvious bug fix) can skip this.
 -->
 
 Closes #
 
 ## Type of Change
 
-<!-- The PR title must use one of these Conventional Commits types, e.g. `feat(cli): ...`, `fix: ...`, `docs: ...`. -->
+<!-- Please title the PR with Conventional Commits, e.g. `feat(cli): ...`, `fix: ...`, `docs: ...`. -->
 
 - [ ] Bug fix (`fix:`)
-- [ ] New feature (`feat:`, needs an `accepted` issue)
-- [ ] Breaking change (`!`, needs an `accepted` issue)
+- [ ] New feature (`feat:`)
+- [ ] Breaking change (`!`)
 - [ ] Documentation (`docs:`)
-- [ ] Refactor / performance (`refactor:` / `perf:`, needs an `accepted` issue)
+- [ ] Refactor / performance (`refactor:` / `perf:`)
 - [ ] Tests / chore / CI / build / style / revert
 
 ## Packages Affected
