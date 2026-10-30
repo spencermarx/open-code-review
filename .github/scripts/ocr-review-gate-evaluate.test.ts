@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import type { GateComment, GateInput, GatePullRequest, GateResult, RenderContext } from './ocr-review-gate-evaluate.ts'
 import {
@@ -8,6 +8,7 @@ import {
   collectTrustedMarkers,
   evaluateGate,
   isTrustedComment,
+  labelPlan,
   nextPageUrl,
   pickStickyComment,
   parseCommentMarker,
@@ -353,11 +354,55 @@ describe('workflow and repo contracts', () => {
     assert.match(reminders, new RegExp(`exempt-pr-labels: .*${LABELS.exempt}`))
   })
 
+  it('runs on the events the bot comment and CONTRIBUTING promise, and no others', () => {
+    const workflow = read('.github/workflows/ocr-review-gate.yml')
+    const on = workflow.slice(workflow.indexOf('\non:\n'), workflow.indexOf('\npermissions:'))
+    assert.deepEqual([...on.matchAll(/^ {2}(\w+):/gm)].map((m) => m[1]), ['pull_request_target', 'issue_comment', 'workflow_dispatch'])
+    assert.match(on, /pull_request_target:\n\s+types: \[opened, reopened, synchronize, ready_for_review, labeled, unlabeled\]\n/)
+    assert.match(on, /issue_comment:\n\s+types: \[created, edited, deleted\]\n/)
+  })
+
+  // The gate trusts `ocr-review-exempt` on a PR, and an issue converted into a
+  // PR keeps its labels, so no issue template may ever apply it.
+  it('never lets an issue template apply the exempt label', () => {
+    const templates = readdirSync(new URL('../ISSUE_TEMPLATE/', import.meta.url)).filter((f) => /\.(ya?ml|md)$/.test(f) && f !== 'config.yml')
+    assert.ok(templates.length > 0)
+    for (const template of templates) {
+      // The whole `labels:` value: inline (`[a, b]` / `a, b`) or a block list
+      // of indented `- item` lines (YAML forms and Markdown front matter alike).
+      const labels = /^labels:[^\n]*(?:\n[ \t]+-[^\n]*)*/m.exec(read(`.github/ISSUE_TEMPLATE/${template}`))?.[0] ?? ''
+      assert.ok(!labels.includes(LABELS.exempt), `${template} applies ${LABELS.exempt}`)
+    }
+  })
+
+  it('reads template labels from block-style lists too', () => {
+    const block = `name: x\nlabels:\n  - bug\n  - ${LABELS.exempt}\nbody: []`
+    assert.ok((/^labels:[^\n]*(?:\n[ \t]+-[^\n]*)*/m.exec(block)?.[0] ?? '').includes(LABELS.exempt))
+  })
+
   it('refuses redirects on every API call', () => {
     const runner = read('.github/scripts/ocr-review-gate.ts')
-    assert.equal(runner.match(/\bfetch\(/g)?.length, 1, 'every API call goes through request()')
-    // Every `redirect` property (or shorthand) at the start of a code line.
-    assert.deepEqual([...runner.matchAll(/^\s+redirect\b(?:\s*:\s*([^,\s}]*))?/gm)].map((m) => m[1]), ["'error'"])
+    assert.equal(runner.match(/\bfetch\s*\(/g)?.length, 1, 'every API call goes through request()')
+    // Every `redirect` property (quoted, shorthand or plain) at the start of a code line.
+    assert.deepEqual([...runner.matchAll(/^\s+['"]?redirect\b['"]?(?:\s*:\s*([^,\s}]*))?/gm)].map((m) => m[1]), ["'error'"])
+    // Last in the options object, so nothing spread after it can override it.
+    assert.match(runner, /redirect: 'error',\n\s*\}\)/)
+  })
+})
+
+describe('labelPlan', () => {
+  it('adds needs-ocr-review on fail and leaves the reminders label alone', () => {
+    assert.deepEqual(labelPlan(evaluate()), { add: [LABELS.needsReview], remove: [] })
+  })
+
+  it('clears both labels once nothing is owed', () => {
+    const cleared = { add: [], remove: [LABELS.needsReview, LABELS.stale] }
+    assert.deepEqual(labelPlan(evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,quality'))] })), cleared)
+    assert.deepEqual(labelPlan(evaluate({ pr: pr({ labels: [LABELS.exempt] }) })), cleared)
+  })
+
+  it('touches no labels on skipped PRs', () => {
+    assert.deepEqual(labelPlan(evaluate({ pr: pr({ draft: true }) })), { add: [], remove: [] })
   })
 })
 
@@ -494,7 +539,7 @@ describe('rendering', () => {
     for (const result of [
       evaluate({ comments: [comment(review(1, 'REQUEST_CHANGES', 'principal,quality'))] }),
       evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,quality'))] }),
-      evaluate({ pr: pr({ labels: [LABELS.exempt] }) }),
+      evaluate({ comments: [comment(`<!-- ocr-review-loop:review round=1 verdict=APPROVED personas=principal,quality sha=${HEAD} -->`)] }),
     ]) {
       assert.doesNotMatch(renderStickyComment(result, ctx) ?? '', /start-with-an-issue/)
     }
@@ -515,6 +560,10 @@ describe('rendering', () => {
     const anchors = new Set(rendered.flatMap((body) => [...body.matchAll(/CONTRIBUTING\.md#([a-z0-9-]+)/g)].map((m) => m[1] ?? '')))
     assert.ok(anchors.size >= 3)
     for (const anchor of anchors) assert.ok(slugs.has(anchor), `CONTRIBUTING.md has no heading for #${anchor}`)
+    // CONTRIBUTING's own in-page links, too.
+    const ownLinks = [...contributing.matchAll(/\]\(#([^)]+)\)/g)].map((m) => m[1] ?? '')
+    assert.ok(ownLinks.length >= 5)
+    for (const anchor of ownLinks) assert.ok(slugs.has(anchor), `CONTRIBUTING.md links to missing heading #${anchor}`)
   })
 
   it('accepts the example marker documented in CONTRIBUTING.md', () => {

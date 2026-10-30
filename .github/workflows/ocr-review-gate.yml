@@ -58,9 +58,9 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      # Needed for ensureLabels to create missing repository labels
-      # (actions/labeler documents the same requirement). Labelling the PR and
-      # its sticky comment also go through the issues API.
+      # Creating missing repository labels (ensureLabels) needs issues: write,
+      # and labelling the PR needs pull-requests: write; actions/labeler
+      # documents both. The sticky comment is written with these as well.
       issues: write
       pull-requests: write
     steps:

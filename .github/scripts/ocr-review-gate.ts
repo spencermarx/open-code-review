@@ -8,7 +8,7 @@
 
 import { appendFileSync } from 'node:fs'
 import type { GateComment, GatePullRequest, GateResult, RenderContext } from './ocr-review-gate-evaluate.ts'
-import { LABELS, evaluateGate, nextPageUrl, pickStickyComment, renderStickyComment, renderSummary } from './ocr-review-gate-evaluate.ts'
+import { LABELS, evaluateGate, labelPlan, nextPageUrl, pickStickyComment, renderStickyComment, renderSummary } from './ocr-review-gate-evaluate.ts'
 
 const BOT_LOGIN = 'github-actions[bot]'
 const MAX_COMMENT_PAGES = 30
@@ -44,7 +44,7 @@ class HttpError extends Error {
   }
 }
 
-/** Never follows a redirect: a 3xx fails the run instead of sending the token elsewhere. */
+/** Never follows a redirect: every response must come from the exact URL requested. */
 async function request(method: string, url: string, body?: unknown): Promise<Response> {
   let res: Response
   try {
@@ -203,12 +203,9 @@ async function main(): Promise<void> {
   const result: GateResult = evaluateGate({ pr, comments })
   const sticky = renderStickyComment(result, ctx)
 
-  if (result.status === 'fail') {
-    await addLabel(labels, LABELS.needsReview)
-  } else {
-    await removeLabel(labels, LABELS.needsReview)
-    await removeLabel(labels, LABELS.stale)
-  }
+  const plan = labelPlan(result)
+  for (const label of plan.add) await addLabel(labels, label)
+  for (const label of plan.remove) await removeLabel(labels, label)
   // Labels now reflect this evaluation; a later crash must not overwrite them.
   labelOnCrash = false
   // Never post a fresh comment just to say "pass"; only update one we left.

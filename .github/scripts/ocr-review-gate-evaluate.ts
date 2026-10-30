@@ -226,6 +226,17 @@ export function collectTrustedMarkers(
   return { markers, rejected }
 }
 
+/**
+ * The gate-managed label changes for a result. While the loop is open,
+ * `ocr-review-stale` belongs to the reminders workflow, so the gate clears it
+ * only once nothing is owed (pass or exempt).
+ */
+export function labelPlan(result: GateResult): { add: string[]; remove: string[] } {
+  if (result.status === 'fail') return { add: [LABELS.needsReview], remove: [] }
+  if (result.status === 'skip') return { add: [], remove: [] }
+  return { add: [], remove: [LABELS.needsReview, LABELS.stale] }
+}
+
 export function isBotAuthor(pr: Pick<GatePullRequest, 'authorLogin' | 'authorType'>): boolean {
   return pr.authorType === 'Bot' || pr.authorLogin.endsWith('[bot]')
 }
@@ -337,10 +348,10 @@ export function renderStickyComment(result: GateResult, ctx: RenderContext): str
   if (result.status === 'fail') {
     const reasons = result.reasons.map((r) => `- ${renderReason(r)}`)
     if (result.evidence.rejectedMarkers > 0) reasons.push(`- ${renderRejectedHint(result.evidence.rejectedMarkers, ctx)}`)
-    // Advice only, and only before the first round: once the loop is under
-    // way it's too late to help, and whether a change needed an issue is a
-    // maintainer's call.
-    const issueHint = result.evidence.latestReview
+    // Advice only, and only before any round is posted (even one with a
+    // malformed marker): once the loop is under way it's too late to help,
+    // and whether a change needed an issue is a maintainer's call.
+    const issueHint = result.evidence.latestReview || result.evidence.rejectedMarkers > 0
       ? []
       : [
           `Bigger change that hasn't been discussed in an issue yet? It's worth [starting with one](${docsLink(ctx, 'start-with-an-issue')}) so we can agree on the approach before you put more time in. That's a conversation with a maintainer, not something I check.`,
