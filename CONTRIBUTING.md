@@ -34,9 +34,9 @@ Some changes need a design conversation before code. Agreeing on the shape up fr
 | `fix:` | No, but include a clear reproduction (in the PR or a linked issue) |
 | `docs:`, `test:`, `chore:`, `ci:`, `build:`, `style:`, `revert:` | No, go straight to a PR |
 
-- PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) (`type(scope): summary`). The gate reads the type to decide whether an issue is required.
+- PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) (`type(scope): summary`) using **one of the types in the table**. The gate reads the type to decide whether an issue is required, so a title with another type (or none) keeps the `needs-ocr-review` label until it's retitled. GitHub's own `Revert "…"` titles count as `revert:`.
 - Link the issue with a closing keyword in the PR description (`Closes #123`) or via the PR's **Development** sidebar. Only issues in this repository count.
-- `accepted` is applied by maintainers once an issue's direction is agreed. If you opened the PR before the issue was accepted, edit the PR description (or push) after it is, and the gate re-checks.
+- `accepted` is applied by maintainers once an issue's direction is agreed. Until then the PR carries `needs-accepted-issue`, which means it's waiting on us, so it's never closed for inactivity. If you opened the PR before the issue was accepted, comment on the PR or edit its description afterwards and the gate re-checks.
 - Use the [bug report](https://github.com/spencermarx/open-code-review/issues/new?template=bug_report.yml) and [feature request](https://github.com/spencermarx/open-code-review/issues/new?template=feature_request.yml) templates. For open-ended ideas, start a [Discussion](https://github.com/spencermarx/open-code-review/discussions).
 
 ## You own your change
@@ -65,7 +65,8 @@ In return, you get a multi-perspective review (architecture, code quality, and o
 
 - **The latest review round's verdict is APPROVE.** You loop review → address → re-review until it is. `NEEDS_DISCUSSION` is a pause for humans: ask your questions on the PR.
 - **The reviewer team has at least 2 distinct personas.** The default team (`principal:2, quality:2`) meets this. **3 or more are encouraged**, e.g. `--team principal:2,quality:2,security:1`, and security is especially welcome for anything touching auth, CI, workflows, or user data.
-- **The loop covers the PR's current head commit.** If you push more commits after the loop, run it again (it's usually one quick round). The final address pass after APPROVE legitimately pushes a commit and counts as covering that commit.
+- **The loop covers the PR's current head commit.** If you push more commits after the loop, run it again (it's usually one quick round). That includes merging `main` into your branch or GitHub's **Update branch** button. The final address pass after APPROVE legitimately pushes a commit and counts as covering that commit.
+- **Each round reviews the whole PR** (`main...HEAD`), not just the commits since the last round.
 - **Every round is posted to the PR** as a comment carrying a hidden marker (see below). That's the evidence the gate reads, and the trail maintainers read.
 
 ### Claude Code: `/ocr-review-loop`
@@ -77,14 +78,14 @@ The repo ships a project skill, [`.claude/skills/ocr-review-loop/`](.claude/skil
 /ocr-review-loop --team principal:2,quality:2,security:1
 ```
 
-It checks the team has at least 2 personas, pushes before each review so the reviewed commit is the PR's commit, posts each review and address round with its marker, and stops for a human on `NEEDS_DISCUSSION`. Requirements: OCR set up locally (`/ocr:doctor`), the `gh` CLI authenticated, and an open PR for your branch.
+It checks the team has at least 2 personas, pushes before each review so the reviewed commit is the PR's commit, reviews the whole PR every round, posts each review and address round with its marker, and stops for a human on `NEEDS_DISCUSSION`. Requirements: OCR set up locally (`/ocr:doctor`), the `gh` CLI authenticated, and an open PR for your branch.
 
 ### Other AI tools: manual fallback
 
-OCR's `/ocr:review` and `/ocr:address` commands work in every [supported AI tool](README.md#supported-ai-tools). Run the loop by hand:
+OCR's review and address commands are available in every [supported AI tool](README.md#supported-ai-tools): `/ocr:review` and `/ocr:address` in tools with namespaced commands (Claude Code, Cursor, ...), and `/ocr-review` and `/ocr-address` in Windsurf and other tools with flat command names. Run the loop by hand:
 
 1. Push your branch and open the PR (draft is fine; mark it ready when the loop is done).
-2. **Review:** `git push`, then run `/ocr:review` against the branch with your team (e.g. `/ocr:review --team principal:2,quality:2`).
+2. **Review the whole PR:** `git push`, then run the review against the full PR range with your team, e.g. `/ocr:review main...HEAD --team principal:2,quality:2` (use your PR's base branch if it isn't `main`).
 3. **Post the round** to the PR: the round's `final.md`, with a review marker as the first line.
 4. If the verdict is `REQUEST CHANGES`, **address it:** run `/ocr:address` on that round's `final.md`, verify (typecheck, lint, tests), commit, push, and **post an address comment** with an address marker. Then go back to step 2 for the next round.
 5. Once a round is **APPROVE**, optionally run one final `/ocr:address` for the leftover suggestions, push, and post it with `round=final`.
@@ -98,7 +99,7 @@ Each comment needs exactly one marker, on its own line (the first line is simple
 
 - `round`: the review round number (1, 2, ...), or `final` for the address pass after APPROVE.
 - `verdict`: the round's verdict with underscores (`REQUEST CHANGES` → `REQUEST_CHANGES`).
-- `personas`: the distinct persona ids that reviewed, e.g. `principal,quality,security` (lowercase, no spaces).
+- `personas`: the distinct **persona ids** that reviewed, e.g. `principal,quality,security`: lowercase, comma-separated, **no spaces**. These are the persona names, not the instance names in the review files (`principal`, not `principal-1`); the gate counts `principal-1,principal-2` as one persona. To list them for your team: `ocr team resolve --team "principal:2,quality:2" --json | jq -r '[.[].persona] | unique | join(",")'`.
 - `sha`: `git rev-parse HEAD`, taken *after* pushing: the commit that was reviewed, or the commit the address pass pushed.
 
 For example:
@@ -110,15 +111,15 @@ For example:
 ...the round's final.md...
 ```
 
-**Markers are evidence.** Only post a marker for a round that actually ran, with the verdict it actually produced, and never edit a verdict after the fact. The gate can only check that the trail exists; maintainers read it, and a fabricated round means we can't trust the rest of the PR.
+**Markers are evidence.** Only post a marker for a round that actually ran, with the verdict it actually produced, and never change a verdict or SHA after the fact. Fixing a *typo* in a marker so it correctly records what ran is fine, and the gate re-checks when you edit the comment. The gate can only check that the trail exists; maintainers read it, and a fabricated round means we can't trust the rest of the PR.
 
 ### How the check works
 
-The [OCR review gate](.github/workflows/ocr-review-gate.yml) workflow re-evaluates the PR on every push, edit, label change, and marker comment. It:
+The [OCR review gate](.github/workflows/ocr-review-gate.yml) workflow re-evaluates the PR on every push, PR edit, label change, and comment from the PR author or a maintainer. Maintainers can also re-run it by hand (**Actions → OCR review gate → Run workflow** with the PR number). It:
 
-- reads markers only from comments by **the PR author or a maintainer** (owner, member, collaborator), ignoring markers inside code blocks or quotes and any marker with a malformed field;
-- **passes** when the latest review marker is `APPROVE` with at least 2 distinct personas, the latest marker of either kind points at the PR's head commit, and (for `feat`/`refactor`/`perf`/breaking PRs) an `accepted` issue is linked;
-- otherwise adds the **`needs-ocr-review`** label and keeps **one** friendly bot comment up to date with exactly what's missing. When the PR passes, it removes the label and updates that comment; it never posts a new comment just to say "pass".
+- reads markers only from comments by **the PR author or a maintainer** (owner, member, collaborator), ignoring markers inside code blocks or quotes and any marker with a malformed field (the bot tells you how many it couldn't use, so a typo doesn't go unnoticed);
+- **passes** when the latest review marker is `APPROVE` with at least 2 distinct personas, the PR's head commit is covered by that review or by an address pass posted after it (`round=final`, or the same or a later round), and, for `feat`/`refactor`/`perf`/breaking PRs, an `accepted` issue is linked;
+- otherwise labels the PR and keeps **one** friendly bot comment up to date with exactly what's missing. **`needs-ocr-review`** means something is still on your side (the loop, or the title); **`needs-accepted-issue`** means we owe you an issue decision. When the PR passes, it removes the labels and updates that comment; it never posts a new comment just to say "pass".
 
 It's a label, not a required status check: it never blocks merging on its own, and maintainers still read the trail. The workflow never checks out or runs code from your PR. It only reads PR metadata and comments through the GitHub API.
 
@@ -131,7 +132,7 @@ It's a label, not a required status check: it never blocks merging on its own, a
 
 ### Inactivity
 
-To keep the review queue honest, a PR labelled `needs-ocr-review` with no activity for **14 days** gets a friendly reminder (and the `ocr-review-stale` label). If there's still no activity **14 days** after that, it's closed with a note. That's not a judgment on the change: you can reopen it any time once the loop is approved, or comment and a maintainer will reopen it for you. Any push or comment resets the clock, and draft PRs are left alone.
+To keep the review queue honest, a PR labelled `needs-ocr-review` with no activity for **14 days** gets a friendly reminder (and the `ocr-review-stale` label). If there's still no activity **14 days** after that, it's closed with a note. That's not a judgment on the change: you can reopen it any time once the loop is approved, or comment and a maintainer will reopen it for you. Any push or comment resets the clock (so if you're waiting on us after a `NEEDS_DISCUSSION` round, just say so on the PR), and draft PRs and PRs that are only waiting on `needs-accepted-issue` are left alone.
 
 ### No AI tooling?
 
