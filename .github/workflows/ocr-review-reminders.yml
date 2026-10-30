@@ -1,8 +1,7 @@
 # Warn-then-close for PRs still waiting on an OCR review loop (CONTRIBUTING.md,
 # "Inactivity"). Scoped to PRs carrying `needs-ocr-review`; issues and every
-# other PR are untouched, including PRs only waiting on `needs-accepted-issue`
-# (a maintainer-owned wait). Any activity on the PR (a push, a comment) resets
-# the clock, and the gate removes both labels once the loop is approved.
+# other PR are untouched. Any activity on the PR (a push, a comment) resets the
+# clock, and the gate removes both labels once the loop is approved.
 
 name: OCR review reminders
 
@@ -27,8 +26,7 @@ jobs:
       - uses: actions/stale@v11
         with:
           only-pr-labels: needs-ocr-review
-          # needs-accepted-issue: the next step is a maintainer's, so the clock pauses.
-          exempt-pr-labels: ocr-review-exempt,needs-accepted-issue
+          exempt-pr-labels: ocr-review-exempt
           exempt-draft-pr: true
           days-before-issue-stale: -1
           days-before-issue-close: -1

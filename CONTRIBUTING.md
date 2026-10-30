@@ -6,13 +6,13 @@ This guide covers how to set up the repo, how a change goes from idea to merged 
 
 ## At a glance
 
-1. **Non-trivial change?** [Open an issue first](#open-an-issue-first-for-non-trivial-changes) and wait for a maintainer to mark it `accepted`.
-2. **Make the change** on a branch, with tests and docs. Read and understand every line, whoever (or whatever) wrote it.
-3. **Open a PR** using the template, including the short [AI-use disclosure](#ai-use-disclosure).
-4. **Run the OCR review loop** on the PR until the latest round is **APPROVE** ([details](#required-ocr-review-loop-before-maintainer-review)). A bot keeps a `needs-ocr-review` label on the PR while something is on your side, or `needs-accepted-issue` while a linked issue is waiting on us.
-5. **A maintainer reviews.**
+A change goes through three steps, and each one answers a single question:
 
-No AI tooling? That's fine, see [No AI tooling?](#no-ai-tooling).
+1. **Start with an issue**, unless the change is trivial (a typo, docs, a small obvious fix). Describe the problem and the approach you have in mind, and a maintainer replies with a go-ahead or a redirect. *Should we do this, and what's the approach?* ([details](#start-with-an-issue))
+2. **Build it, then run the OCR review loop** on your PR until the latest round is **APPROVE**, with at least 2 distinct reviewer personas, covering the PR's head commit. *Is the implementation sound?* This is the only step a bot checks: it keeps a `needs-ocr-review` label on the PR until the loop is done. ([details](#required-ocr-review-loop-before-maintainer-review))
+3. **A maintainer reviews** the PR against what was agreed in the issue. *Does it do what we agreed, and is it ready to merge?*
+
+Along the way, you [own your change](#you-own-your-change): read and understand every line, whoever (or whatever) wrote it, and fill in the PR template, including the short [AI-use disclosure](#ai-use-disclosure). No AI tooling? That's fine, see [No AI tooling?](#no-ai-tooling).
 
 ## Quick start
 
@@ -23,21 +23,22 @@ No AI tooling? That's fine, see [No AI tooling?](#no-ai-tooling).
 2. **Install dependencies**: `pnpm install`
 3. **Run the CLI locally**: `nx run cli:init` or `nx run cli:progress`
 
-## Open an issue first for non-trivial changes
+## Start with an issue
 
-Some changes need a design conversation before code. Agreeing on the shape up front saves you from building something we can't merge, and saves us from reviewing a large PR we'd have steered differently. We follow the issue-first practice used by projects like Ghostty.
+For anything beyond a trivial change, please open an issue before you write code. It's where we agree on *whether* to make a change and *how*, before anyone spends time building or reviewing it. Many well-loved projects work this way in one form or another (Go, Rust, Kubernetes, React, Ghostty), and it saves everyone the disappointment of a finished PR that we'd have steered differently.
 
-| PR title type | Issue needed? |
-|---|---|
-| `feat:`, `refactor:`, `perf:` | **Yes**: link an issue a maintainer has labelled `accepted` |
-| Anything breaking (`feat!:`, `fix!:`, ...) | **Yes**: link an `accepted` issue |
-| `fix:` | No, but include a clear reproduction (in the PR or a linked issue) |
-| `docs:`, `test:`, `chore:`, `ci:`, `build:`, `style:`, `revert:` | No, go straight to a PR |
+**Trivial changes can go straight to a PR:** typo fixes, docs improvements, and small, obvious bug fixes where there's really only one sensible way to do it. Not sure? Open the issue; that's never the wrong call.
 
-- PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) (`type(scope): summary`) using **one of the types in the table**. The gate reads the type to decide whether an issue is required, so a title with another type (or none) keeps the `needs-ocr-review` label until it's retitled. GitHub's own `Revert "…"` titles count as `revert:`.
-- Link the issue with a closing keyword in the PR description (`Closes #123`) or via the PR's **Development** sidebar. Only issues in this repository count.
-- `accepted` is applied by maintainers once an issue's direction is agreed. While an open *linked* issue waits for that, the PR carries `needs-accepted-issue`: it's waiting on us, so the inactivity clock is paused. (A PR that hasn't linked an issue at all, or whose linked issue was closed without `accepted`, keeps `needs-ocr-review`, since the next step is yours.) Once the issue is accepted, comment on the PR or edit its description and the gate re-checks.
-- Use the [bug report](https://github.com/spencermarx/open-code-review/issues/new?template=bug_report.yml) and [feature request](https://github.com/spencermarx/open-code-review/issues/new?template=feature_request.yml) templates. For open-ended ideas, start a [Discussion](https://github.com/spencermarx/open-code-review/discussions).
+**What to put in the issue:**
+
+- **The problem:** what's broken or missing, and who runs into it. For a bug, include a reproduction.
+- **Your proposed approach:** how you'd solve it, in a few sentences (for example, "add a `--since` flag to `ocr history` that filters sessions by date"), plus any alternatives you considered.
+
+A maintainer will reply with a go-ahead or a redirect: a different approach, a smaller scope, or a reason it doesn't fit the project. **A maintainer's go-ahead in the issue thread is your signal to start building.** When you open the PR, link the issue with `Closes #123`.
+
+Whether a change needed an issue is a maintainer's judgment call, and no bot checks it. If a larger PR arrives without one, we may kindly ask to step back to an issue first, to settle the approach before more of your time goes in. That isn't a rejection.
+
+Use the [bug report](https://github.com/spencermarx/open-code-review/issues/new?template=bug_report.yml) and [feature request](https://github.com/spencermarx/open-code-review/issues/new?template=feature_request.yml) templates. For open-ended ideas that aren't a concrete proposal yet, start a [Discussion](https://github.com/spencermarx/open-code-review/discussions).
 
 ## You own your change
 
@@ -57,9 +58,13 @@ The PR template has a short **AI use** section: which tools you used (if any) an
 
 ### Why
 
-Many PRs we receive are AI-assisted, which is great, but it means a large diff can arrive quickly and the first thorough review lands on maintainers, often as an expensive multi-agent review on our side before a human can even judge the change. We'd rather that work happen first, using the project's own tool, with the evidence on the PR. It's also the best way to dogfood OCR: if the loop is painful, we want to feel that pain too. That's why **maintainers' own PRs go through it as well**.
+Each of the three steps answers a different question, so no single review has to answer all of them at once:
 
-In return, you get a multi-perspective review (architecture, code quality, and optionally security) before any human looks at your PR, and maintainers can spend their time on design and judgment instead of first-pass findings.
+- **The issue** settles *whether* to make the change and *what approach* to take. That's a conversation between people, and it's cheapest before any code exists.
+- **The OCR review loop** checks *whether the implementation is sound*: bugs, missing tests, unhandled edge cases, and the project's conventions. That's the line-by-line part of a review, and a multi-perspective review (architecture, code quality, and optionally security) does it well. Running it first means those findings are already fixed, or declined with reasons, by the time a human looks, and the posted rounds show what was found and how it was handled.
+- **Maintainer review** checks *whether the PR does what was agreed and is ready to merge*. The maintainer compares the PR with the approach agreed in the issue: is the scope what we discussed, does it behave the way we expected, does anything the loop declined or couldn't judge matter? It's a check against an agreement, not a fresh design debate. Design questions can still come up when the PR reveals something nobody knew at issue time, but that's the exception.
+
+Why the loop in particular: many PRs we receive are AI-assisted, which is great, but a large diff can arrive quickly, and the first thorough review used to land on maintainers. We'd rather that pass happen first, using the project's own tool, with the evidence on the PR. It's also the best way to dogfood OCR: if the loop is painful, we want to feel that pain too. That's why **maintainers' own PRs go through it as well**.
 
 ### What counts as done
 
@@ -121,11 +126,11 @@ For example:
 
 ### How the check works
 
-The [OCR review gate](.github/workflows/ocr-review-gate.yml) workflow re-evaluates the PR on every push, PR edit, label change, and comment from the PR author or a maintainer. Maintainers can also re-run it by hand (**Actions → OCR review gate → Run workflow**, from the default branch, with the PR number). It:
+The [OCR review gate](.github/workflows/ocr-review-gate.yml) workflow checks only the loop. It doesn't look at the PR title or linked issues; those are for people to judge. It re-evaluates the PR when it's opened, reopened, marked ready for review, or pushed to, when a label changes, and on every comment from the PR author or a maintainer. Maintainers can also re-run it by hand (**Actions → OCR review gate → Run workflow**, from the default branch, with the PR number). It:
 
 - reads markers only from comments by **the PR author or a maintainer** (owner, member, collaborator), ignoring markers inside code blocks or quotes and any marker with a malformed field (the bot tells you how many it couldn't use, so a typo doesn't go unnoticed);
-- **passes** when the latest review marker is `APPROVE` with at least 2 distinct personas, the PR's head commit is the one covered by the most recent of that review and any address pass posted after it (`round=final`, or the same or a later round), and, for `feat`/`refactor`/`perf`/breaking PRs, an `accepted` issue is linked;
-- otherwise labels the PR and keeps **one** friendly bot comment up to date with exactly what's missing. **`needs-ocr-review`** means something is still on your side (the loop, the title, or linking an issue); **`needs-accepted-issue`** means a linked issue is waiting on our decision. When the PR passes, it removes the labels and updates that comment; it never posts a new comment just to say "pass".
+- **passes** when the latest review marker is `APPROVE` with at least 2 distinct personas, and the PR's head commit is the one covered by the most recent of that review and any address pass posted after it (`round=final`, or the same or a later round);
+- otherwise labels the PR **`needs-ocr-review`** and keeps **one** friendly bot comment up to date with exactly what's missing. When the PR passes, it removes the label and updates that comment; it never posts a new comment just to say "pass".
 
 It's a label, not a required status check: it never blocks merging on its own, and maintainers still read the trail. The workflow never checks out or runs code from your PR. It only reads PR metadata and comments through the GitHub API.
 
@@ -138,7 +143,7 @@ It's a label, not a required status check: it never blocks merging on its own, a
 
 ### Inactivity
 
-To keep the review queue honest, a PR labelled `needs-ocr-review` with no activity for **14 days** gets a friendly reminder (and the `ocr-review-stale` label). If there's still no activity **14 days** after that, it's closed with a note. That's not a judgment on the change: you can reopen it any time once the loop is approved, or comment and a maintainer will reopen it for you. Any push or comment resets the clock (so if you're waiting on us after a `NEEDS_DISCUSSION` round, just say so on the PR), and draft PRs and any PR carrying `needs-accepted-issue` (we owe the next step) are left alone.
+To keep the review queue honest, a PR labelled `needs-ocr-review` with no activity for **14 days** gets a friendly reminder (and the `ocr-review-stale` label). If there's still no activity **14 days** after that, it's closed with a note. That's not a judgment on the change: you can reopen it any time once the loop is approved, or comment and a maintainer will reopen it for you. Any push or comment resets the clock (so if you're waiting on us after a `NEEDS_DISCUSSION` round, just say so on the PR), and draft PRs are left alone.
 
 ### No AI tooling?
 
@@ -147,6 +152,8 @@ The loop needs an AI coding tool, and we don't want that to be a barrier. If you
 ## Contribution workflow
 
 ### 1. Create a branch
+
+For a non-trivial change, do this once a maintainer has given the go-ahead in [the issue](#start-with-an-issue).
 
 ```bash
 git checkout -b feat/your-feature-name
@@ -159,7 +166,7 @@ git checkout -b fix/issue-description
 - Follow the conventions in [`CLAUDE.md`](CLAUDE.md) (they apply to humans too): TypeScript only, ESM, apps never depend on apps.
 - Agent assets (skills, commands, reviewer personas) are edited in `packages/agents/`, then synced with `nx run cli:update`. Never hand-edit the generated `.ocr/` copies.
 - Add tests for new behavior and update docs when user-facing behavior changes.
-- Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages and the PR title.
+- Use [Conventional Commits](https://www.conventionalcommits.org/) (`type(scope): summary`, e.g. `fix(cli): handle an empty diff`) for commit messages and the PR title. Our release tooling reads commit types to choose the version bump and write the changelog. It's a guideline, not something the gate checks; if a title is off, a maintainer will help fix it.
 
 ### 3. Open the PR and run the loop
 
@@ -201,7 +208,7 @@ node --test ".github/scripts/*.test.ts"     # OCR review gate logic
 ## Areas to contribute
 
 - **Good first issues**: look for the [`good first issue`](https://github.com/spencermarx/open-code-review/labels/good%20first%20issue) label. Documentation improvements, additional reviewer personas, and CLI UX polish are often good starting points.
-- **Feature ideas**: new reviewer types, IDE integrations, GitHub Actions integration, notifications. Open an issue first so we can agree on the shape.
+- **Feature ideas**: new reviewer types, IDE integrations, GitHub Actions integration, notifications. [Start with an issue](#start-with-an-issue) so we can agree on the approach.
 - **Bug fixes**: check the tracker for the [`bug`](https://github.com/spencermarx/open-code-review/labels/bug) label.
 
 ## Releasing (maintainers)

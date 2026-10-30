@@ -5,13 +5,10 @@ import type { GateComment, GateInput, GatePullRequest, GateResult, RenderContext
 import {
   LABELS,
   STICKY_MARKER,
-  classifyTitle,
   collectTrustedMarkers,
   evaluateGate,
-  gateLabels,
   isTrustedComment,
   nextPageUrl,
-  parseClosingRefs,
   pickStickyComment,
   parseCommentMarker,
   parseMarkerLine,
@@ -51,8 +48,6 @@ function pr(overrides: Partial<GatePullRequest> = {}): GatePullRequest {
     draft: false,
     authorLogin: AUTHOR,
     authorType: 'User',
-    title: 'fix: handle empty diff',
-    body: '',
     headSha: HEAD,
     labels: [],
     ...overrides,
@@ -60,7 +55,7 @@ function pr(overrides: Partial<GatePullRequest> = {}): GatePullRequest {
 }
 
 function evaluate(input: Partial<GateInput> & { pr?: GatePullRequest } = {}): GateResult {
-  return evaluateGate({ pr: input.pr ?? pr(), comments: input.comments ?? [], linkedIssues: input.linkedIssues ?? [] })
+  return evaluateGate({ pr: input.pr ?? pr(), comments: input.comments ?? [] })
 }
 
 function reasonCodes(result: GateResult): string[] {
@@ -310,131 +305,8 @@ describe('evaluateGate: review loop', () => {
   })
 
   it('reports every failing condition at once', () => {
-    const result = evaluate({
-      pr: pr({ title: 'feat: shiny' }),
-      comments: [comment(review(1, 'REQUEST_CHANGES', 'principal', OLD))],
-    })
-    assert.deepEqual(reasonCodes(result), ['not-approved', 'too-few-personas', 'head-not-covered', 'issue-required'])
-  })
-})
-
-describe('classifyTitle and issue-first', () => {
-  it('classifies conventional titles', () => {
-    assert.deepEqual(classifyTitle('feat(cli): add flag'), { kind: 'conventional', type: 'feat', breaking: false, requiresIssue: true })
-    assert.deepEqual(classifyTitle('fix: crash'), { kind: 'conventional', type: 'fix', breaking: false, requiresIssue: false })
-    assert.deepEqual(classifyTitle('chore(deps)!: drop node 20'), { kind: 'conventional', type: 'chore', breaking: true, requiresIssue: true })
-    assert.deepEqual(classifyTitle('Docs: typo'), { kind: 'conventional', type: 'docs', breaking: false, requiresIssue: false })
-  })
-
-  for (const type of ['feat', 'refactor', 'perf']) {
-    it(`requires an issue for ${type}:`, () => {
-      const rule = classifyTitle(`${type}: x`)
-      assert.equal(rule.kind === 'conventional' && rule.requiresIssue, true)
-    })
-  }
-  for (const type of ['fix', 'docs', 'test', 'chore', 'ci', 'build', 'style', 'revert']) {
-    it(`does not require an issue for ${type}:`, () => {
-      const rule = classifyTitle(`${type}: x`)
-      assert.equal(rule.kind === 'conventional' && rule.requiresIssue, false)
-    })
-  }
-
-  for (const title of ['Add a thing', 'feature: add', 'feat:no space', 'feat(): empty scope', 'feat(a)(b): double', ': nothing', '', 'Revert feat: x']) {
-    it(`rejects unconventional title ${JSON.stringify(title)}`, () => assert.deepEqual(classifyTitle(title), { kind: 'unconventional' }))
-  }
-
-  it("treats GitHub's Revert-button titles as revert", () => {
-    assert.deepEqual(classifyTitle('Revert "feat(cli): add flag"'), { kind: 'conventional', type: 'revert', breaking: false, requiresIssue: false })
-  })
-
-  const approved = () => [comment(review(1, 'APPROVE', 'principal,quality'))]
-
-  it('fails a feat PR with no linked issue', () => {
-    assert.deepEqual(reasonCodes(evaluate({ pr: pr({ title: 'feat: x' }), comments: approved() })), ['issue-required'])
-  })
-
-  it('fails a feat PR whose linked issue is not accepted', () => {
-    const result = evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: [{ number: 12, labels: ['enhancement'], open: true }] })
-    assert.equal(result.status === 'fail' && result.reasons[0]?.code === 'issue-required' && result.reasons[0].waitingIssues[0], 12)
-  })
-
-  it('passes a feat PR linked to an accepted issue', () => {
-    const result = evaluate({
-      pr: pr({ title: 'feat: x' }),
-      comments: approved(),
-      linkedIssues: [{ number: 3, labels: [], open: true }, { number: 12, labels: ['enhancement', LABELS.accepted], open: true }],
-    })
-    assert.equal(result.status, 'pass')
-  })
-
-  it('requires an issue for breaking fixes', () => {
-    assert.deepEqual(reasonCodes(evaluate({ pr: pr({ title: 'fix!: change default' }), comments: approved() })), ['issue-required'])
-  })
-
-  it('fails an unconventional title with a specific reason', () => {
-    assert.deepEqual(reasonCodes(evaluate({ pr: pr({ title: 'Update stuff' }), comments: approved() })), ['unconventional-title'])
-  })
-})
-
-describe('parseClosingRefs', () => {
-  it('finds GitHub closing keywords', () => {
-    assert.deepEqual(parseClosingRefs('Closes #12\nfixes #3, resolved #44\nFix: #9'), [12, 3, 44, 9])
-  })
-
-  it('ignores the empty template placeholder, plain mentions, cross-repo refs and code blocks', () => {
-    const body = ['Closes #', 'See #5', 'Closes other/repo#6', 'prefixcloses #7', '```', 'Closes #8', '```'].join('\n')
-    assert.deepEqual(parseClosingRefs(body), [])
-  })
-
-  it('caps the number of references it returns', () => {
-    const body = Array.from({ length: 50 }, (_, i) => `Closes #${i + 1}`).join('\n')
-    assert.equal(parseClosingRefs(body).length, 10)
-  })
-
-  it('accepts optional colons and extra whitespace', () => {
-    assert.deepEqual(parseClosingRefs('Closes:  #4\nresolves \t#5\nfixes : #6'), [4, 5, 6])
-  })
-
-  it('stays linear on a maximum-size body of whitespace after a keyword', () => {
-    const start = performance.now()
-    assert.deepEqual(parseClosingRefs(`close${' '.repeat(65_000)}`), [])
-    assert.ok(performance.now() - start < 100, 'parseClosingRefs backtracked on hostile whitespace')
-  })
-})
-
-describe('gateLabels', () => {
-  const approved = () => [comment(review(1, 'APPROVE', 'principal,quality'))]
-
-  it('asks for no labels on pass, exempt or skip', () => {
-    assert.deepEqual(gateLabels(evaluate({ comments: approved() })), { needsReview: false, needsIssue: false })
-    assert.deepEqual(gateLabels(evaluate({ pr: pr({ labels: [LABELS.exempt] }) })), { needsReview: false, needsIssue: false })
-    assert.deepEqual(gateLabels(evaluate({ pr: pr({ draft: true }) })), { needsReview: false, needsIssue: false })
-  })
-
-  it('marks only a linked-but-unaccepted issue as a maintainer wait', () => {
-    const linked = [{ number: 12, labels: [], open: true }]
-    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: linked })), { needsReview: false, needsIssue: true })
-    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), linkedIssues: linked })), { needsReview: true, needsIssue: true })
-  })
-
-  it('puts a PR whose only linked issue is closed (declined) back on the contributor', () => {
-    const closed = [{ number: 9, labels: [], open: false }]
-    const result = evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: closed })
-    assert.deepEqual(gateLabels(result), { needsReview: true, needsIssue: false })
-    assert.match(renderStickyComment(result, ctx) ?? '', /The linked issue \(#9\) is closed without the `accepted` label\. Link an open issue instead/)
-    const mixed = [...closed, { number: 10, labels: [], open: true }]
-    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: mixed })), { needsReview: false, needsIssue: true })
-  })
-
-  it('still accepts an accepted issue that has since been closed', () => {
-    const result = evaluate({ pr: pr({ title: 'feat: x' }), comments: approved(), linkedIssues: [{ number: 9, labels: [LABELS.accepted], open: false }] })
-    assert.equal(result.status, 'pass')
-  })
-
-  it('keeps contributor-owned work, including linking an issue at all, on needs-ocr-review', () => {
-    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'feat: x' }), comments: approved() })), { needsReview: true, needsIssue: false })
-    assert.deepEqual(gateLabels(evaluate()), { needsReview: true, needsIssue: false })
-    assert.deepEqual(gateLabels(evaluate({ pr: pr({ title: 'Update stuff' }), comments: approved() })), { needsReview: true, needsIssue: false })
+    const result = evaluate({ comments: [comment(review(1, 'REQUEST_CHANGES', 'principal', OLD))] })
+    assert.deepEqual(reasonCodes(result), ['not-approved', 'too-few-personas', 'head-not-covered'])
   })
 })
 
@@ -475,10 +347,9 @@ describe('workflow and repo contracts', () => {
     assert.ok(!isTrustedComment(comment('x', { authorLogin: 'someone', authorAssociation: 'CONTRIBUTOR' }), AUTHOR))
   })
 
-  it('stale-closes only needs-ocr-review PRs and never a maintainer wait', () => {
+  it('stale-closes only needs-ocr-review PRs and never an exempt one', () => {
     const reminders = read('.github/workflows/ocr-review-reminders.yml')
     assert.match(reminders, new RegExp(`only-pr-labels: ${LABELS.needsReview}\\n`))
-    assert.match(reminders, new RegExp(`exempt-pr-labels: .*${LABELS.needsIssue}`))
     assert.match(reminders, new RegExp(`exempt-pr-labels: .*${LABELS.exempt}`))
   })
 
@@ -489,20 +360,19 @@ describe('workflow and repo contracts', () => {
       // The whole `labels:` value: inline (`[a, b]` / `a, b`) or a block list
       // of indented `- item` lines (YAML forms and Markdown front matter alike).
       const labels = /^labels:[^\n]*(?:\n[ \t]+-[^\n]*)*/m.exec(read(`.github/ISSUE_TEMPLATE/${template}`))?.[0] ?? ''
-      for (const trusted of [LABELS.accepted, LABELS.exempt]) assert.ok(!labels.includes(trusted), `${template} applies ${trusted}`)
+      assert.ok(!labels.includes(LABELS.exempt), `${template} applies ${LABELS.exempt}`)
     }
   })
 
   it('reads labels from block-style lists too', () => {
-    const block = 'name: x\nlabels:\n  - bug\n  - accepted\nbody: []'
-    assert.ok((/^labels:[^\n]*(?:\n[ \t]+-[^\n]*)*/m.exec(block)?.[0] ?? '').includes('accepted'))
+    const block = `name: x\nlabels:\n  - bug\n  - ${LABELS.exempt}\nbody: []`
+    assert.ok((/^labels:[^\n]*(?:\n[ \t]+-[^\n]*)*/m.exec(block)?.[0] ?? '').includes(LABELS.exempt))
   })
 
-  it('lets only the linked-issue lookup see a redirect; every other call refuses them', () => {
+  it('refuses redirects on every API call', () => {
     const runner = read('.github/scripts/ocr-review-gate.ts')
-    assert.match(runner, /redirect: 'error' \| 'manual' = 'error'/)
-    assert.equal(runner.match(/'manual'\)/g)?.length, 1, 'exactly one call site may opt into manual redirects')
-    assert.match(runner, /\/issues\/\$\{number\}`, undefined, 'manual'\)/)
+    assert.match(runner, /redirect: 'error',/)
+    assert.ok(!runner.includes("'manual'"), 'no call may opt into following or surfacing redirects')
   })
 })
 
@@ -591,7 +461,6 @@ describe('rendering', () => {
   it('never echoes attacker-controlled text into the bot comment', () => {
     const payload = '@everyone <img src=x onerror=alert(1)> [click](https://evil.example) $(curl evil)'
     const result = evaluate({
-      pr: pr({ title: `feat: ${payload}`, body: payload }),
       comments: [
         comment(`${payload}\n<!-- ocr-review-loop:review round=1 verdict=APPROVE personas=principal,<script> sha=${HEAD} -->`),
         comment(`<!-- ocr-review-loop:review round=1 verdict=APPROVE`),
@@ -619,65 +488,25 @@ describe('rendering', () => {
       [evaluate({ comments: [comment(review(1, 'APPROVE', 'principal'))] }), /Round 1 used 1 distinct reviewer persona \(`principal`\); the loop needs at least 2/],
       [evaluate({ comments: [comment(review(1, 'APPROVE', 'ephemeral-1,ephemeral-2'))] }), /Round 1 didn't list any reviewer personas \(ephemeral/],
       [evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,quality', OLD))] }), /covers `bbbbbbb`, but the PR head is now `aaaaaaa`\. Commits pushed after the loop need another review round/],
-      [evaluate({ pr: pr({ title: 'Update stuff' }) }), /should look like `type: summary` \(with a space after the colon\) using one of `feat`, .*`revert`/],
-      [evaluate({ pr: pr({ title: 'feat: x' }) }), /`feat:` PRs need a linked issue .* Link one with `Closes #<number>`/],
-      [evaluate({ pr: pr({ title: 'fix!: x' }), linkedIssues: [{ number: 12, labels: [], open: true }] }), /Breaking changes need .* The linked issue \(#12\) doesn't have/],
-      [evaluate({ pr: pr({ title: 'feat: x' }), linkedIssues: [{ number: 1, labels: [], open: true }, { number: 2, labels: [], open: true }] }), /The linked issues \(#1, #2\) don't have/],
     ]
     for (const [result, pattern] of cases) assert.match(renderStickyComment(result, ctx) ?? '', pattern)
   })
 
-  it('says accurately when it re-checks, and shows loop steps only when the loop is missing', () => {
-    const loop = renderStickyComment(evaluate(), ctx) ?? ''
-    assert.match(loop, /re-check automatically when you push, edit the PR, or comment here/)
-    assert.ok(!loop.includes('every push and comment'))
-    assert.match(loop, /### OCR review loop: not complete yet/)
-    assert.match(loop, /\*\*How to finish\*\*/)
-    assert.match(loop, /14 days/)
-  })
-
-  it('tells a contributor with an approved loop that only the issue decision is left', () => {
-    const approvedLoop = [comment(review(1, 'APPROVE', 'principal,quality'))]
-    const body = renderStickyComment(evaluate({ pr: pr({ title: 'feat: x' }), comments: approvedLoop, linkedIssues: [{ number: 12, labels: [], open: true }] }), ctx) ?? ''
-    assert.match(body, /### OCR review gate: waiting on an accepted issue/)
-    assert.match(body, /Your OCR review loop is complete ✅/)
-    assert.match(body, /won't be closed for inactivity/)
-    assert.match(body, /Once it's accepted, comment here or edit the PR/)
-    assert.ok(!body.includes('How to finish'))
-    assert.ok(!body.includes('/ocr-review-loop'))
-  })
-
-  it('does not ask an approved loop to re-run for a title or a missing issue link', () => {
-    const approvedLoop = [comment(review(1, 'APPROVE', 'principal,quality'))]
-    for (const result of [
-      evaluate({ pr: pr({ title: 'Update stuff' }), comments: approvedLoop }),
-      evaluate({ pr: pr({ title: 'feat: x' }), comments: approvedLoop }),
-    ]) {
-      const body = renderStickyComment(result, ctx) ?? ''
-      assert.match(body, /### OCR review gate: almost there/)
-      assert.match(body, /Your OCR review loop is complete ✅/)
-      assert.ok(!body.includes('How to finish'))
-      assert.ok(!body.includes('OCR review loop: not complete yet'))
-      assert.match(body, /14 days/)
-    }
-  })
-
-  it('keeps "almost there" when a stray malformed marker follows an approved loop', () => {
-    const comments = [
-      comment(review(1, 'APPROVE', 'principal,quality')),
-      comment(`<!-- ocr-review-loop:address round=final sha=NOTASHA -->`),
-    ]
-    const body = renderStickyComment(evaluate({ pr: pr({ title: 'Update stuff' }), comments }), ctx) ?? ''
-    assert.match(body, /### OCR review gate: almost there/)
-    assert.match(body, /1 comment has an `ocr-review-loop:` marker I couldn't use/)
-    assert.ok(!body.includes('How to finish'))
-  })
-
-  it('never promises a close when a maintainer wait pauses the clock, even with the loop missing', () => {
-    const body = renderStickyComment(evaluate({ pr: pr({ title: 'feat: x' }), linkedIssues: [{ number: 12, labels: [], open: true }] }), ctx) ?? ''
+  it('says accurately when it re-checks, and how inactivity works', () => {
+    const body = renderStickyComment(evaluate(), ctx) ?? ''
+    assert.match(body, /re-check automatically when you push or comment here/)
+    assert.ok(!body.includes('edit the PR'))
     assert.match(body, /### OCR review loop: not complete yet/)
-    assert.match(body, /won't be closed for inactivity while that's pending/)
-    assert.ok(!body.includes('14 days'))
+    assert.match(body, /\*\*How to finish\*\*/)
+    assert.match(body, /14 days/)
+  })
+
+  it('suggests an issue for bigger changes only as advice, and only while the loop is open', () => {
+    const fail = renderStickyComment(evaluate(), ctx) ?? ''
+    assert.match(fail, /\[starting with one\]\(\S+CONTRIBUTING\.md#start-with-an-issue\)/)
+    assert.match(fail, /not something I check/)
+    const pass = renderStickyComment(evaluate({ comments: [comment(review(1, 'APPROVE', 'principal,quality'))] }), ctx) ?? ''
+    assert.ok(!pass.includes('issue'))
   })
 
   it('names both command styles for non-Claude-Code tools', () => {
@@ -691,11 +520,7 @@ describe('rendering', () => {
         (m[1] ?? '').trim().toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, '').replace(/ /g, '-'),
       ),
     )
-    const rendered = [
-      evaluate(),
-      evaluate({ pr: pr({ title: 'feat: x' }) }),
-      evaluate({ comments: [comment(`<!-- ocr-review-loop:review round=1 -->`)] }),
-    ].map((r) => renderStickyComment(r, ctx) ?? '')
+    const rendered = [evaluate(), evaluate({ comments: [comment(`<!-- ocr-review-loop:review round=1 -->`)] })].map((r) => renderStickyComment(r, ctx) ?? '')
     const anchors = new Set(rendered.flatMap((body) => [...body.matchAll(/CONTRIBUTING\.md#([a-z0-9-]+)/g)].map((m) => m[1] ?? '')))
     assert.ok(anchors.size >= 3)
     for (const anchor of anchors) assert.ok(slugs.has(anchor), `CONTRIBUTING.md has no heading for #${anchor}`)

@@ -1,19 +1,19 @@
 // Pure evaluation logic for the OCR review gate (.github/workflows/ocr-review-gate.yml).
 //
 // Everything here is side-effect free so it can be unit tested without the
-// GitHub API; ocr-review-gate.ts does the I/O. All PR titles, PR bodies and
-// comment bodies are attacker-controlled input: markers are validated field by
-// field and only validated values (or values GitHub itself guarantees, like
-// SHAs and logins from the API) are ever echoed back into the bot comment.
+// GitHub API; ocr-review-gate.ts does the I/O. Comment bodies are
+// attacker-controlled input: markers are validated field by field and only
+// validated values (or values GitHub itself guarantees, like SHAs and logins
+// from the API) are ever echoed back into the bot comment.
+//
+// The gate checks only the loop evidence. Whether a change is wanted is
+// settled by people in an issue thread, never by this gate.
 
-// `needsReview` marks work the contributor owes (the loop, a conventional
-// title) and is what the reminders workflow acts on. `needsIssue` marks a wait
-// on maintainers accepting an issue, so it is deliberately never stale-closed.
+// `needsReview` is the one label the gate applies, and what the reminders
+// workflow acts on.
 export const LABELS = {
   needsReview: 'needs-ocr-review',
-  needsIssue: 'needs-accepted-issue',
   exempt: 'ocr-review-exempt',
-  accepted: 'accepted',
   stale: 'ocr-review-stale',
 } as const
 
@@ -21,11 +21,6 @@ export const STICKY_MARKER = '<!-- ocr-review-gate -->'
 export const MIN_DISTINCT_PERSONAS = 2
 
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR'])
-
-// Conventional-commit types that may skip the issue-first step. `!` (breaking)
-// always requires an accepted issue, whatever the type.
-const ISSUE_OPTIONAL_TYPES = new Set(['fix', 'docs', 'test', 'chore', 'ci', 'build', 'style', 'revert'])
-const ISSUE_REQUIRED_TYPES = new Set(['feat', 'refactor', 'perf'])
 
 export type Verdict = 'APPROVE' | 'REQUEST_CHANGES' | 'NEEDS_DISCUSSION'
 const VERDICTS: ReadonlySet<string> = new Set<Verdict>(['APPROVE', 'REQUEST_CHANGES', 'NEEDS_DISCUSSION'])
@@ -36,7 +31,6 @@ const SHA_RE = /^[0-9a-f]{7,40}$/
 const MAX_PERSONAS = 32
 // Real markers are ~200 chars. The cap bounds the work done on hostile input.
 const MAX_MARKER_LINE = 1024
-const MAX_CLOSING_REFS = 10
 
 export interface ReviewMarker {
   kind: 'review'
@@ -68,23 +62,13 @@ export interface GatePullRequest {
   draft: boolean
   authorLogin: string
   authorType: string
-  title: string
-  body: string
   headSha: string
   labels: string[]
-}
-
-export interface LinkedIssue {
-  number: number
-  labels: string[]
-  open: boolean
 }
 
 export interface GateInput {
   pr: GatePullRequest
   comments: GateComment[]
-  /** Same-repository issues the PR links to, with their current labels. */
-  linkedIssues: LinkedIssue[]
 }
 
 export type GateReason =
@@ -92,16 +76,6 @@ export type GateReason =
   | { code: 'not-approved'; round: number; verdict: Verdict }
   | { code: 'too-few-personas'; round: number; personas: string[] }
   | { code: 'head-not-covered'; markerSha: string; headSha: string }
-  | { code: 'unconventional-title' }
-  | {
-      code: 'issue-required'
-      type: string
-      breaking: boolean
-      /** Open linked issues still awaiting `accepted`: a wait on maintainers. */
-      waitingIssues: number[]
-      /** Closed linked issues without `accepted` (e.g. declined). */
-      closedIssues: number[]
-    }
 
 export interface GateEvidence {
   headSha: string
@@ -275,75 +249,11 @@ export function coveringMarker(latestReview: ReviewMarker, after: LoopMarker[]):
   return addresses.at(-1) ?? latestReview
 }
 
-/**
- * An open linked issue waiting for `accepted` is the one failure a maintainer
- * owes. A closed one (declined) is back on the contributor.
- */
-function isMaintainerWait(reason: GateReason): boolean {
-  return reason.code === 'issue-required' && reason.waitingIssues.length > 0
-}
-
-const LOOP_REASONS: ReadonlySet<GateReason['code']> = new Set(['no-review', 'not-approved', 'too-few-personas', 'head-not-covered'])
-
-/**
- * Which gate-managed labels a result calls for: `needsReview` whenever the
- * contributor owes the next step (including linking an issue at all), and
- * `needsIssue` only while a linked issue waits on a maintainer.
- */
-export function gateLabels(result: GateResult): { needsReview: boolean; needsIssue: boolean } {
-  if (result.status !== 'fail') return { needsReview: false, needsIssue: false }
-  return {
-    needsReview: result.reasons.some((r) => !isMaintainerWait(r)),
-    needsIssue: result.reasons.some(isMaintainerWait),
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Issue-first
-// ---------------------------------------------------------------------------
-
-export type TitleRule =
-  | { kind: 'unconventional' }
-  | { kind: 'conventional'; type: string; breaking: boolean; requiresIssue: boolean }
-
-export function classifyTitle(title: string): TitleRule {
-  // GitHub's Revert button titles PRs `Revert "<original title>"`.
-  if (/^Revert "/.test(title.trim())) {
-    return { kind: 'conventional', type: 'revert', breaking: false, requiresIssue: false }
-  }
-  const match = /^([A-Za-z]+)(?:\([^()\r\n]{1,64}\))?(!)?: \S/.exec(title.trim())
-  const type = match?.[1]?.toLowerCase()
-  if (!type || !(ISSUE_OPTIONAL_TYPES.has(type) || ISSUE_REQUIRED_TYPES.has(type))) {
-    return { kind: 'unconventional' }
-  }
-  const breaking = match?.[2] === '!'
-  return { kind: 'conventional', type, breaking, requiresIssue: breaking || ISSUE_REQUIRED_TYPES.has(type) }
-}
-
-/**
- * Same-repository issue numbers referenced with a GitHub closing keyword
- * (`Closes #12`, `fixes #3`, ...). Cross-repo references are ignored on
- * purpose: an "accepted" label in someone else's repo means nothing here.
- */
-export function parseClosingRefs(body: string): number[] {
-  const refs = new Set<number>()
-  // The optional colon group only consumes whitespace when a `:` follows, so
-  // the separator can't backtrack quadratically on long runs of spaces.
-  const re = /(?:^|[^\w/#-])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)(?:[ \t]*:)?[ \t]+#(\d{1,7})\b/gi
-  for (const line of stripFencedCode(body)) {
-    for (const m of line.matchAll(re)) {
-      refs.add(Number(m[1]))
-      if (refs.size >= MAX_CLOSING_REFS) return [...refs]
-    }
-  }
-  return [...refs]
-}
-
 // ---------------------------------------------------------------------------
 // Evaluation
 // ---------------------------------------------------------------------------
 
-export function evaluateGate({ pr, comments, linkedIssues }: GateInput): GateResult {
+export function evaluateGate({ pr, comments }: GateInput): GateResult {
   if (pr.state !== 'open') return { status: 'skip', why: 'closed' }
   if (pr.draft) return { status: 'skip', why: 'draft' }
   if (isBotAuthor(pr)) return { status: 'exempt', why: 'bot' }
@@ -370,19 +280,6 @@ export function evaluateGate({ pr, comments, linkedIssues }: GateInput): GateRes
     }
   }
 
-  const title = classifyTitle(pr.title)
-  if (title.kind === 'unconventional') {
-    reasons.push({ code: 'unconventional-title' })
-  } else if (title.requiresIssue && !linkedIssues.some((i) => i.labels.includes(LABELS.accepted))) {
-    reasons.push({
-      code: 'issue-required',
-      type: title.type,
-      breaking: title.breaking,
-      waitingIssues: linkedIssues.filter((i) => i.open).map((i) => i.number),
-      closedIssues: linkedIssues.filter((i) => !i.open).map((i) => i.number),
-    })
-  }
-
   return reasons.length === 0 ? { status: 'pass', evidence } : { status: 'fail', reasons, evidence }
 }
 
@@ -407,7 +304,7 @@ function docsLink(ctx: RenderContext, anchor: string): string {
   return `${ctx.repoUrl}/blob/${ctx.defaultBranch}/CONTRIBUTING.md#${anchor}`
 }
 
-function renderReason(reason: GateReason, ctx: RenderContext): string {
+function renderReason(reason: GateReason): string {
   switch (reason.code) {
     case 'no-review':
       return "I couldn't find an OCR review round with an `ocr-review-loop:` marker on this PR yet. Run the review loop and post each round here; `/ocr-review-loop` does this for you (OCR's `/ocr:post` doesn't add the marker)."
@@ -425,28 +322,8 @@ function renderReason(reason: GateReason, ctx: RenderContext): string {
     }
     case 'head-not-covered':
       return `The latest loop round covers \`${short(reason.markerSha)}\`, but the PR head is now \`${short(reason.headSha)}\`. Commits pushed after the loop need another review round (it's usually a quick one).`
-    case 'unconventional-title':
-      return `The PR title should look like \`type: summary\` (with a space after the colon) using one of ${TITLE_TYPES}, so I can tell whether an accepted issue is needed. Please retitle the PR.`
-    case 'issue-required': {
-      const kind = reason.breaking ? 'Breaking changes' : `\`${reason.type}:\` PRs`
-      const refs = (numbers: number[]) => numbers.map((n) => `#${n}`).join(', ')
-      const plural = (numbers: number[]) => numbers.length > 1
-      let linked: string
-      if (reason.waitingIssues.length > 0) {
-        const w = reason.waitingIssues
-        linked = ` The linked issue${plural(w) ? 's' : ''} (${refs(w)}) ${plural(w) ? "don't" : "doesn't"} have the \`${LABELS.accepted}\` label yet. Once it's accepted, comment here or edit the PR and I'll re-check.`
-      } else if (reason.closedIssues.length > 0) {
-        const c = reason.closedIssues
-        linked = ` The linked issue${plural(c) ? 's' : ''} (${refs(c)}) ${plural(c) ? 'are' : 'is'} closed without the \`${LABELS.accepted}\` label. Link an open issue instead, or ask us here if you think it should be reopened.`
-      } else {
-        linked = " Link one with `Closes #<number>` in the description; once it's accepted, I'll re-check."
-      }
-      return `${kind} need a linked issue a maintainer has marked \`${LABELS.accepted}\` ([why](${docsLink(ctx, 'open-an-issue-first-for-non-trivial-changes')})).${linked}`
-    }
   }
 }
-
-const TITLE_TYPES = [...ISSUE_REQUIRED_TYPES, ...ISSUE_OPTIONAL_TYPES].map((t) => `\`${t}\``).join(', ')
 
 function renderRejectedHint(count: number, ctx: RenderContext): string {
   const what = count === 1 ? '1 comment has' : `${count} comments have`
@@ -458,45 +335,28 @@ export function renderStickyComment(result: GateResult, ctx: RenderContext): str
   const policy = docsLink(ctx, 'required-ocr-review-loop-before-maintainer-review')
 
   if (result.status === 'fail') {
-    const labels = gateLabels(result)
-    const loopMissing = result.reasons.some((r) => LOOP_REASONS.has(r.code))
-    const reasons = result.reasons.map((r) => `- ${renderReason(r, ctx)}`)
+    const reasons = result.reasons.map((r) => `- ${renderReason(r)}`)
     if (result.evidence.rejectedMarkers > 0) reasons.push(`- ${renderRejectedHint(result.evidence.rejectedMarkers, ctx)}`)
-    const heading = loopMissing
-      ? '### OCR review loop: not complete yet'
-      : labels.needsReview
-        ? '### OCR review gate: almost there'
-        : '### OCR review gate: waiting on an accepted issue'
-    const intro = loopMissing
-      ? `${greeting} for contributing! Before a maintainer reviews a PR, we ask contributors to run OCR's own review loop on it and post the rounds here. It catches most issues before a human spends time on them, and it's how we [dogfood the tool](${policy}).`
-      : `${greeting} for contributing! Your OCR review loop is complete ✅, so only the item below is left before a maintainer reviews this PR.`
-    const howToFinish = loopMissing
-      ? [
-          '**How to finish**',
-          '',
-          '- **Claude Code:** run `/ocr-review-loop` on this branch (`--team principal:2,quality:2,security:1` is a great choice). It posts every round for you.',
-          `- **Other AI tools:** run \`/ocr:review\` and \`/ocr:address\` (\`/ocr-review\` and \`/ocr-address\` in Windsurf and other tools with flat command names) round by round, and post each round with the markers described in the [manual fallback](${docsLink(ctx, 'other-ai-tools-manual-fallback')}).`,
-          `- **No AI tooling?** No problem. [Open an issue](${ctx.repoUrl}/issues/new/choose) describing the change and a maintainer can pick it up or exempt this PR.`,
-          '',
-        ]
-      : []
-    // Mirrors the reminders workflow, which exempts needs-accepted-issue even
-    // when needs-ocr-review is also present.
-    const inactivity = labels.needsIssue
-      ? ` \`${LABELS.needsIssue}\` means we're waiting on a maintainer, so this PR won't be closed for inactivity while that's pending.`
-      : ` While \`${LABELS.needsReview}\` is on this PR it won't be queued for maintainer review. If it sits inactive for 14 days I'll send a friendly reminder, and 14 days after that it will be closed; it can be reopened any time once everything above is done.`
     return [
       STICKY_MARKER,
-      heading,
+      '### OCR review loop: not complete yet',
       '',
-      intro,
+      `${greeting} for contributing! Before a maintainer reviews a PR, we ask contributors to run OCR's own review loop on it and post the rounds here. It catches most issues before a human spends time on them, and it's how we [dogfood the tool](${policy}).`,
       '',
       "**What's still needed**",
       '',
       ...reasons,
       '',
-      ...howToFinish,
-      `I re-check automatically when you push, edit the PR, or comment here (comments from you or a maintainer).${inactivity}`,
+      '**How to finish**',
+      '',
+      '- **Claude Code:** run `/ocr-review-loop` on this branch (`--team principal:2,quality:2,security:1` is a great choice). It posts every round for you.',
+      `- **Other AI tools:** run \`/ocr:review\` and \`/ocr:address\` (\`/ocr-review\` and \`/ocr-address\` in Windsurf and other tools with flat command names) round by round, and post each round with the markers described in the [manual fallback](${docsLink(ctx, 'other-ai-tools-manual-fallback')}).`,
+      `- **No AI tooling?** No problem. [Open an issue](${ctx.repoUrl}/issues/new/choose) describing the change and a maintainer can pick it up or exempt this PR.`,
+      '',
+      // Advice only: whether a change needed an issue is a maintainer's call.
+      `Bigger change that hasn't been discussed in an issue yet? It's worth [starting with one](${docsLink(ctx, 'start-with-an-issue')}) so we can agree on the approach before you put more time in. That's a conversation with a maintainer, not something I check.`,
+      '',
+      `I re-check automatically when you push or comment here (comments from you or a maintainer). While \`${LABELS.needsReview}\` is on this PR it won't be queued for maintainer review. If it sits inactive for 14 days I'll send a friendly reminder, and 14 days after that it will be closed; it can be reopened any time once the loop is done.`,
       '',
       `<sub>Checked head \`${short(result.evidence.headSha)}\`. This is a label, not a required status check.</sub>`,
     ].join('\n')
