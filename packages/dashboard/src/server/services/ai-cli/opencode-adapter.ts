@@ -84,12 +84,13 @@ export class OpenCodeAdapter implements AiCliAdapter {
 
     const isWorkflow = opts.mode === 'workflow'
 
-    // OpenCode uses agent-based tool control instead of allowlists:
+    // OpenCode uses agent-based tool control instead of per-spawn allowlists:
     //   build = full tool access (write, edit, bash, etc.)
     //   plan  = read-only analysis (file edits and bash require approval)
-    const agent = opts.allowedTools
-      ? undefined // caller specified tools — skip agent flag and let OpenCode defaults apply
-      : isWorkflow ? 'build' : 'plan'
+    // Never omit this flag. OpenCode may otherwise select its configured
+    // default agent, which can turn a query such as Ask the Team into a
+    // write-capable workflow despite the caller supplying read-only tools.
+    const agent = isWorkflow ? 'build' : 'plan'
 
     // The prompt is NOT an argv element — it is delivered on stdin below
     // (issue #43): argv embedded user input + review content in process

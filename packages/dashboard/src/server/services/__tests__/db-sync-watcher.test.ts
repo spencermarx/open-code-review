@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import {
   openDatabase,
   runMigrations,
+  insertEvent,
   insertSession,
   updateSession,
   type Database,
@@ -111,5 +112,65 @@ describe('DbSyncWatcher change notification', () => {
     const updates = emits.filter((e) => e.event === 'session:updated')
     expect(updates).toHaveLength(1)
     expect((updates[0]!.payload as { current_phase: string }).current_phase).toBe('reviews')
+  })
+
+  it('materializes and announces a newly started review round before artifacts exist', async () => {
+    insertSession(db, {
+      id: 'sess-round-live',
+      branch: 'feat/round-live',
+      workflow_type: 'review',
+      session_dir: '.ocr/sessions/sess-round-live',
+    })
+    const watcher = new DbSyncWatcher(db, dbPath, makeIo(emits))
+    await watcher.init()
+
+    insertEvent(db, {
+      session_id: 'sess-round-live',
+      event_type: 'round_started',
+      phase: 'context',
+      phase_number: 1,
+      round: 2,
+    })
+    watcher.syncFromDisk()
+
+    const rows = db.exec(
+      'SELECT round_number FROM review_rounds WHERE session_id = ?',
+      ['sess-round-live'],
+    )
+    expect(rows[0]?.values).toEqual([[2]])
+    expect(emits).toContainEqual({
+      event: 'round:updated',
+      payload: {
+        sessionId: 'sess-round-live',
+        roundNumber: 2,
+        source: 'lifecycle',
+      },
+    })
+  })
+
+  it('backfills a started review round that predates dashboard startup', async () => {
+    insertSession(db, {
+      id: 'sess-round-existing',
+      branch: 'feat/round-existing',
+      workflow_type: 'review',
+      session_dir: '.ocr/sessions/sess-round-existing',
+    })
+    insertEvent(db, {
+      session_id: 'sess-round-existing',
+      event_type: 'round_started',
+      phase: 'context',
+      phase_number: 1,
+      round: 2,
+    })
+
+    const watcher = new DbSyncWatcher(db, dbPath, makeIo(emits))
+    await watcher.init()
+
+    const rows = db.exec(
+      'SELECT round_number FROM review_rounds WHERE session_id = ?',
+      ['sess-round-existing'],
+    )
+    expect(rows[0]?.values).toEqual([[2]])
+    expect(emits.filter((event) => event.event === 'round:updated')).toHaveLength(0)
   })
 })

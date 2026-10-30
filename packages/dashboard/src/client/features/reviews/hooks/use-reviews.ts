@@ -19,6 +19,9 @@ export function useAllReviews() {
   useSocketEvent('artifact:updated', () => {
     queryClient.invalidateQueries({ queryKey: ['reviews'] })
   })
+  useSocketEvent('round:updated', () => {
+    queryClient.invalidateQueries({ queryKey: ['reviews'] })
+  })
 
   return useQuery<ReviewRound[]>({
     queryKey: ['reviews'],
@@ -43,6 +46,12 @@ export function useRound(sessionId: string, roundNumber: number) {
 
   useSocketEvent('artifact:updated', () => {
     queryClient.invalidateQueries({ queryKey })
+  })
+
+  useSocketEvent<{ sessionId: string; roundNumber: number }>('round:updated', (event) => {
+    if (event.sessionId === sessionId && event.roundNumber === roundNumber) {
+      queryClient.invalidateQueries({ queryKey })
+    }
   })
 
   return query

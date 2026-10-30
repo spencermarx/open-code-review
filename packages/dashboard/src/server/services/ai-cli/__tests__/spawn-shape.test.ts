@@ -191,3 +191,32 @@ describe.each([
     expect(child.unref).not.toHaveBeenCalled()
   })
 })
+
+describe('OpenCode agent isolation', () => {
+  it('forces read-only plan mode for a query even when an allowlist is supplied', () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child.proc)
+
+    new OpenCodeAdapter().spawn({
+      prompt: PROMPT,
+      cwd: '/tmp',
+      mode: 'query',
+      allowedTools: ['Read', 'Grep', 'Glob'],
+    })
+
+    const args = spawnMock.mock.calls[0]![1]
+    expect(args).toContain('--agent')
+    expect(args[args.indexOf('--agent') + 1]).toBe('plan')
+  })
+
+  it('forces build mode for workflows', () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child.proc)
+
+    new OpenCodeAdapter().spawn({ prompt: PROMPT, cwd: '/tmp', mode: 'workflow' })
+
+    const args = spawnMock.mock.calls[0]![1]
+    expect(args).toContain('--agent')
+    expect(args[args.indexOf('--agent') + 1]).toBe('build')
+  })
+})
