@@ -134,7 +134,13 @@ jobs:
     name: UI E2E (Playwright)
     needs: [typecheck, test]
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    # Pinned, unlike the Node-only jobs: Playwright ships browser builds and
+    # `--with-deps` package lists per OS release, so a floating label lets
+    # GitHub change the OS under an unchanged lockfile. That is how
+    # `ubuntu-latest` moving to 26.04 broke this job on Playwright 1.59
+    # ("does not support chromium on ubuntu26.04-x64"). Move this label only
+    # together with a @playwright/test version that supports the new OS.
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

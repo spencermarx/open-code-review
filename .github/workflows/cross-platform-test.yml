@@ -6,10 +6,12 @@ on:
       os:
         description: "Target OS"
         type: choice
+        # The Linux option is pinned rather than ubuntu-latest because it also
+        # runs the Playwright suite; see the e2e-ui job in ci.yml for why.
         options:
           - windows-latest
           - macos-latest
-          - ubuntu-latest
+          - ubuntu-26.04
         default: windows-latest
       targets:
         # e2e-only exists so a branch can validate its e2e suites on an OS
@@ -79,11 +81,11 @@ jobs:
         run: pnpm nx e2e dashboard-api-e2e
 
       - name: Install Playwright (Linux only)
-        if: ${{ inputs.os == 'ubuntu-latest' }}
+        if: ${{ runner.os == 'Linux' }}
         run: pnpm exec playwright install --with-deps chromium
 
       - name: UI E2E (Linux only)
-        if: ${{ inputs.os == 'ubuntu-latest' }}
+        if: ${{ runner.os == 'Linux' }}
         run: pnpm nx e2e dashboard-ui-e2e
 
       - name: Debug Session (SSH)
