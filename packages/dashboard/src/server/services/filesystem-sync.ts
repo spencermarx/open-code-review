@@ -18,6 +18,7 @@ import type { Server as SocketIOServer } from 'socket.io'
 import { parseMapMd } from './parsers/map-parser.js'
 import { parseReviewerOutput } from './parsers/reviewer-parser.js'
 import { parseFinalMd } from './parsers/final-parser.js'
+import { reconcileFindings } from './finding-reconcile.js'
 
 // ── Types ──
 
@@ -722,10 +723,13 @@ export class FilesystemSync {
     const content = readFileSync(filePath, 'utf-8')
     const parsed = parseReviewerOutput(content)
 
-    // Upsert reviewer_output
+    // Upsert reviewer_output. Never INSERT OR REPLACE: that deletes the row and,
+    // with foreign_keys=ON, cascades to review_findings and user_finding_progress.
     this.db.run(
-      `INSERT OR REPLACE INTO reviewer_outputs (round_id, reviewer_type, instance_number, file_path, finding_count, parsed_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO reviewer_outputs (round_id, reviewer_type, instance_number, file_path, finding_count, parsed_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(round_id, reviewer_type, instance_number)
+       DO UPDATE SET file_path = excluded.file_path, finding_count = excluded.finding_count, parsed_at = excluded.parsed_at`,
       [roundId, reviewerType, instanceNumber, filePath, parsed.findings.length, sqlNow()],
     )
 
@@ -737,64 +741,16 @@ export class FilesystemSync {
     const outputId = outputRow?.['id'] as number | undefined
     if (!outputId) return
 
-    // Stash user progress before delete (cascade will destroy it)
-    const stashedFindingProgress = new Map<string, { status: string; updatedAt: string | null }>()
-    const findingProgressResult = this.db.exec(
-      `SELECT rf.title, rf.severity, rf.file_path, ufp.status, ufp.updated_at
-       FROM user_finding_progress ufp
-       JOIN review_findings rf ON rf.id = ufp.finding_id
-       WHERE rf.reviewer_output_id = ?`,
-      [outputId],
-    )
-    if (findingProgressResult[0]) {
-      for (const row of findingProgressResult[0].values) {
-        const key = `${row[0] as string}|${row[1] as string}|${row[2] as string}`
-        stashedFindingProgress.set(key, {
-          status: row[3] as string,
-          updatedAt: row[4] as string | null,
-        })
-      }
-    }
-
-    // Delete existing findings for this output (they get replaced on re-parse)
-    this.db.run('DELETE FROM review_findings WHERE reviewer_output_id = ?', [outputId])
-
-    // Insert findings
-    for (const finding of parsed.findings) {
-      this.db.run(
-        `INSERT INTO review_findings (reviewer_output_id, title, severity, file_path, line_start, line_end, summary, is_blocker, parsed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          outputId,
-          finding.title,
-          finding.severity,
-          finding.filePath,
-          finding.lineStart,
-          finding.lineEnd,
-          finding.summary,
-          finding.isBlocker ? 1 : 0,
-          sqlNow(),
-        ],
-      )
-
-      // Restore stashed user progress for this finding
-      const key = `${finding.title}|${finding.severity}|${finding.filePath ?? ''}`
-      const stashed = stashedFindingProgress.get(key)
-      if (stashed) {
-        const newFindingRow = queryFirst(
-          this.db,
-          'SELECT id FROM review_findings WHERE reviewer_output_id = ? AND title = ? AND severity = ? AND file_path IS ?',
-          [outputId, finding.title, finding.severity, finding.filePath ?? null],
-        )
-        if (newFindingRow) {
-          this.db.run(
-            `INSERT OR REPLACE INTO user_finding_progress (finding_id, status, updated_at)
-             VALUES (?, ?, ?)`,
-            [newFindingRow['id'] as number, stashed.status, stashed.updatedAt],
-          )
-        }
-      }
-    }
+    // Reconcile in place so finding ids (and the user's triage) survive a re-parse
+    reconcileFindings(this.db, outputId, parsed.findings.map((f) => ({
+      title: f.title,
+      severity: f.severity,
+      filePath: f.filePath,
+      lineStart: f.lineStart,
+      lineEnd: f.lineEnd,
+      summary: f.summary,
+      isBlocker: f.isBlocker,
+    })), sqlNow())
 
     // Store raw markdown
     const action = this.upsertMarkdownArtifact(sessionId, 'reviewer-output', filePath, content, roundNumber)
@@ -928,10 +884,12 @@ export class FilesystemSync {
         // Use the reviewer's .md file path (not the round-meta.json path)
         const reviewerMdPath = join(roundDir, 'reviews', `${reviewerType}-${instanceNumber}.md`)
 
-        // Upsert reviewer_output
+        // Upsert reviewer_output (see processReviewerOutput: no INSERT OR REPLACE)
         this.db.run(
-          `INSERT OR REPLACE INTO reviewer_outputs (round_id, reviewer_type, instance_number, file_path, finding_count, parsed_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO reviewer_outputs (round_id, reviewer_type, instance_number, file_path, finding_count, parsed_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(round_id, reviewer_type, instance_number)
+       DO UPDATE SET file_path = excluded.file_path, finding_count = excluded.finding_count, parsed_at = excluded.parsed_at`,
           [roundId, reviewerType, instanceNumber, reviewerMdPath, findings.length, sqlNow()],
         )
 
@@ -943,64 +901,15 @@ export class FilesystemSync {
         const outputId = outputRow?.['id'] as number | undefined
         if (!outputId) continue
 
-        // Stash user_finding_progress before delete (CASCADE will destroy it)
-        const stashedFindingProgress = new Map<string, { status: string; updatedAt: string | null }>()
-        const findingProgressResult = this.db.exec(
-          `SELECT rf.title, rf.severity, rf.file_path, ufp.status, ufp.updated_at
-           FROM user_finding_progress ufp
-           JOIN review_findings rf ON rf.id = ufp.finding_id
-           WHERE rf.reviewer_output_id = ?`,
-          [outputId],
-        )
-        if (findingProgressResult[0]) {
-          for (const row of findingProgressResult[0].values) {
-            const key = `${row[0] as string}|${row[1] as string}|${row[2] as string}`
-            stashedFindingProgress.set(key, {
-              status: row[3] as string,
-              updatedAt: row[4] as string | null,
-            })
-          }
-        }
-
-        // Delete existing findings for this output (replacing with orchestrator data)
-        this.db.run('DELETE FROM review_findings WHERE reviewer_output_id = ?', [outputId])
-
-        // Insert findings from structured data
-        for (const finding of findings) {
-          this.db.run(
-            `INSERT INTO review_findings (reviewer_output_id, title, severity, file_path, line_start, line_end, summary, is_blocker, parsed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              outputId,
-              finding.title ?? '',
-              finding.severity ?? 'info',
-              finding.file_path ?? null,
-              finding.line_start ?? null,
-              finding.line_end ?? null,
-              finding.summary ?? null,
-              finding.category === 'blocker' ? 1 : 0,
-              sqlNow(),
-            ],
-          )
-
-          // Restore stashed user progress for this finding
-          const key = `${finding.title ?? ''}|${finding.severity ?? 'info'}|${finding.file_path ?? ''}`
-          const stashed = stashedFindingProgress.get(key)
-          if (stashed) {
-            const newFindingRow = queryFirst(
-              this.db,
-              'SELECT id FROM review_findings WHERE reviewer_output_id = ? AND title = ? AND severity = ? AND file_path IS ?',
-              [outputId, finding.title ?? '', finding.severity ?? 'info', finding.file_path ?? null],
-            )
-            if (newFindingRow) {
-              this.db.run(
-                `INSERT OR REPLACE INTO user_finding_progress (finding_id, status, updated_at)
-                 VALUES (?, ?, ?)`,
-                [newFindingRow['id'] as number, stashed.status, stashed.updatedAt],
-              )
-            }
-          }
-        }
+        reconcileFindings(this.db, outputId, findings.map((f) => ({
+          title: f.title ?? '',
+          severity: f.severity ?? 'info',
+          filePath: f.file_path ?? null,
+          lineStart: f.line_start ?? null,
+          lineEnd: f.line_end ?? null,
+          summary: f.summary ?? null,
+          isBlocker: f.category === 'blocker',
+        })), sqlNow())
       }
 
       this.db.run('COMMIT')
