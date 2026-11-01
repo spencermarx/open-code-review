@@ -233,11 +233,11 @@ describe('compareVersions', () => {
 })
 
 describe('isReadOnlyQueryTool', () => {
-  it('accepts exactly Read, Grep and Glob, in either vendor casing', () => {
-    for (const tool of ['Read', 'Grep', 'Glob', 'read', 'grep', 'glob']) {
+  it('accepts exactly Read, Grep and Glob', () => {
+    for (const tool of ['Read', 'Grep', 'Glob']) {
       expect(isReadOnlyQueryTool(tool)).toBe(true)
     }
-    for (const tool of ['Bash', 'bash', 'Write', 'Edit', 'Task', 'WebFetch', 'mcp__x__read', 'ReadFile']) {
+    for (const tool of ['read', 'READ', 'Bash', 'bash', 'Write', 'Edit', 'Task', 'WebFetch', 'mcp__x__read', 'ReadFile']) {
       expect(isReadOnlyQueryTool(tool)).toBe(false)
     }
   })

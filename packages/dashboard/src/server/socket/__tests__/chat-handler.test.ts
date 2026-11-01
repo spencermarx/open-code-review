@@ -1,9 +1,10 @@
 /**
  * Ask the Team `chat:send` against a real database and a stub adapter whose
  * child is a fake process fed real Claude Code stream-json lines. Pins the
- * two chat-side guards around the adapter's read-only restriction: a refused
- * spawn surfaces as `chat:error`, and a call to a tool outside Read/Grep/Glob
- * stops the turn without keeping its answer or session.
+ * chat-side guards around the adapter's read-only restriction: a refused spawn
+ * surfaces as `chat:error`, a call to a tool outside Read/Grep/Glob stops the
+ * turn without keeping its answer or session, and a conversation runs one turn
+ * at a time.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
@@ -174,12 +175,69 @@ describe('chat:send while a turn is running', () => {
     })
   })
 
-  it('accepts the message once the child has exited, even if close never fired', () => {
+  it.each([
+    ['exited', { exitCode: 0 }],
+    ['been killed', { signalCode: 'SIGKILL' as const }],
+  ])('accepts the message once the child has %s, even if close never fired', (_label, state) => {
     const child = fakeChild()
     const { spawn, sendAgain } = sendTwice(child)
-    child.exitCode = 0
+    Object.assign(child, state)
     sendAgain()
     expect(spawn).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('chat:send when an earlier turn closes late', () => {
+  /** Turn A exits with its `close` pending, so turn B replaces it. */
+  function supersede() {
+    const a = fakeChild()
+    const b = fakeChild()
+    const { socket, handlers, emitted } = fakeSocket()
+    const spawn = vi.fn<AiCliAdapter['spawn']>()
+    spawn.mockReturnValueOnce({ process: a as unknown as ChildProcess, detached: false })
+    spawn.mockReturnValueOnce({ process: b as unknown as ChildProcess, detached: false })
+    registerChatHandlers(io, socket, db, ocrDir, serviceWith(spawn))
+    send(handlers)
+    a.exitCode = 0
+    send(handlers)
+    expect(spawn).toHaveBeenCalledTimes(2)
+    return { a, b, spawn, emitted, sendAgain: () => send(handlers) }
+  }
+
+  async function finish(child: ReturnType<typeof fakeChild>, stream: string, code: number) {
+    child.stdout.write(stream)
+    await new Promise((resolve) => setImmediate(resolve))
+    child.emit('close', code)
+  }
+
+  it('leaves the running turn visible to the one-turn guard', async () => {
+    const { a, spawn, sendAgain } = supersede()
+    await finish(a, toolTurn('Read', false), 0)
+    sendAgain()
+    expect(spawn).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps its answer and tells its own tab, but leaves the session to the newer turn', async () => {
+    const { a, emitted } = supersede()
+    await finish(a, toolTurn('Read', false), 0)
+    expect(getMessages(db, 'conv-1').at(-1)?.role).toBe('assistant')
+    expect(emitted.some((e) => e.event === 'chat:done')).toBe(true)
+    expect(getConversation(db, 'conv-1')?.claude_session_id ?? null).toBeNull()
+  })
+
+  it('does not restore a session that the newer turn stopped and cleared', async () => {
+    const { a, b } = supersede()
+    await finish(b, toolTurn('Bash', false), 1)
+    await finish(a, toolTurn('Read', false), 0)
+    expect(getConversation(db, 'conv-1')?.claude_session_id ?? null).toBeNull()
+  })
+
+  it('does not replace the session the newer turn stored', async () => {
+    const { a, b } = supersede()
+    const newer = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'claude-sess-b' })
+    await finish(b, `${newer}\n`, 0)
+    await finish(a, toolTurn('Read', false), 0)
+    expect(getConversation(db, 'conv-1')?.claude_session_id).toBe('claude-sess-b')
   })
 })
 
@@ -254,6 +312,60 @@ describe('chat:send read-only backstop', () => {
     expect(child.stderr.destroyed).toBe(true)
   })
 
+  it('still kills the CLI and reports the stop when the session clear fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const run = db.run.bind(db)
+    const dbRun = vi.spyOn(db, 'run').mockImplementation((sql, params) => {
+      if (sql.startsWith('UPDATE chat_conversations SET claude_session_id')) {
+        throw new Error('database is locked')
+      }
+      return run(sql, params)
+    })
+    const child = fakeChild()
+    const { socket, handlers, emitted } = fakeSocket()
+    registerChatHandlers(io, socket, db, ocrDir, serviceWith(() => ({
+      process: child as unknown as ChildProcess,
+      detached: false,
+    })))
+    send(handlers)
+    child.stdout.write(toolTurn('Bash', false))
+    await new Promise((resolve) => setImmediate(resolve))
+    child.emit('close', null)
+    dbRun.mockRestore()
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    expect(child.stdout.destroyed).toBe(true)
+    expect(emitted.some((e) => e.event === 'chat:error')).toBe(true)
+    expect(recordedExitCode()).toBe(1)
+    consoleError.mockRestore()
+  })
+
+  it('leaves parallel reads alone, in the order a real CLI streams them', async () => {
+    // Captured from Claude Code with two parallel Reads: the first result
+    // arrives while the second block is still open.
+    const block = (type: string, index: number, extra: object = {}) => ({
+      type: 'stream_event',
+      event: { type, index, ...extra },
+    })
+    const start = (index: number, id: string) =>
+      block('content_block_start', index, { content_block: { type: 'tool_use', id, name: 'Read', input: {} } })
+    const result = (id: string) => ({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'out' }] },
+    })
+    const stream = [
+      start(0, 'toolu_1'),
+      block('content_block_stop', 0),
+      start(1, 'toolu_2'),
+      result('toolu_1'),
+      block('content_block_stop', 1),
+      result('toolu_2'),
+      block('content_block_delta', 0, { delta: { type: 'text_delta', text: 'Both read.' } }),
+    ].map((line) => JSON.stringify(line)).join('\n')
+    const { child, emitted } = await run(`${stream}\n`)
+    expect(child.kill).not.toHaveBeenCalled()
+    expect(emitted.some((e) => e.event === 'chat:done')).toBe(true)
+  })
+
   it('starts the next message fresh after a stop', async () => {
     upsertConversation(db, 'conv-1', 'sess-1', 'review_round', 1)
     updateConversationClaudeSession(db, 'conv-1', 'claude-sess-0')
@@ -268,7 +380,6 @@ describe('chat:send read-only backstop', () => {
     child.stdout.write(toolTurn('Bash', false))
     await new Promise((resolve) => setImmediate(resolve))
     child.emit('close', null)
-    child.exitCode = 1
     send(handlers)
     expect(spawn).toHaveBeenCalledTimes(2)
     const next = spawn.mock.calls[1]![0]

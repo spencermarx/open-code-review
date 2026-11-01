@@ -63,9 +63,9 @@ export function assertNonEmptyPrompt(prompt: string): void {
 /** The only tools a query-mode (Ask the Team) spawn may use. */
 export const READ_ONLY_QUERY_TOOLS = ['Read', 'Grep', 'Glob'] as const
 
-/** Case-insensitive: OpenCode reports lowercase tool ids. */
+/** Exact match: the adapters' parsers normalize vendor casing before this. */
 export function isReadOnlyQueryTool(name: string): boolean {
-  return READ_ONLY_QUERY_TOOLS.some((tool) => tool.toLowerCase() === name.toLowerCase())
+  return READ_ONLY_QUERY_TOOLS.some((tool) => tool === name)
 }
 
 // ── Version gate for containment-dependent spawns ──

@@ -1064,6 +1064,7 @@ The dashboard SHALL provide an "Ask the Team" chat feature that allows users to 
 - **GIVEN** a chat turn's AI CLI process is running
 - **WHEN** another message is sent to the same conversation, for example after a reload or from a second tab
 - **THEN** the server SHALL emit a `chat:error`, and SHALL neither store the message nor spawn the AI CLI
+- **AND** once that process has exited, a new message MAY start a turn before the earlier turn's streams close; the earlier turn SHALL then store its answer but SHALL NOT store its session or change the new turn's tracking
 
 ---
 

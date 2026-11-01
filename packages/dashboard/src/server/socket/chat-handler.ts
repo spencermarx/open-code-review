@@ -248,17 +248,29 @@ export function registerChatHandlers(
         }
         return null
       }
+      /** Logs a failure: a stop must still reach its kill and its `chat:error`. */
+      const clearStoredSession = () => {
+        try {
+          updateConversationClaudeSession(db, conversationId, null)
+        } catch (err) {
+          console.error('[chat-handler] failed to clear the stored session:', err)
+        }
+      }
       const stopForDisallowedTool = (tool: string) => {
         if (disallowedTool !== null) return
         disallowedTool = tool
-        updateConversationClaudeSession(db, conversationId, null)
-        if (proc.pid !== undefined) killTreeNow(proc.pid)
+        // Stdout can outlast the child, and an exited child's pid can be reused.
+        if (proc.pid !== undefined && proc.exitCode === null && proc.signalCode === null) {
+          killTreeNow(proc.pid)
+        }
         proc.kill('SIGKILL')
         // `close` also waits for stdio EOF, which a process outside the tree
         // can withhold by holding these pipes. Destroying them leaves `close`
         // waiting only on the CLI's own exit.
         proc.stdout?.destroy()
         proc.stderr?.destroy()
+        // After the kill: this write can block on the shared database.
+        clearStoredSession()
       }
 
       // UTF-8 boundary safety — round-2 Blocker 1 (sweep completion).
@@ -332,6 +344,20 @@ export function registerChatHandlers(
       })
 
       proc.on('close', (code) => {
+        // False once a later turn has replaced this one, which the guard allows
+        // as soon as this child exits. The conversation's session and process
+        // reference then belong to that turn. This turn's answer and tracker
+        // are still its own, and `socket` still reaches this turn's tab.
+        const current = activeChats.get(conversationId)?.process === proc
+        const releaseTurn = () => {
+          if (!current) return
+          // Reset idle timer (keep entry for session tracking)
+          resetIdleTimer(conversationId, db)
+          // Remove process reference since it's done
+          const chat = activeChats.get(conversationId)
+          if (chat) chat.process = null
+        }
+
         // Process any remaining buffered data, with the same backstop checks
         if (disallowedTool === null && lineBuffer.trim()) {
           for (const evt of parser.parseLine(lineBuffer)) {
@@ -353,21 +379,20 @@ export function registerChatHandlers(
         if (disallowedTool !== null) {
           const errMsg = `Stopped: the AI tried to use a tool outside the chat's read-only set (${disallowedTool}).`
           // A resumed turn ran inside the stored session; drop it so the next
-          // message starts a fresh one. A stop on the buffered last line
-          // reaches this without going through stopForDisallowedTool.
-          updateConversationClaudeSession(db, conversationId, null)
+          // message starts a fresh one, even if a later turn has replaced this
+          // one. A stop on the buffered last line reaches this without going
+          // through stopForDisallowedTool, and this is the retry for one that did.
+          clearStoredSession()
           tracker.appendOutput(`\n✗ ${errMsg}\n`)
           // Never 0: the CLI may have exited cleanly before it was stopped.
           tracker.finish(code || 1)
           socket.emit('chat:error', { conversationId, error: errMsg })
-          resetIdleTimer(conversationId, db)
-          const chat = activeChats.get(conversationId)
-          if (chat) chat.process = null
+          releaseTurn()
           return
         }
 
         // Store Claude session ID for future resume
-        if (capturedClaudeSessionId) {
+        if (capturedClaudeSessionId && current) {
           updateConversationClaudeSession(db, conversationId, capturedClaudeSessionId)
         }
 
@@ -390,13 +415,7 @@ export function registerChatHandlers(
           })
         }
 
-        // Reset idle timer (keep entry for session tracking)
-        resetIdleTimer(conversationId, db)
-        // Remove process reference since it's done
-        const chat = activeChats.get(conversationId)
-        if (chat) {
-          chat.process = null
-        }
+        releaseTurn()
       })
 
       proc.on('error', (err) => {
@@ -406,7 +425,7 @@ export function registerChatHandlers(
           conversationId,
           error: `Failed to spawn AI CLI: ${err.message}`,
         })
-        cleanupChat(conversationId)
+        if (activeChats.get(conversationId)?.process === proc) cleanupChat(conversationId)
       })
     } catch (err) {
       console.error('Error in chat:send handler:', err)

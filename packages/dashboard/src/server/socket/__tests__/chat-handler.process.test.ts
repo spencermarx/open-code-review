@@ -33,7 +33,7 @@ const REPORT_BASH_AND_WAIT = `
 const TREE_SCRIPT = `
   const { spawn } = require('node:child_process')
   const grandchild = spawn(process.execPath, ['-e', ${JSON.stringify(LONG_LIVED)}], { stdio: 'ignore' })
-  process.stderr.write(grandchild.pid + '\\n')
+  process.stdout.write(grandchild.pid + '\\n')
   ${REPORT_BASH_AND_WAIT}
 `
 
@@ -47,7 +47,7 @@ const PIPE_HOLDER_SCRIPT = `
   const intermediate = \`
     const { spawn } = require('node:child_process')
     const holder = spawn(process.execPath, ['-e', ${JSON.stringify(JSON.stringify(LONG_LIVED)).slice(1, -1)}], { stdio: 'inherit', detached: true })
-    process.stderr.write(holder.pid + '\\\\n')
+    process.stdout.write(holder.pid + '\\\\n')
     holder.unref()
   \`
   spawn(process.execPath, ['-e', intermediate], { stdio: 'inherit' }).on('exit', () => {
@@ -73,7 +73,11 @@ function serviceSpawning(script: string): { service: AiCliService; child: ChildP
   }
 }
 
-/** Runs a turn and resolves with the pid the script printed to stderr. */
+/**
+ * Runs a turn and resolves with the pid the script printed first on stdout,
+ * which the turn's parser skips as non-JSON. Read here, ahead of the handler's
+ * listener, because the same chunk may carry the line that triggers the stop.
+ */
 function startTurn(script: string) {
   const { service, child } = serviceSpawning(script)
   const handlers = new Map<string, (payload: unknown) => void>()
@@ -86,7 +90,7 @@ function startTurn(script: string) {
   } as unknown as Socket
   const io = { emit: () => true } as unknown as SocketIOServer
   const childPid = new Promise<number>((resolve) => {
-    child.stderr?.once('data', (chunk) => resolve(Number(String(chunk).trim())))
+    child.stdout?.once('data', (chunk) => resolve(Number(String(chunk).split('\n')[0])))
   })
   registerChatHandlers(io, socket, db, ocrDir, service)
   handlers.get('chat:send')!({
@@ -138,6 +142,7 @@ describe('Ask the Team stop, real processes', () => {
   it('kills the CLI and what it started', async () => {
     const { child, errors, childPid } = startTurn(TREE_SCRIPT)
     const grandchild = await childPid
+    expect(Number.isInteger(grandchild)).toBe(true)
     started.push(grandchild)
     expect(await eventually(() => errors.length > 0)).toBe(true)
     expect(errors[0]).toContain("outside the chat's read-only set (Bash)")
@@ -148,6 +153,7 @@ describe('Ask the Team stop, real processes', () => {
   it('still reports the stop when another process holds the pipes', async () => {
     const { errors, childPid } = startTurn(PIPE_HOLDER_SCRIPT)
     const holder = await childPid
+    expect(Number.isInteger(holder)).toBe(true)
     started.push(holder)
     expect(await eventually(() => errors.length > 0)).toBe(true)
     expect(errors[0]).toContain("outside the chat's read-only set (Bash)")
