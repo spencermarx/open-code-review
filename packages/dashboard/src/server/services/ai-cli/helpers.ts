@@ -58,6 +58,67 @@ export function assertNonEmptyPrompt(prompt: string): void {
   }
 }
 
+// ── Read-only query contract ──
+
+/** The only tools a query-mode (Ask the Team) spawn may use. */
+export const READ_ONLY_QUERY_TOOLS = ['Read', 'Grep', 'Glob'] as const
+
+/** Exact match: the adapters' parsers normalize vendor casing before this. */
+export function isReadOnlyQueryTool(name: string): boolean {
+  return READ_ONLY_QUERY_TOOLS.some((tool) => tool === name)
+}
+
+// ── Version gate for containment-dependent spawns ──
+
+/** A query spawn refused because the installed CLI cannot enforce its restriction. */
+export class UnsupportedCliVersionError extends Error {
+  override readonly name = 'UnsupportedCliVersionError'
+}
+
+/**
+ * Numeric dot-segment comparison (`2.1.295` vs `2.1.300`). Adapters detect
+ * only the numeric part of `--version` output, so pre-release or build
+ * suffixes never reach here; a missing segment counts as 0.
+ */
+export function compareVersions(a: string, b: string): number {
+  const parse = (v: string) => (v.match(/\d+(?:\.\d+)*/)?.[0] ?? '0').split('.').map(Number)
+  const pa = parse(a)
+  const pb = parse(b)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (diff !== 0) return diff < 0 ? -1 : 1
+  }
+  return 0
+}
+
+/**
+ * Fail-closed gate for a spawn whose restriction depends on vendor flags or
+ * config that older (or differently-shaped newer) CLIs lack or mishandle.
+ * Throws BEFORE spawning when the version is unknown or outside
+ * `[min, below)` — running the child without its restriction is never an
+ * acceptable fallback.
+ */
+export function assertVersionSupported(opts: {
+  binary: string
+  purpose: string
+  version: string | undefined
+  min: string
+  below?: string
+}): void {
+  const { binary, purpose, version, min, below } = opts
+  const range = below ? `>= ${min} and < ${below}` : `>= ${min}`
+  if (
+    !version ||
+    compareVersions(version, min) < 0 ||
+    (below !== undefined && compareVersions(version, below) >= 0)
+  ) {
+    throw new UnsupportedCliVersionError(
+      `${purpose} requires ${binary} ${range} (found ${version ?? 'unknown version'}). ` +
+        `Install a supported ${binary} version.`,
+    )
+  }
+}
+
 /**
  * Deliver the prompt to a freshly spawned vendor child over stdin.
  *

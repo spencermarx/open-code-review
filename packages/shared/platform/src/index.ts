@@ -168,6 +168,28 @@ export type ReapResult = {
   psAvailable: boolean;
 };
 
+function taskkillTree(rootPid: number): void {
+  try {
+    execFileSync("taskkill", ["/PID", String(rootPid), "/T", "/F"], {
+      timeout: 5000,
+    });
+  } catch {
+    /* already gone / not found */
+  }
+}
+
+/**
+ * No production caller branches on `psAvailable`, so the degradation is
+ * surfaced here, where it happens: without `ps` only the root can be signalled
+ * and a setsid()-escaped grandchild survives.
+ */
+function warnPsUnavailable(caller: string, rootPid: number): void {
+  console.warn(
+    `[${caller}] 'ps' unavailable — signalling only the root (PID ${rootPid}); ` +
+      `escaped descendants cannot be enumerated on this system.`,
+  );
+}
+
 /**
  * Terminate an entire process tree (root + all descendants), robust to children
  * that escaped the root's process group via `setsid()` — the failure mode that
@@ -183,25 +205,11 @@ export type ReapResult = {
  */
 export function reapTree(rootPid: number, graceMs = 5000): ReapResult {
   if (isWindows) {
-    try {
-      execFileSync("taskkill", ["/PID", String(rootPid), "/T", "/F"], {
-        timeout: 5000,
-      });
-    } catch {
-      /* already gone / not found */
-    }
+    taskkillTree(rootPid);
     return { signaled: 1, psAvailable: false };
   }
   const { pids: descendants, psAvailable } = walkDescendants(rootPid);
-  if (!psAvailable) {
-    // No production caller branches on the returned bit, so the degradation is
-    // surfaced HERE, once, where it happens: without `ps` only the root can be
-    // signalled and a setsid()-escaped grandchild survives the reap.
-    console.warn(
-      `[reapTree] 'ps' unavailable — signalling only the root (PID ${rootPid}); ` +
-        `escaped descendants cannot be enumerated on this system.`,
-    );
-  }
+  if (!psAvailable) warnPsUnavailable("reapTree", rootPid);
   const term = [...descendants, rootPid];
   for (const pid of term) {
     try {
@@ -234,6 +242,37 @@ export function reapTree(rootPid: number, graceMs = 5000): ReapResult {
   }, graceMs).unref();
 
   return { signaled: term.length, psAvailable };
+}
+
+/**
+ * Kill a process tree now, with no grace period: for a child that must stop
+ * rather than be asked to. POSIX: SIGSTOP the root so it starts nothing during
+ * the walk, then SIGKILL every descendant (leaves first, root last). Windows:
+ * `taskkill /T /F` from the root. Best-effort and never throws.
+ *
+ * The walk follows parent links, so like {@link reapTree} it cannot reach a
+ * process already reparented away from the tree, and a descendant that is
+ * already running can still fork during it.
+ */
+export function killTreeNow(rootPid: number): void {
+  if (isWindows) {
+    taskkillTree(rootPid);
+    return;
+  }
+  try {
+    process.kill(rootPid, "SIGSTOP");
+  } catch {
+    /* already gone */
+  }
+  const { pids, psAvailable } = walkDescendants(rootPid);
+  if (!psAvailable) warnPsUnavailable("killTreeNow", rootPid);
+  for (const pid of [...pids.reverse(), rootPid]) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
 }
 
 // ── Reviewer icons ──

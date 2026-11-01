@@ -1029,6 +1029,42 @@ The dashboard SHALL provide an "Ask the Team" chat feature that allows users to 
 - **WHEN** the AI attempts to use tools
 - **THEN** only read-only tools SHALL be permitted: `Read`, `Grep`, `Glob`
 - **AND** any tool not in the allowed list MUST be rejected
+- **AND** this SHALL hold whatever the user-level, project-level, or inherited-environment configuration of the active AI CLI says (permission modes, allow rules, hooks, MCP servers, plugins, custom agents), on every chat turn including resumed ones
+- **AND** the adapter SHALL enforce it with restrictions the child process cannot override: an explicit tool set rather than a pre-approval list, a permission mode that denies anything not pre-approved, and isolation from the reviewed repository's own CLI configuration
+
+#### Scenario: Allowed tools — Claude Code enforcement
+
+- **GIVEN** the active adapter is Claude Code
+- **WHEN** it spawns a chat turn
+- **THEN** the turn SHALL pass `--tools=Read,Grep,Glob`, `--permission-mode=dontAsk`, `--setting-sources=user`, `--strict-mcp-config`, `--disable-slash-commands`, and `--settings` disabling all hooks and blocking reads outside the working directory
+- **AND** the tool set SHALL be given by `--tools`, not by a pre-approval list
+
+#### Scenario: Allowed tools — OpenCode enforcement
+
+- **GIVEN** the active adapter is OpenCode
+- **WHEN** it spawns a chat turn
+- **THEN** the turn SHALL run a per-spawn agent whose permission denies every tool (`"*": "deny"`) except `read` (keeping OpenCode's default `.env` read rule), `grep` and `glob`, and denies directories outside the project (`external_directory`), made the default agent with `build` and `plan` disabled, delivered via `OPENCODE_CONFIG_CONTENT`, with project configuration, external plugins and Claude Code compatibility disabled (`OPENCODE_DISABLE_PROJECT_CONFIG`, `OPENCODE_PURE`, `OPENCODE_DISABLE_CLAUDE_CODE`)
+
+#### Scenario: Allowed tools — unsupported CLI version
+
+- **GIVEN** the active AI CLI's version, detected for each chat turn, cannot enforce the restriction (Claude Code below 2.1.295; OpenCode below 1.3.4 or 2.0.0 and above), or its version cannot be determined
+- **WHEN** the user sends a chat message
+- **THEN** the server SHALL NOT spawn the AI CLI
+- **AND** it SHALL emit a `chat:error` naming the required version
+
+#### Scenario: Allowed tools — runtime backstop
+
+- **GIVEN** a chat turn is running
+- **WHEN** the AI CLI reports a call to a tool other than `Read`, `Grep` or `Glob`, or a tool result for a call it never reported
+- **THEN** the server SHALL terminate the AI CLI process tree and emit a `chat:error`, without waiting for other processes holding the CLI's output pipes
+- **AND** it SHALL NOT store that turn's answer, and SHALL clear the conversation's stored session so the next message starts a new one
+
+#### Scenario: One turn per conversation
+
+- **GIVEN** a chat turn's AI CLI process is running
+- **WHEN** another message is sent to the same conversation, for example after a reload or from a second tab
+- **THEN** the server SHALL emit a `chat:error`, and SHALL neither store the message nor spawn the AI CLI
+- **AND** once that process has exited, a new message MAY start a turn before the earlier turn's streams close; the earlier turn SHALL then store its answer but SHALL NOT store its session or change the new turn's tracking
 
 ---
 
@@ -1892,12 +1928,20 @@ Secret-shaped and third-party provider names are categorically inadmissible.
 Every child-carrying spawn SHALL construct its environment through the
 single builder function (documented argument-only probe exceptions per the
 Shell-Parity requirement). Injected keys SHALL be limited to a
-compile-time-frozen allowed set (currently `OCR_DASHBOARD_EXECUTION_UID`),
+compile-time-frozen allowed set (see Scenario: Registered injections),
 enforced by a runtime error at the builder. Injected entries with undefined
 values SHALL be omitted from both the output env and the injected-names
 list. No socket-, HTTP-, or agent-derived value SHALL become or override
 child env. Lint SHALL flag both divergence vectors: direct `process.env`
 reads in spawn modules, and spawn calls whose arguments omit `env`.
+
+#### Scenario: Registered injections
+
+- **GIVEN** a spawn path injects variables into a child's environment
+- **WHEN** the child env is built
+- **THEN** only these registered names SHALL be injectable: `OCR_DASHBOARD_EXECUTION_UID` (workflow linking) and, for the OpenCode adapter's chat containment, `OPENCODE_CONFIG_CONTENT`, `OPENCODE_DISABLE_PROJECT_CONFIG`, `OPENCODE_PURE` and `OPENCODE_DISABLE_CLAUDE_CODE`
+- **AND** an injected value SHALL replace any inherited value of the same name (on Windows, any case variant of it)
+- **AND** any other injection key SHALL be rejected at runtime
 
 #### Scenario: Unregistered inject key rejected at runtime
 

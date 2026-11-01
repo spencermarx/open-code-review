@@ -10,6 +10,7 @@ import type { ChildProcess } from 'node:child_process'
 import { dirname } from 'node:path'
 import type { Server as SocketIOServer, Socket } from 'socket.io'
 import type { Database } from '@open-code-review/persistence'
+import { killTreeNow } from '@open-code-review/platform'
 import {
   getConversation,
   getMessages,
@@ -20,7 +21,14 @@ import {
   type ChatConversationRow,
 } from '../db.js'
 import { buildChatContext, type ChatTarget } from '../services/chat-context.js'
-import { AiCliService, formatToolDetail } from '../services/ai-cli/index.js'
+import {
+  AiCliService,
+  formatToolDetail,
+  isReadOnlyQueryTool,
+  UnsupportedCliVersionError,
+  type NormalizedEvent,
+  type SpawnResult,
+} from '../services/ai-cli/index.js'
 import { startTrackedExecution, type TrackedExecution } from './execution-tracker.js'
 
 // ── Types ──
@@ -119,6 +127,19 @@ export function registerChatHandlers(
         return
       }
 
+      // One turn per conversation: a reload or a second tab can send while a
+      // turn is running, and the later `close` would overwrite the stored
+      // session. Keyed on the child being alive, not on `process`, which only
+      // `close` nulls: a `close` that never fires must not lock the chat.
+      const running = activeChats.get(conversationId)?.process
+      if (running && running.exitCode === null && running.signalCode === null) {
+        socket.emit('chat:error', {
+          conversationId,
+          error: 'A response is already in progress for this conversation.',
+        })
+        return
+      }
+
       // Ensure conversation exists in DB
       upsertConversation(db, conversationId, sessionId, targetType, targetId)
 
@@ -161,14 +182,28 @@ export function registerChatHandlers(
       }
 
       const repoRoot = dirname(ocrDir)
-      const spawnResult = adapter.spawn({
-        prompt,
-        cwd: repoRoot,
-        mode: 'query',
-        maxTurns: 1,
-        allowedTools: ['Read', 'Grep', 'Glob'],
-        resumeSessionId: resumeId,
-      })
+      // Query mode IS the read-only (Read/Grep/Glob) contract; the adapter
+      // enforces it or throws — e.g. on a CLI too old to enforce it.
+      let spawnResult: SpawnResult
+      try {
+        spawnResult = adapter.spawn({
+          prompt,
+          cwd: repoRoot,
+          mode: 'query',
+          maxTurns: 1,
+          resumeSessionId: resumeId,
+        })
+      } catch (err) {
+        if (!(err instanceof UnsupportedCliVersionError)) {
+          console.error('[chat-handler] AI CLI spawn failed:', err)
+        }
+        socket.emit('chat:error', {
+          conversationId,
+          error:
+            err instanceof UnsupportedCliVersionError ? err.message : 'Failed to spawn AI CLI',
+        })
+        return
+      }
       const proc = spawnResult.process
 
       // Track the process
@@ -197,16 +232,57 @@ export function registerChatHandlers(
       let capturedClaudeSessionId: string | null = null
       let thinkingStatusEmitted = false
 
+      // Backstop for the adapter's read-only restriction. The child is never
+      // offered a tool outside Read/Grep/Glob, so any call to one — or a
+      // result for a call that was never announced — stops the turn, and the
+      // conversation keeps neither the answer nor a session to resume.
+      const announcedTools = new Set<string>()
+      let disallowedTool: string | null = null
+      /** The label to stop on for this event, or null if it is within the set. */
+      const backstopViolation = (evt: NormalizedEvent): string | null => {
+        if (evt.type === 'tool_call') {
+          if (!isReadOnlyQueryTool(evt.name)) return evt.name
+          announcedTools.add(evt.toolId)
+        } else if (evt.type === 'tool_result' && !announcedTools.delete(evt.toolId)) {
+          return 'unannounced tool'
+        }
+        return null
+      }
+      /** Logs a failure: a stop must still reach its kill and its `chat:error`. */
+      const clearStoredSession = () => {
+        try {
+          updateConversationClaudeSession(db, conversationId, null)
+        } catch (err) {
+          console.error('[chat-handler] failed to clear the stored session:', err)
+        }
+      }
+      const stopForDisallowedTool = (tool: string) => {
+        disallowedTool = tool
+        // Stdout can outlast the child, and an exited child's pid can be reused.
+        if (proc.pid !== undefined && proc.exitCode === null && proc.signalCode === null) {
+          killTreeNow(proc.pid)
+        }
+        proc.kill('SIGKILL')
+        // `close` also waits for stdio EOF, which a process outside the tree
+        // can withhold by holding these pipes. Destroying them leaves `close`
+        // waiting only on the CLI's own exit.
+        proc.stdout?.destroy()
+        proc.stderr?.destroy()
+        // After the kill: this write can block on the shared database.
+        clearStoredSession()
+      }
+
       // UTF-8 boundary safety — round-2 Blocker 1 (sweep completion).
       // Without setEncoding, multi-byte codepoints split across pipe
       // chunks become `�` and the line containing them fails JSON.parse,
       // silently dropping events including `session_id` capture lines.
-      // The chat handler's `capturedClaudeSessionId` (line 245, 273) is
-      // the same loss mode round-1 surfaced for command-runner.
+      // The chat handler's `capturedClaudeSessionId` is the same loss mode
+      // round-1 surfaced for command-runner.
       proc.stdout?.setEncoding('utf-8')
       proc.stderr?.setEncoding('utf-8')
 
       proc.stdout?.on('data', (chunk: string) => {
+        if (disallowedTool !== null) return
         lineBuffer += chunk
         const lines = lineBuffer.split('\n')
         // Keep the last incomplete line in the buffer
@@ -215,6 +291,11 @@ export function registerChatHandlers(
         for (const line of lines) {
           if (!line.trim()) continue
           for (const evt of parser.parseLine(line)) {
+            const violation = backstopViolation(evt)
+            if (violation !== null) {
+              stopForDisallowedTool(violation)
+              return
+            }
             switch (evt.type) {
               case 'text_delta':
                 assistantText += evt.text
@@ -262,9 +343,24 @@ export function registerChatHandlers(
       })
 
       proc.on('close', (code) => {
-        // Process any remaining buffered data
-        if (lineBuffer.trim()) {
+        // False once a later turn has replaced this one, which the guard allows
+        // as soon as this child exits. The conversation's session and process
+        // reference then belong to that turn. This turn's answer and tracker
+        // are still its own, and `socket` still reaches this turn's tab.
+        const current = activeChats.get(conversationId)?.process === proc
+        const releaseTurn = () => {
+          if (!current) return
+          // Reset idle timer (keep entry for session tracking)
+          resetIdleTimer(conversationId, db)
+          // Remove process reference since it's done
+          const chat = activeChats.get(conversationId)
+          if (chat) chat.process = null
+        }
+
+        // Process any remaining buffered data, with the same backstop checks
+        if (disallowedTool === null && lineBuffer.trim()) {
           for (const evt of parser.parseLine(lineBuffer)) {
+            disallowedTool ??= backstopViolation(evt)
             switch (evt.type) {
               case 'text_delta':
                 assistantText += evt.text
@@ -279,8 +375,28 @@ export function registerChatHandlers(
           }
         }
 
-        // Store Claude session ID for future resume
-        if (capturedClaudeSessionId) {
+        if (disallowedTool !== null) {
+          const errMsg = `Stopped: the AI tried to use a tool outside the chat's read-only set (${disallowedTool}).`
+          // A resumed turn ran inside the stored session; drop it so the next
+          // message starts a fresh one. A later turn that already resumed it
+          // runs on, but won't store it again. A stop on the buffered last line
+          // reaches this without going through stopForDisallowedTool, and this
+          // is the retry for one that did.
+          clearStoredSession()
+          tracker.appendOutput(`\n✗ ${errMsg}\n`)
+          // Never 0: the CLI may have exited cleanly before it was stopped.
+          tracker.finish(code || 1)
+          socket.emit('chat:error', { conversationId, error: errMsg })
+          releaseTurn()
+          return
+        }
+
+        // Store Claude session ID for future resume. A turn that resumed a
+        // session only keeps it while it's still stored: a replaced turn's stop
+        // may have dropped it during this turn.
+        const resumedStillStored =
+          !resumeId || getConversation(db, conversationId)?.claude_session_id === resumeId
+        if (capturedClaudeSessionId && current && resumedStillStored) {
           updateConversationClaudeSession(db, conversationId, capturedClaudeSessionId)
         }
 
@@ -303,13 +419,7 @@ export function registerChatHandlers(
           })
         }
 
-        // Reset idle timer (keep entry for session tracking)
-        resetIdleTimer(conversationId, db)
-        // Remove process reference since it's done
-        const chat = activeChats.get(conversationId)
-        if (chat) {
-          chat.process = null
-        }
+        releaseTurn()
       })
 
       proc.on('error', (err) => {
@@ -319,7 +429,7 @@ export function registerChatHandlers(
           conversationId,
           error: `Failed to spawn AI CLI: ${err.message}`,
         })
-        cleanupChat(conversationId)
+        if (activeChats.get(conversationId)?.process === proc) cleanupChat(conversationId)
       })
     } catch (err) {
       console.error('Error in chat:send handler:', err)

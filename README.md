@@ -203,6 +203,8 @@ After reviewing findings, address them directly. Copy a portable AI prompt into 
 
 AI-powered chat on every review round and map run page. Ask follow-up questions about specific findings, request clarification on reviewer reasoning, or explore alternative approaches.
 
+The chat is read-only: the AI can only read and search files in your repository. It requires Claude Code 2.1.295 or later, or OpenCode 1.3.4 or later (1.x).
+
 The dashboard reads from the same `.ocr/` directory and SQLite database used by the review workflow. No separate configuration is needed.
 
 ---

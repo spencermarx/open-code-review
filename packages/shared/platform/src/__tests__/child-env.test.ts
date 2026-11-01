@@ -154,8 +154,35 @@ describe("buildChildEnv", () => {
     expect(env.OCR_X).toBeUndefined();
   });
 
-  it("keeps the inject allowlist closed to exactly the execution UID", () => {
-    expect([...ALLOWED_INJECT_KEYS]).toEqual(["OCR_DASHBOARD_EXECUTION_UID"]);
+  it("keeps the inject allowlist closed to the execution UID and the OpenCode containment keys", () => {
+    expect([...ALLOWED_INJECT_KEYS]).toEqual([
+      "OCR_DASHBOARD_EXECUTION_UID",
+      "OPENCODE_CONFIG_CONTENT",
+      "OPENCODE_DISABLE_PROJECT_CONFIG",
+      "OPENCODE_PURE",
+      "OPENCODE_DISABLE_CLAUDE_CODE",
+    ]);
+  });
+
+  it("an injection overrides the ambient value of the same name", () => {
+    const { env, injected } = buildChildEnvForPlatform(
+      "linux",
+      { PATH: "/usr/bin", OPENCODE_CONFIG_CONTENT: '{"ambient":true}' },
+      { OPENCODE_CONFIG_CONTENT: '{"contained":true}' },
+    );
+    expect(env.OPENCODE_CONFIG_CONTENT).toBe('{"contained":true}');
+    expect(injected).toEqual(["OPENCODE_CONFIG_CONTENT"]);
+  });
+
+  it("on Windows an injection also drops case variants of its name", () => {
+    const { env } = buildChildEnvForPlatform(
+      "win32",
+      { Path: "C:\\Windows", Opencode_Pure: "0", OPENCODE_PURE: "0" },
+      { OPENCODE_PURE: "1" },
+    );
+    expect(env.Opencode_Pure).toBeUndefined();
+    expect(env.OPENCODE_PURE).toBe("1");
+    expect(env.Path).toBe("C:\\Windows");
   });
 });
 

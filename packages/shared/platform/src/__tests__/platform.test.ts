@@ -16,6 +16,7 @@ import {
   isProcessAlive,
   descendantPids,
   reapTree,
+  killTreeNow,
   BUILTIN_ICON_MAP,
 } from "../index.js";
 
@@ -291,6 +292,43 @@ describe("process-tree reaping", () => {
     // whole tree is dead — on every OS.
     expect(await eventually(() => !isProcessAlive(parent.pid!), 4000)).toBe(true);
     expect(await eventually(() => !isProcessAlive(grandchildPid), 4000)).toBe(true);
+  });
+
+  it("killTreeNow kills the whole tree", async () => {
+    const parent = spawn(process.execPath, [parentFixture, longLivedFixture], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const grandchildPid = Number(await firstLine(parent));
+    expect(isProcessAlive(grandchildPid)).toBe(true);
+
+    killTreeNow(parent.pid!);
+
+    expect(await eventually(() => !isProcessAlive(parent.pid!), 4000)).toBe(true);
+    expect(await eventually(() => !isProcessAlive(grandchildPid), 4000)).toBe(true);
+  });
+
+  it.skipIf(isWindows)("killTreeNow doesn't wait for a process that ignores SIGTERM", async () => {
+    const stubborn = spawn(
+      process.execPath,
+      ["-e", "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)"],
+      { stdio: ["ignore", "pipe", "ignore"] },
+    );
+    await firstLine(stubborn);
+
+    killTreeNow(stubborn.pid!);
+
+    try {
+      // Well inside reapTree's default 5s grace, so it can only be a SIGKILL.
+      expect(await eventually(() => !isProcessAlive(stubborn.pid!), 2000)).toBe(true);
+    } finally {
+      stubborn.kill("SIGKILL");
+    }
+  });
+
+  it("killTreeNow tolerates a process that is already gone", async () => {
+    const proc = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+    await new Promise((done) => proc.on("exit", done));
+    expect(() => killTreeNow(proc.pid!)).not.toThrow();
   });
 });
 

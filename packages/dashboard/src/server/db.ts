@@ -658,7 +658,7 @@ export function upsertConversation(
 export function updateConversationClaudeSession(
   db: Database,
   conversationId: string,
-  claudeSessionId: string
+  claudeSessionId: string | null
 ): void {
   db.run(
     `UPDATE chat_conversations SET claude_session_id = ?, last_active_at = datetime('now') WHERE id = ?`,

@@ -94,13 +94,17 @@ export type SpawnOptions = {
   prompt: string
   /** Working directory for the spawned process */
   cwd: string
-  /** 'workflow' = multi-turn agentic (map, review), 'query' = single-turn (chat, post) */
+  /**
+   * 'workflow' = multi-turn agentic with the full tool set (review, map,
+   * address, translate). 'query' = the Ask the Team contract: ONLY the
+   * read-only tools Read, Grep and Glob, regardless of the user's or the
+   * repo's vendor configuration. Each adapter either enforces that with
+   * restrictions the child cannot override, or throws before spawning.
+   */
   mode: SpawnMode
-  /** Override max turns (default: 50 for workflow, 1 for query) */
+  /** Override max turns (default: 500 for workflow, 1 for query) */
   maxTurns?: number
-  /** Tool allowlist (default: full set for workflow, read-only for query) */
-  allowedTools?: string[]
-  /** Session ID for conversation resume (Claude Code: --resume, OpenCode: TBD) */
+  /** Session ID for conversation resume (Claude Code: --resume, OpenCode: --session) */
   resumeSessionId?: string
   /**
    * Resolved model identifier passed verbatim to the underlying CLI's
@@ -109,13 +113,14 @@ export type SpawnOptions = {
    */
   model?: string
   /**
-   * Deliberate per-spawn injections, limited to the platform builder's
-   * closed key set (runtime-enforced). Currently only
+   * Deliberate per-spawn injection from the caller: only
    * `OCR_DASHBOARD_EXECUTION_UID`, which lets `ocr state begin` link the
    * new session row's id back to the dashboard's parent command_execution
    * row (so the handoff lookup can resolve the captured vendor_session_id).
+   * The platform's other registered keys belong to the adapters' own
+   * query-mode restriction and are not caller-settable.
    */
-  env?: ChildEnvInject
+  env?: Pick<ChildEnvInject, 'OCR_DASHBOARD_EXECUTION_UID'>
   /**
    * When set (workflow mode), the adapter redirects the spawned process's
    * stdout+stderr to THIS file instead of OS pipes, and the caller tails the
