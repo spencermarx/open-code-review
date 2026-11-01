@@ -149,27 +149,22 @@ describe('Claude Code query containment', () => {
     expect(spawnMock).not.toHaveBeenCalled()
   })
 
-  it('accepts the minimum version and reuses the startup detection', () => {
+  it('accepts the minimum version', () => {
     execMock.mockReturnValue(`${MIN_QUERY_CONTAINMENT_VERSION} (Claude Code)`)
-    const adapter = new ClaudeCodeAdapter()
-    adapter.detect()
-    adapter.spawn({ prompt: PROMPT, cwd: '/repo', mode: 'query' })
-    adapter.spawn({ prompt: PROMPT, cwd: '/repo', mode: 'query' })
-    expect(execMock).toHaveBeenCalledTimes(1)
-    expect(spawnMock).toHaveBeenCalledTimes(2)
+    new ClaudeCodeAdapter().spawn({ prompt: PROMPT, cwd: '/repo', mode: 'query' })
+    expect(spawnMock).toHaveBeenCalledTimes(1)
   })
 
-  it('probes an unparseable version once, then keeps refusing without re-probing', () => {
-    execMock.mockReturnValue('Claude Code (dev build)')
+  it('checks the installed version on every chat turn, not the one seen at startup', () => {
+    execMock.mockReturnValue('2.1.308 (Claude Code)')
     const adapter = new ClaudeCodeAdapter()
     adapter.detect()
-    for (let i = 0; i < 3; i++) {
-      expect(() => adapter.spawn({ prompt: PROMPT, cwd: '/repo', mode: 'query' })).toThrow(
-        UnsupportedCliVersionError,
-      )
-    }
-    expect(execMock).toHaveBeenCalledTimes(1)
-    expect(spawnMock).not.toHaveBeenCalled()
+    adapter.spawn({ prompt: PROMPT, cwd: '/repo', mode: 'query' })
+    execMock.mockReturnValue('2.1.294 (Claude Code)')
+    expect(() => adapter.spawn({ prompt: PROMPT, cwd: '/repo', mode: 'query' })).toThrow(
+      UnsupportedCliVersionError,
+    )
+    expect(spawnMock).toHaveBeenCalledTimes(1)
   })
 
   it('does not gate workflow spawns on the containment version', () => {
@@ -229,6 +224,11 @@ describe('OpenCode query containment', () => {
     expect(config.agent.plan).toEqual({ disable: true })
   })
 
+  it('turns off the background features the chat has no use for', () => {
+    const { config } = spawnQuery()
+    expect(config).toMatchObject({ lsp: false, formatter: false, share: 'disabled', autoupdate: false })
+  })
+
   it("isolates the child from the reviewed repo's config and plugins, overriding ambient values", () => {
     const { env } = spawnQuery()
     expect(env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1')
@@ -269,5 +269,15 @@ describe('OpenCode query containment', () => {
     execMock.mockReturnValue(version)
     new OpenCodeAdapter().spawn({ prompt: PROMPT, cwd: '/repo', mode: 'query' })
     expect(spawnMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a chat turn once the CLI has moved to 2.x, whatever startup saw', () => {
+    const adapter = new OpenCodeAdapter()
+    adapter.detect()
+    execMock.mockReturnValue('2.0.0')
+    expect(() => adapter.spawn({ prompt: PROMPT, cwd: '/repo', mode: 'query' })).toThrow(
+      UnsupportedCliVersionError,
+    )
+    expect(spawnMock).not.toHaveBeenCalled()
   })
 })

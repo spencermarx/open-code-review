@@ -83,9 +83,6 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
   // Claude Code can spawn reviewer sub-agents via its Task tool.
   readonly supportsSubagentSpawn = true
 
-  /** Startup detection, reused by the query gate; see {@link assertVersionSupported}. */
-  private detection: DetectionResult | undefined
-
   buildResumeArgs(vendorSessionId: string): string[] {
     return buildResumeArgsShared('claude', vendorSessionId)
   }
@@ -106,11 +103,10 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       const match = output.match(/\d+\.\d+[\.\d]*/)
-      this.detection = { found: true, version: match?.[0] }
+      return { found: true, version: match?.[0] }
     } catch {
-      this.detection = { found: false }
+      return { found: false }
     }
-    return this.detection
   }
 
   spawn(opts: SpawnOptions): SpawnResult {
@@ -123,7 +119,8 @@ export class ClaudeCodeAdapter implements AiCliAdapter {
       assertVersionSupported({
         binary: this.binary,
         purpose: 'Ask the Team',
-        version: (this.detection ?? this.detect()).version,
+        // Probed per turn: the CLI can change while the dashboard runs.
+        version: this.detect().version,
         min: MIN_QUERY_CONTAINMENT_VERSION,
       })
     }

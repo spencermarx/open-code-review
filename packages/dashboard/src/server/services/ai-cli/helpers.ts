@@ -114,7 +114,7 @@ export function assertVersionSupported(opts: {
   ) {
     throw new UnsupportedCliVersionError(
       `${purpose} requires ${binary} ${range} (found ${version ?? 'unknown version'}). ` +
-        `Install a supported ${binary} version and restart the dashboard.`,
+        `Install a supported ${binary} version.`,
     )
   }
 }

@@ -104,10 +104,10 @@ export function formatChildEnvHeader(result: ChildEnvResult): string {
  * Recomputes the builder result rather than reusing the spawn's (which is
  * out of scope at the close handler): `removed` is a deterministic function
  * of the frozen base and the compiled-in constants, so the recomputation is
- * identical by construction. Injections are deliberately not reported here —
- * they are irrelevant to a "why didn't my variable reach the child"
- * diagnosis (they only ever add OCR-owned values: the execution UID, or a
- * chat spawn's OpenCode restriction).
+ * identical by construction. Injections are deliberately not reported here:
+ * this hint serves workflow children, whose only injection is the execution
+ * UID, which is irrelevant to a "why didn't my variable reach the child"
+ * diagnosis.
  */
 export function childEnvFailureHint(): string {
   const base = getChildEnvBase()

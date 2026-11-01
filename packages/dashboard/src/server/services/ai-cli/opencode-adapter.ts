@@ -124,9 +124,6 @@ export class OpenCodeAdapter implements AiCliAdapter {
   // can be spawned in-agent (uniform model — see supportsPerTaskModel above).
   readonly supportsSubagentSpawn = true
 
-  /** Startup detection, reused by the query gate; see {@link assertVersionSupported}. */
-  private detection: DetectionResult | undefined
-
   buildResumeArgs(vendorSessionId: string): string[] {
     return buildResumeArgsShared('opencode', vendorSessionId)
   }
@@ -147,11 +144,10 @@ export class OpenCodeAdapter implements AiCliAdapter {
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       const match = output.match(/\d+\.\d+[\.\d]*/)
-      this.detection = { found: true, version: match?.[0] }
+      return { found: true, version: match?.[0] }
     } catch {
-      this.detection = { found: false }
+      return { found: false }
     }
-    return this.detection
   }
 
   spawn(opts: SpawnOptions): SpawnResult {
@@ -164,7 +160,8 @@ export class OpenCodeAdapter implements AiCliAdapter {
       assertVersionSupported({
         binary: this.binary,
         purpose: 'Ask the Team',
-        version: (this.detection ?? this.detect()).version,
+        // Probed per turn: the CLI can change while the dashboard runs.
+        version: this.detect().version,
         ...QUERY_CONTAINMENT_VERSION_RANGE,
       })
     }
