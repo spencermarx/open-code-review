@@ -317,8 +317,12 @@ describe("process-tree reaping", () => {
 
     killTreeNow(stubborn.pid!);
 
-    // Well inside reapTree's default 5s grace, so it can only be a SIGKILL.
-    expect(await eventually(() => !isProcessAlive(stubborn.pid!), 2000)).toBe(true);
+    try {
+      // Well inside reapTree's default 5s grace, so it can only be a SIGKILL.
+      expect(await eventually(() => !isProcessAlive(stubborn.pid!), 2000)).toBe(true);
+    } finally {
+      stubborn.kill("SIGKILL");
+    }
   });
 
   it("killTreeNow tolerates a process that is already gone", async () => {

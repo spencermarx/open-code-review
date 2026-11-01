@@ -75,7 +75,7 @@ function serviceSpawning(script: string): { service: AiCliService; child: ChildP
 
 /**
  * Runs a turn and resolves with the pid the script printed first on stdout,
- * which the turn's parser skips as non-JSON. Read here, ahead of the handler's
+ * which the turn's parser ignores. Read here, ahead of the handler's
  * listener, because the same chunk may carry the line that triggers the stop.
  */
 function startTurn(script: string) {

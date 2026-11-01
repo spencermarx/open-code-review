@@ -257,7 +257,6 @@ export function registerChatHandlers(
         }
       }
       const stopForDisallowedTool = (tool: string) => {
-        if (disallowedTool !== null) return
         disallowedTool = tool
         // Stdout can outlast the child, and an exited child's pid can be reused.
         if (proc.pid !== undefined && proc.exitCode === null && proc.signalCode === null) {
@@ -277,8 +276,8 @@ export function registerChatHandlers(
       // Without setEncoding, multi-byte codepoints split across pipe
       // chunks become `�` and the line containing them fails JSON.parse,
       // silently dropping events including `session_id` capture lines.
-      // The chat handler's `capturedClaudeSessionId` (line 245, 273) is
-      // the same loss mode round-1 surfaced for command-runner.
+      // The chat handler's `capturedClaudeSessionId` is the same loss mode
+      // round-1 surfaced for command-runner.
       proc.stdout?.setEncoding('utf-8')
       proc.stderr?.setEncoding('utf-8')
 
@@ -379,9 +378,10 @@ export function registerChatHandlers(
         if (disallowedTool !== null) {
           const errMsg = `Stopped: the AI tried to use a tool outside the chat's read-only set (${disallowedTool}).`
           // A resumed turn ran inside the stored session; drop it so the next
-          // message starts a fresh one, even if a later turn has replaced this
-          // one. A stop on the buffered last line reaches this without going
-          // through stopForDisallowedTool, and this is the retry for one that did.
+          // message starts a fresh one. A later turn that already resumed it
+          // runs on, but won't store it again. A stop on the buffered last line
+          // reaches this without going through stopForDisallowedTool, and this
+          // is the retry for one that did.
           clearStoredSession()
           tracker.appendOutput(`\n✗ ${errMsg}\n`)
           // Never 0: the CLI may have exited cleanly before it was stopped.
@@ -391,8 +391,12 @@ export function registerChatHandlers(
           return
         }
 
-        // Store Claude session ID for future resume
-        if (capturedClaudeSessionId && current) {
+        // Store Claude session ID for future resume. A turn that resumed a
+        // session only keeps it while it's still stored: a replaced turn's stop
+        // may have dropped it during this turn.
+        const resumedStillStored =
+          !resumeId || getConversation(db, conversationId)?.claude_session_id === resumeId
+        if (capturedClaudeSessionId && current && resumedStillStored) {
           updateConversationClaudeSession(db, conversationId, capturedClaudeSessionId)
         }
 

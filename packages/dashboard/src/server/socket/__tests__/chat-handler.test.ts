@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import type { Server as SocketIOServer, Socket } from 'socket.io'
 import type { Database } from '@open-code-review/persistence'
+import { killTreeNow } from '@open-code-review/platform'
 import { makeTempWorkspace, removeTempWorkspace } from '@open-code-review/persistence/test-support'
 import {
   getConversation,
@@ -27,6 +28,13 @@ import { ClaudeCodeAdapter } from '../../services/ai-cli/claude-adapter.js'
 import { OpenCodeAdapter } from '../../services/ai-cli/opencode-adapter.js'
 import { UnsupportedCliVersionError } from '../../services/ai-cli/helpers.js'
 import type { AiCliAdapter, AiCliService } from '../../services/ai-cli/index.js'
+
+// A fake child's pid is not a real process, so the kill itself stays out of
+// this file; chat-handler.process.test.ts covers it against real ones.
+vi.mock('@open-code-review/platform', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  killTreeNow: vi.fn(),
+}))
 
 type Emitted = { event: string; payload: Record<string, unknown> }
 
@@ -96,6 +104,10 @@ function toolTurn(name: string, isError: boolean): string {
   ]
     .map((line) => JSON.stringify(line))
     .join('\n') + '\n'
+}
+
+function sessionLine(id: string): string {
+  return `${JSON.stringify({ type: 'system', subtype: 'init', session_id: id })}\n`
 }
 
 function recordedExitCode(): unknown {
@@ -234,10 +246,45 @@ describe('chat:send when an earlier turn closes late', () => {
 
   it('does not replace the session the newer turn stored', async () => {
     const { a, b } = supersede()
-    const newer = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'claude-sess-b' })
-    await finish(b, `${newer}\n`, 0)
+    await finish(b, sessionLine('claude-sess-b'), 0)
     await finish(a, toolTurn('Read', false), 0)
     expect(getConversation(db, 'conv-1')?.claude_session_id).toBe('claude-sess-b')
+  })
+
+  it('leaves the running turn tracked when a replaced turn stops late', async () => {
+    const { a, spawn, sendAgain } = supersede()
+    await finish(a, toolTurn('Bash', false), 0)
+    sendAgain()
+    expect(spawn).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves the running turn alone when a replaced turn errors', () => {
+    const { a, b, spawn, sendAgain } = supersede()
+    a.emit('error', new Error('kill failed'))
+    expect(b.kill).not.toHaveBeenCalled()
+    sendAgain()
+    expect(spawn).toHaveBeenCalledTimes(2)
+  })
+
+  describe('with a stored session both turns resumed', () => {
+    beforeEach(() => {
+      upsertConversation(db, 'conv-1', 'sess-1', 'review_round', 1)
+      updateConversationClaudeSession(db, 'conv-1', 'claude-sess-0')
+    })
+
+    it('keeps a newer turn from storing it after the replaced turn stops late', async () => {
+      const { a, b } = supersede()
+      await finish(a, toolTurn('Bash', false), 0)
+      await finish(b, sessionLine('claude-sess-0'), 0)
+      expect(getConversation(db, 'conv-1')?.claude_session_id ?? null).toBeNull()
+    })
+
+    it('lets a newer turn store its session when nothing stopped', async () => {
+      const { a, b } = supersede()
+      await finish(a, toolTurn('Read', false), 0)
+      await finish(b, sessionLine('claude-sess-b'), 0)
+      expect(getConversation(db, 'conv-1')?.claude_session_id).toBe('claude-sess-b')
+    })
   })
 })
 
@@ -310,6 +357,24 @@ describe('chat:send read-only backstop', () => {
     expect(getConversation(db, 'conv-1')?.claude_session_id ?? null).toBeNull()
     expect(child.stdout.destroyed).toBe(true)
     expect(child.stderr.destroyed).toBe(true)
+  })
+
+  it.each([
+    ['a running child', {}, 1],
+    ['a child that has exited', { exitCode: 0 }, 0],
+    ['a child that was killed', { signalCode: 'SIGKILL' as const }, 0],
+  ])('kills the tree of %s only if it is still running', async (_label, state, kills) => {
+    const child = Object.assign(fakeChild(), { pid: 4242 }, state)
+    const { socket, handlers } = fakeSocket()
+    registerChatHandlers(io, socket, db, ocrDir, serviceWith(() => ({
+      process: child as unknown as ChildProcess,
+      detached: false,
+    })))
+    send(handlers)
+    vi.mocked(killTreeNow).mockClear()
+    child.stdout.write(toolTurn('Bash', false))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(killTreeNow).toHaveBeenCalledTimes(kills)
   })
 
   it('still kills the CLI and reports the stop when the session clear fails', async () => {
@@ -425,6 +490,8 @@ describe('chat:send read-only backstop', () => {
   })
 
   async function runUnterminated(stream: string) {
+    upsertConversation(db, 'conv-1', 'sess-1', 'review_round', 1)
+    updateConversationClaudeSession(db, 'conv-1', 'claude-sess-0')
     const child = fakeChild()
     const { socket, handlers, emitted } = fakeSocket()
     registerChatHandlers(io, socket, db, ocrDir, serviceWith(() => ({
