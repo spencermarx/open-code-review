@@ -1,3 +1,21 @@
+## 2.5.1 (2026-11-01)
+
+### 🩹 Fixes
+
+- **dashboard:** enforce the chat's read-only tool set ([5262716](https://github.com/spencermarx/open-code-review/commit/5262716))
+- **dashboard:** check the CLI version on every chat turn ([c786984](https://github.com/spencermarx/open-code-review/commit/c786984))
+- **dashboard:** finish a stopped chat turn without waiting on its pipes ([5b277e2](https://github.com/spencermarx/open-code-review/commit/5b277e2))
+- **dashboard:** keep a late close from touching the newer chat turn ([cae9e2b](https://github.com/spencermarx/open-code-review/commit/cae9e2b))
+- **dashboard:** keep a newer turn from re-storing a stopped session ([5379fd9](https://github.com/spencermarx/open-code-review/commit/5379fd9))
+- **platform:** register the OpenCode chat restriction env injections ([a67d6cd](https://github.com/spencermarx/open-code-review/commit/a67d6cd))
+- **platform:** add killTreeNow for an immediate process-tree kill ([5d67314](https://github.com/spencermarx/open-code-review/commit/5d67314))
+- **platform:** stop the root before killTreeNow walks the tree ([2aeab03](https://github.com/spencermarx/open-code-review/commit/2aeab03))
+
+### ❤️ Thank You
+
+- claude-flow @agentic-org
+- Spencer Marx
+
 ## 2.5.0 (2026-07-28)
 
 ### 🚀 Features

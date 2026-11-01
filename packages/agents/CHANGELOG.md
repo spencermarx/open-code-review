@@ -1,3 +1,17 @@
+## 2.5.1 (2026-11-01)
+
+### 🩹 Fixes
+
+- **dashboard:** keep a late close from touching the newer chat turn ([cae9e2b](https://github.com/spencermarx/open-code-review/commit/cae9e2b))
+- **dashboard:** finish a stopped chat turn without waiting on its pipes ([5b277e2](https://github.com/spencermarx/open-code-review/commit/5b277e2))
+- **dashboard:** enforce the chat's read-only tool set ([5262716](https://github.com/spencermarx/open-code-review/commit/5262716))
+- **platform:** register the OpenCode chat restriction env injections ([a67d6cd](https://github.com/spencermarx/open-code-review/commit/a67d6cd))
+
+### ❤️ Thank You
+
+- claude-flow @agentic-org
+- Spencer Marx
+
 ## 2.5.0 (2026-07-28)
 
 ### 🩹 Fixes
