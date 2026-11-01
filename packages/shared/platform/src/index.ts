@@ -236,6 +236,35 @@ export function reapTree(rootPid: number, graceMs = 5000): ReapResult {
   return { signaled: term.length, psAvailable };
 }
 
+/**
+ * Kill a process tree now, with no grace period: for a child that must stop
+ * rather than be asked to. POSIX: SIGKILL every descendant (leaves first, root
+ * last). Windows: `taskkill /T /F` from the root. Best-effort and never throws.
+ *
+ * The walk follows parent links, so like {@link reapTree} it cannot reach a
+ * process already reparented away from the tree.
+ */
+export function killTreeNow(rootPid: number): void {
+  if (isWindows) {
+    try {
+      execFileSync("taskkill", ["/PID", String(rootPid), "/T", "/F"], {
+        timeout: 5000,
+      });
+    } catch {
+      /* already gone / not found */
+    }
+    return;
+  }
+  const { pids } = walkDescendants(rootPid);
+  for (const pid of [...pids.reverse(), rootPid]) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
 // ── Reviewer icons ──
 
 /**

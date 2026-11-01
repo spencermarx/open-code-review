@@ -16,6 +16,7 @@ import {
   isProcessAlive,
   descendantPids,
   reapTree,
+  killTreeNow,
   BUILTIN_ICON_MAP,
 } from "../index.js";
 
@@ -291,6 +292,25 @@ describe("process-tree reaping", () => {
     // whole tree is dead — on every OS.
     expect(await eventually(() => !isProcessAlive(parent.pid!), 4000)).toBe(true);
     expect(await eventually(() => !isProcessAlive(grandchildPid), 4000)).toBe(true);
+  });
+
+  it("killTreeNow kills the whole tree without a grace period", async () => {
+    const parent = spawn(process.execPath, [parentFixture, longLivedFixture], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const grandchildPid = Number(await firstLine(parent));
+    expect(isProcessAlive(grandchildPid)).toBe(true);
+
+    killTreeNow(parent.pid!);
+
+    expect(await eventually(() => !isProcessAlive(parent.pid!), 4000)).toBe(true);
+    expect(await eventually(() => !isProcessAlive(grandchildPid), 4000)).toBe(true);
+  });
+
+  it("killTreeNow tolerates a process that is already gone", async () => {
+    const proc = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+    await new Promise((done) => proc.on("exit", done));
+    expect(() => killTreeNow(proc.pid!)).not.toThrow();
   });
 });
 
