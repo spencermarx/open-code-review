@@ -10,7 +10,7 @@ import type { ChildProcess } from 'node:child_process'
 import { dirname } from 'node:path'
 import type { Server as SocketIOServer, Socket } from 'socket.io'
 import type { Database } from '@open-code-review/persistence'
-import { descendantPids, reapTree } from '@open-code-review/platform'
+import { killTreeNow } from '@open-code-review/platform'
 import {
   getConversation,
   getMessages,
@@ -26,6 +26,7 @@ import {
   formatToolDetail,
   isReadOnlyQueryTool,
   UnsupportedCliVersionError,
+  type NormalizedEvent,
   type SpawnResult,
 } from '../services/ai-cli/index.js'
 import { startTrackedExecution, type TrackedExecution } from './execution-tracker.js'
@@ -122,6 +123,19 @@ export function registerChatHandlers(
         socket.emit('chat:error', {
           conversationId,
           error: 'No AI CLI available. Install Claude Code or OpenCode to use the chat feature.',
+        })
+        return
+      }
+
+      // One turn per conversation: a reload or a second tab can send while a
+      // turn is running, and the later `close` would overwrite the stored
+      // session. Keyed on the child being alive, not on `process`, which only
+      // `close` nulls: a `close` that never fires must not lock the chat.
+      const running = activeChats.get(conversationId)?.process
+      if (running && running.exitCode === null && running.signalCode === null) {
+        socket.emit('chat:error', {
+          conversationId,
+          error: 'A response is already in progress for this conversation.',
         })
         return
       }
@@ -224,23 +238,27 @@ export function registerChatHandlers(
       // conversation keeps neither the answer nor a session to resume.
       const announcedTools = new Set<string>()
       let disallowedTool: string | null = null
+      /** The label to stop on for this event, or null if it is within the set. */
+      const backstopViolation = (evt: NormalizedEvent): string | null => {
+        if (evt.type === 'tool_call') {
+          if (!isReadOnlyQueryTool(evt.name)) return evt.name
+          announcedTools.add(evt.toolId)
+        } else if (evt.type === 'tool_result' && !announcedTools.delete(evt.toolId)) {
+          return 'unannounced tool'
+        }
+        return null
+      }
       const stopForDisallowedTool = (tool: string) => {
         if (disallowedTool !== null) return
         disallowedTool = tool
-        if (proc.pid !== undefined) {
-          // Kill what the CLI started before the CLI itself, while those
-          // processes are still its descendants. Windows has no `ps` walk;
-          // reapTree's `taskkill /T /F` covers the tree there.
-          for (const pid of descendantPids(proc.pid)) {
-            try {
-              process.kill(pid, 'SIGKILL')
-            } catch {
-              // already gone
-            }
-          }
-          reapTree(proc.pid, 0)
-        }
+        updateConversationClaudeSession(db, conversationId, null)
+        if (proc.pid !== undefined) killTreeNow(proc.pid)
         proc.kill('SIGKILL')
+        // `close` also waits for stdio EOF, which a process outside the tree
+        // can withhold by holding these pipes. Destroying them leaves `close`
+        // waiting only on the CLI's own exit.
+        proc.stdout?.destroy()
+        proc.stderr?.destroy()
       }
 
       // UTF-8 boundary safety — round-2 Blocker 1 (sweep completion).
@@ -262,6 +280,11 @@ export function registerChatHandlers(
         for (const line of lines) {
           if (!line.trim()) continue
           for (const evt of parser.parseLine(line)) {
+            const violation = backstopViolation(evt)
+            if (violation !== null) {
+              stopForDisallowedTool(violation)
+              return
+            }
             switch (evt.type) {
               case 'text_delta':
                 assistantText += evt.text
@@ -279,11 +302,6 @@ export function registerChatHandlers(
                 }
                 break
               case 'tool_call': {
-                if (!isReadOnlyQueryTool(evt.name)) {
-                  stopForDisallowedTool(evt.name)
-                  return
-                }
-                announcedTools.add(evt.toolId)
                 const detail = formatToolDetail(evt.name, evt.input)
                 socket.emit('chat:status', {
                   conversationId,
@@ -299,14 +317,8 @@ export function registerChatHandlers(
               case 'session_id':
                 capturedClaudeSessionId = evt.id
                 break
-              case 'tool_result':
-                if (!announcedTools.has(evt.toolId)) {
-                  stopForDisallowedTool('unannounced tool')
-                  return
-                }
-                break
-              // tool_input_delta, error: not surfaced in the chat UI today —
-              // the chat status row already shows tool name and the
+              // tool_input_delta, tool_result, error: not surfaced in the chat UI
+              // today — the chat status row already shows tool name and the
               // assistant message will reflect the result.
             }
           }
@@ -323,6 +335,7 @@ export function registerChatHandlers(
         // Process any remaining buffered data, with the same backstop checks
         if (disallowedTool === null && lineBuffer.trim()) {
           for (const evt of parser.parseLine(lineBuffer)) {
+            disallowedTool ??= backstopViolation(evt)
             switch (evt.type) {
               case 'text_delta':
                 assistantText += evt.text
@@ -333,13 +346,6 @@ export function registerChatHandlers(
               case 'session_id':
                 capturedClaudeSessionId = evt.id
                 break
-              case 'tool_call':
-                if (!isReadOnlyQueryTool(evt.name)) disallowedTool ??= evt.name
-                else announcedTools.add(evt.toolId)
-                break
-              case 'tool_result':
-                if (!announcedTools.has(evt.toolId)) disallowedTool ??= 'unannounced tool'
-                break
             }
           }
         }
@@ -347,10 +353,12 @@ export function registerChatHandlers(
         if (disallowedTool !== null) {
           const errMsg = `Stopped: the AI tried to use a tool outside the chat's read-only set (${disallowedTool}).`
           // A resumed turn ran inside the stored session; drop it so the next
-          // message starts a fresh one.
+          // message starts a fresh one. A stop on the buffered last line
+          // reaches this without going through stopForDisallowedTool.
           updateConversationClaudeSession(db, conversationId, null)
           tracker.appendOutput(`\n✗ ${errMsg}\n`)
-          tracker.finish(code ?? 1)
+          // Never 0: the CLI may have exited cleanly before it was stopped.
+          tracker.finish(code || 1)
           socket.emit('chat:error', { conversationId, error: errMsg })
           resetIdleTimer(conversationId, db)
           const chat = activeChats.get(conversationId)

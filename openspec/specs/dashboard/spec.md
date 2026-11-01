@@ -1047,7 +1047,7 @@ The dashboard SHALL provide an "Ask the Team" chat feature that allows users to 
 
 #### Scenario: Allowed tools — unsupported CLI version
 
-- **GIVEN** the active AI CLI's detected version cannot enforce the restriction (Claude Code below 2.1.295; OpenCode below 1.3.4 or 2.0.0 and above), or its version cannot be determined
+- **GIVEN** the active AI CLI's version, detected for each chat turn, cannot enforce the restriction (Claude Code below 2.1.295; OpenCode below 1.3.4 or 2.0.0 and above), or its version cannot be determined
 - **WHEN** the user sends a chat message
 - **THEN** the server SHALL NOT spawn the AI CLI
 - **AND** it SHALL emit a `chat:error` naming the required version
@@ -1056,8 +1056,14 @@ The dashboard SHALL provide an "Ask the Team" chat feature that allows users to 
 
 - **GIVEN** a chat turn is running
 - **WHEN** the AI CLI reports a call to a tool other than `Read`, `Grep` or `Glob`, or a tool result for a call it never reported
-- **THEN** the server SHALL terminate the AI CLI process tree and emit a `chat:error`
+- **THEN** the server SHALL terminate the AI CLI process tree and emit a `chat:error`, without waiting for other processes holding the CLI's output pipes
 - **AND** it SHALL NOT store that turn's answer, and SHALL clear the conversation's stored session so the next message starts a new one
+
+#### Scenario: One turn per conversation
+
+- **GIVEN** a chat turn's AI CLI process is running
+- **WHEN** another message is sent to the same conversation, for example after a reload or from a second tab
+- **THEN** the server SHALL emit a `chat:error`, and SHALL neither store the message nor spawn the AI CLI
 
 ---
 

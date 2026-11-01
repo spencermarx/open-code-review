@@ -21,7 +21,7 @@ import {
   updateConversationClaudeSession,
   upsertConversation,
 } from '../../db.js'
-import { registerChatHandlers } from '../chat-handler.js'
+import { cleanupAllChats, registerChatHandlers } from '../chat-handler.js'
 import { ClaudeCodeAdapter } from '../../services/ai-cli/claude-adapter.js'
 import { OpenCodeAdapter } from '../../services/ai-cli/opencode-adapter.js'
 import { UnsupportedCliVersionError } from '../../services/ai-cli/helpers.js'
@@ -48,6 +48,8 @@ function fakeChild() {
     stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
     kill: vi.fn(() => true),
   })
   return proc
@@ -71,23 +73,32 @@ function send(handlers: Map<string, (payload: unknown) => void>) {
   })
 }
 
-/** Claude stream-json for one tool call (block 0) and its result. */
+/**
+ * Claude stream-json for a turn that says something, calls one tool (block 1),
+ * gets its result and answers. The text before the call is what a stopped turn
+ * must not keep.
+ */
 function toolTurn(name: string, isError: boolean): string {
   return [
     { type: 'system', subtype: 'init', session_id: 'claude-sess-1' },
+    { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Let me check.' } } },
     {
       type: 'stream_event',
-      event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_1', name, input: {} } },
+      event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_1', name, input: {} } },
     },
-    { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } },
+    { type: 'stream_event', event: { type: 'content_block_stop', index: 1 } },
     {
       type: 'user',
       message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'out', is_error: isError }] },
     },
-    { type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Answer.' } } },
+    { type: 'stream_event', event: { type: 'content_block_delta', index: 2, delta: { type: 'text_delta', text: 'Answer.' } } },
   ]
     .map((line) => JSON.stringify(line))
     .join('\n') + '\n'
+}
+
+function recordedExitCode(): unknown {
+  return db.exec('SELECT exit_code FROM command_executions ORDER BY id DESC LIMIT 1')[0]?.values[0]?.[0]
 }
 
 beforeEach(async () => {
@@ -104,11 +115,73 @@ beforeEach(async () => {
 })
 
 afterEach(() => {
+  cleanupAllChats()
   vi.useRealTimers()
   removeTempWorkspace(workspace)
 })
 
 const io = { emit: () => true } as unknown as SocketIOServer
+
+describe('chat:send spawn options', () => {
+  function spawnSpy() {
+    return vi.fn<AiCliAdapter['spawn']>(() => ({
+      process: fakeChild() as unknown as ChildProcess,
+      detached: false,
+    }))
+  }
+
+  it('runs a new turn in query mode', () => {
+    const { socket, handlers } = fakeSocket()
+    const spawn = spawnSpy()
+    registerChatHandlers(io, socket, db, ocrDir, serviceWith(spawn))
+    send(handlers)
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ mode: 'query', maxTurns: 1 }))
+  })
+
+  it('runs a resumed turn in query mode', () => {
+    upsertConversation(db, 'conv-1', 'sess-1', 'review_round', 1)
+    updateConversationClaudeSession(db, 'conv-1', 'claude-sess-0')
+    const { socket, handlers } = fakeSocket()
+    const spawn = spawnSpy()
+    registerChatHandlers(io, socket, db, ocrDir, serviceWith(spawn))
+    send(handlers)
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'query', maxTurns: 1, resumeSessionId: 'claude-sess-0' }),
+    )
+  })
+})
+
+describe('chat:send while a turn is running', () => {
+  function sendTwice(first: ReturnType<typeof fakeChild>) {
+    const { socket, handlers, emitted } = fakeSocket()
+    const spawn = vi.fn<AiCliAdapter['spawn']>(() => ({
+      process: first as unknown as ChildProcess,
+      detached: false,
+    }))
+    registerChatHandlers(io, socket, db, ocrDir, serviceWith(spawn))
+    send(handlers)
+    return { spawn, emitted, sendAgain: () => send(handlers) }
+  }
+
+  it('refuses the message without storing it or spawning', () => {
+    const { spawn, emitted, sendAgain } = sendTwice(fakeChild())
+    sendAgain()
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(getMessages(db, 'conv-1')).toHaveLength(1)
+    expect(emitted).toContainEqual({
+      event: 'chat:error',
+      payload: { conversationId: 'conv-1', error: 'A response is already in progress for this conversation.' },
+    })
+  })
+
+  it('accepts the message once the child has exited, even if close never fired', () => {
+    const child = fakeChild()
+    const { spawn, sendAgain } = sendTwice(child)
+    child.exitCode = 0
+    sendAgain()
+    expect(spawn).toHaveBeenCalledTimes(2)
+  })
+})
 
 describe('chat:send spawn refusal', () => {
   it('reports an unsupported CLI version to the user as a chat:error', () => {
@@ -161,7 +234,48 @@ describe('chat:send read-only backstop', () => {
     expect(emitted.some((e) => e.event === 'chat:done')).toBe(false)
     expect(getConversation(db, 'conv-1')?.claude_session_id ?? null).toBeNull()
     expect(getMessages(db, 'conv-1').map((m) => m.role)).toEqual(['user'])
+    expect(recordedExitCode()).toBe(1)
   }
+
+  it('clears the session and releases the pipes without waiting for close', async () => {
+    upsertConversation(db, 'conv-1', 'sess-1', 'review_round', 1)
+    updateConversationClaudeSession(db, 'conv-1', 'claude-sess-0')
+    const child = fakeChild()
+    const { socket, handlers } = fakeSocket()
+    registerChatHandlers(io, socket, db, ocrDir, serviceWith(() => ({
+      process: child as unknown as ChildProcess,
+      detached: false,
+    })))
+    send(handlers)
+    child.stdout.write(toolTurn('Bash', false))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(getConversation(db, 'conv-1')?.claude_session_id ?? null).toBeNull()
+    expect(child.stdout.destroyed).toBe(true)
+    expect(child.stderr.destroyed).toBe(true)
+  })
+
+  it('starts the next message fresh after a stop', async () => {
+    upsertConversation(db, 'conv-1', 'sess-1', 'review_round', 1)
+    updateConversationClaudeSession(db, 'conv-1', 'claude-sess-0')
+    const child = fakeChild()
+    const { socket, handlers } = fakeSocket()
+    const spawn = vi.fn<AiCliAdapter['spawn']>(() => ({
+      process: child as unknown as ChildProcess,
+      detached: false,
+    }))
+    registerChatHandlers(io, socket, db, ocrDir, serviceWith(spawn))
+    send(handlers)
+    child.stdout.write(toolTurn('Bash', false))
+    await new Promise((resolve) => setImmediate(resolve))
+    child.emit('close', null)
+    child.exitCode = 1
+    send(handlers)
+    expect(spawn).toHaveBeenCalledTimes(2)
+    const next = spawn.mock.calls[1]![0]
+    expect(next.resumeSessionId).toBeUndefined()
+    expect(next.prompt).toContain('User: What did the reviewers flag?')
+    expect(next.prompt).not.toBe('What did the reviewers flag?')
+  })
 
   it.each([
     ['its result succeeded', false],
@@ -199,8 +313,7 @@ describe('chat:send read-only backstop', () => {
     expectStopped(child, emitted, 'Bash')
   })
 
-  it('stops the turn when the out-of-set call is on an unterminated last line', async () => {
-    const stream = toolTurn('Bash', true).split('\n').slice(0, 3).join('\n')
+  async function runUnterminated(stream: string) {
     const child = fakeChild()
     const { socket, handlers, emitted } = fakeSocket()
     registerChatHandlers(io, socket, db, ocrDir, serviceWith(() => ({
@@ -211,10 +324,50 @@ describe('chat:send read-only backstop', () => {
     child.stdout.write(stream)
     await new Promise((resolve) => setImmediate(resolve))
     child.emit('close', 0)
+    return emitted
+  }
+
+  it('stops the turn when the out-of-set call is on an unterminated last line', async () => {
+    const emitted = await runUnterminated(toolTurn('Bash', true).split('\n').slice(0, 4).join('\n'))
     const error = emitted.find((e) => e.event === 'chat:error')
     expect(error?.payload.error).toContain("outside the chat's read-only set (Bash)")
     expect(emitted.some((e) => e.event === 'chat:done')).toBe(false)
     expect(getConversation(db, 'conv-1')?.claude_session_id ?? null).toBeNull()
+    expect(getMessages(db, 'conv-1').map((m) => m.role)).toEqual(['user'])
+    expect(recordedExitCode()).toBe(1)
+  })
+
+  it('stops the turn when an unannounced result is on an unterminated last line', async () => {
+    const orphan = JSON.stringify({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_x', content: 'out', is_error: false }] },
+    })
+    const emitted = await runUnterminated(orphan)
+    const error = emitted.find((e) => e.event === 'chat:error')
+    expect(error?.payload.error).toContain("outside the chat's read-only set (unannounced tool)")
+    expect(emitted.some((e) => e.event === 'chat:done')).toBe(false)
+  })
+
+  it('matches an announced call to one result only, even when a block index repeats', async () => {
+    // Claude block indexes restart per message: the second call never reports
+    // a stop, so its result lands on the first call's already-used correlator.
+    const start = (id: string) => ({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id, name: 'Read', input: {} } },
+    })
+    const result = (id: string) => ({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'out', is_error: false }] },
+    })
+    const stream = [
+      start('toolu_1'),
+      { type: 'stream_event', event: { type: 'content_block_stop', index: 1 } },
+      result('toolu_1'),
+      start('toolu_2'),
+      result('toolu_2'),
+    ].map((line) => JSON.stringify(line)).join('\n')
+    const { child, emitted } = await run(`${stream}\n`)
+    expectStopped(child, emitted, 'unannounced tool')
   })
 
   it.each(['read', 'grep', 'glob'])('leaves an OpenCode turn alone when it uses %s', async (tool) => {
