@@ -11,7 +11,12 @@
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 
-export { execBinary, execBinaryAsync, spawnBinary } from "./spawn.js";
+export {
+  execBinary,
+  execBinaryAsync,
+  spawnBinary,
+  resolveDetachedWindowsTarget,
+} from "./spawn.js";
 export type { ExecBinaryAsyncOptions, ExecError } from "./spawn.js";
 
 export {

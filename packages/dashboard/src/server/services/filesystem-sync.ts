@@ -1417,7 +1417,9 @@ export class FilesystemSync {
 
   private processChangedFile(filePath: string): void {
     // Determine session from path
-    const relFromSessions = relative(this.sessionsDir, filePath)
+    // Normalize to POSIX separators: on Windows `relative()` yields backslashes,
+    // which broke the session-id split and every path regex below.
+    const relFromSessions = relative(this.sessionsDir, filePath).replace(/\\/g, '/')
     const parts = relFromSessions.split('/')
     const sessionId = parts[0]
     if (!sessionId) return
