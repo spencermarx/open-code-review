@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -916,6 +916,138 @@ Database changes.
 
       const runs = queryAll(db, "SELECT * FROM map_runs WHERE session_id = ? AND source = 'orchestrator'", [sessionId])
       expect(runs).toHaveLength(0)
+    })
+  })
+
+  describe('finding identity across rescans', () => {
+    const findingIds = () =>
+      queryAll(db, 'SELECT id, title FROM review_findings ORDER BY id').map((r) => `${r['id']}:${r['title']}`)
+
+    const markProgress = (title: string, status: string) => {
+      const row = queryOne(db, 'SELECT id FROM review_findings WHERE title = ?', [title])
+      db.run('INSERT INTO user_finding_progress (finding_id, status) VALUES (?, ?)', [row!['id'] as number, status])
+    }
+
+    it('keeps finding ids and user progress when a reviewer .md is re-parsed', async () => {
+      const reviewsDir = join(sessionsDir, '2026-01-01-ids-md', 'rounds', 'round-1', 'reviews')
+      mkdirSync(reviewsDir, { recursive: true })
+      const file = join(reviewsDir, 'principal-1.md')
+      const md = (extra = '') =>
+        `# Review\n\n## Finding: Bad Import\n**Severity**: medium\n**File**: \`src/a.ts\`\n**Lines**: 10\n\nx\n\n` +
+        `## Finding: Leak\n**Severity**: high\n**File**: \`src/b.ts\`\n**Lines**: 5\n\ny\n${extra}`
+      writeFileSync(file, md())
+
+      const sync = new FilesystemSync(db, sessionsDir)
+      await sync.fullScan()
+      const before = findingIds()
+      const outputBefore = queryOne(db, 'SELECT id FROM reviewer_outputs')!['id']
+      markProgress('Leak', 'fixed')
+
+      // Touch the file into the future so shouldSkip() does not short-circuit the re-parse.
+      for (let i = 1; i <= 2; i++) {
+        const t = new Date(Date.now() + i * 60_000)
+        writeFileSync(file, md(`\nnote ${i}\n`))
+        utimesSync(file, t, t)
+        await sync.fullScan()
+      }
+
+      expect(findingIds()).toEqual(before)
+      expect(queryOne(db, 'SELECT id FROM reviewer_outputs')!['id']).toBe(outputBefore)
+      const progress = queryAll(
+        db,
+        `SELECT rf.title, ufp.status FROM user_finding_progress ufp JOIN review_findings rf ON rf.id = ufp.finding_id`,
+      )
+      expect(progress).toEqual([{ title: 'Leak', status: 'fixed' }])
+    })
+
+    it('keeps finding ids and user progress when round-meta.json is re-ingested', async () => {
+      const roundDir = join(sessionsDir, '2026-01-01-ids-meta', 'rounds', 'round-1')
+      mkdirSync(roundDir, { recursive: true })
+      const meta = {
+        schema_version: 1,
+        verdict: 'REQUEST CHANGES',
+        reviewers: [
+          {
+            type: 'principal',
+            instance: 1,
+            findings: [
+              { title: 'SQL Injection', category: 'blocker', severity: 'high', file_path: 'src/auth.ts', line_start: 42 },
+              { title: 'Missing validation', category: 'should_fix', severity: 'medium', file_path: 'src/auth.ts', line_start: 7 },
+            ],
+          },
+        ],
+      }
+      writeFileSync(join(roundDir, 'round-meta.json'), JSON.stringify(meta))
+
+      const sync = new FilesystemSync(db, sessionsDir)
+      await sync.fullScan()
+      const before = findingIds()
+      markProgress('SQL Injection', 'acknowledged')
+
+      await sync.fullScan()
+      // A line shift of the same finding is still the same finding.
+      meta.reviewers[0]!.findings[0]!.line_start = 44
+      const t = new Date(Date.now() + 60_000)
+      writeFileSync(join(roundDir, 'round-meta.json'), JSON.stringify(meta))
+      utimesSync(join(roundDir, 'round-meta.json'), t, t)
+      await sync.fullScan()
+
+      expect(findingIds()).toEqual(before)
+      const progress = queryAll(
+        db,
+        `SELECT rf.title, rf.line_start, ufp.status FROM user_finding_progress ufp JOIN review_findings rf ON rf.id = ufp.finding_id`,
+      )
+      expect(progress).toEqual([{ title: 'SQL Injection', line_start: 44, status: 'acknowledged' }])
+    })
+
+    it('deletes only findings that left the source and inserts new ones', async () => {
+      const roundDir = join(sessionsDir, '2026-01-01-ids-gone', 'rounds', 'round-1')
+      mkdirSync(roundDir, { recursive: true })
+      const f = (title: string, line: number) => ({ title, category: 'should_fix', severity: 'low', file_path: 'src/x.ts', line_start: line })
+      const write = (findings: unknown[], offsetMin: number) => {
+        const p = join(roundDir, 'round-meta.json')
+        writeFileSync(p, JSON.stringify({ schema_version: 1, verdict: 'APPROVE', reviewers: [{ type: 'quality', instance: 1, findings }] }))
+        const t = new Date(Date.now() + offsetMin * 60_000)
+        utimesSync(p, t, t)
+      }
+      write([f('Keep', 1), f('Drop', 2)], 1)
+      const sync = new FilesystemSync(db, sessionsDir)
+      await sync.fullScan()
+      const keepId = queryOne(db, "SELECT id FROM review_findings WHERE title = 'Keep'")!['id']
+
+      write([f('Keep', 1), f('New', 3)], 2)
+      await sync.fullScan()
+
+      const rows = queryAll(db, 'SELECT id, title FROM review_findings ORDER BY id')
+      expect(rows.map((r) => r['title'])).toEqual(['Keep', 'New'])
+      expect(rows[0]?.['id']).toBe(keepId)
+    })
+
+    it('does not move progress between same-title findings when the match is ambiguous', async () => {
+      const roundDir = join(sessionsDir, '2026-01-01-ids-tie', 'rounds', 'round-1')
+      mkdirSync(roundDir, { recursive: true })
+      const f = (line: number) => ({ title: 'Dup', category: 'should_fix', severity: 'low', file_path: 'src/x.ts', line_start: line })
+      const write = (lines: number[], offsetMin: number) => {
+        const p = join(roundDir, 'round-meta.json')
+        writeFileSync(p, JSON.stringify({ schema_version: 1, verdict: 'APPROVE', reviewers: [{ type: 'quality', instance: 1, findings: lines.map(f) }] }))
+        const t = new Date(Date.now() + offsetMin * 60_000)
+        utimesSync(p, t, t)
+      }
+      write([10, 20], 1)
+      const sync = new FilesystemSync(db, sessionsDir)
+      await sync.fullScan()
+      const old = queryOne(db, 'SELECT id FROM review_findings WHERE line_start = 10')!['id'] as number
+      db.run("INSERT INTO user_finding_progress (finding_id, status) VALUES (?, 'fixed')", [old])
+
+      // 15 is equidistant from the stored 10 and 20: a tie must insert, never guess.
+      write([15], 2)
+      await sync.fullScan()
+
+      const rows = queryAll(db, 'SELECT id, line_start FROM review_findings')
+      expect(rows).toHaveLength(1)
+      expect(rows[0]?.['line_start']).toBe(15)
+      expect(rows[0]?.['id']).not.toBe(old)
+      expect(queryAll(db, 'SELECT * FROM user_finding_progress')).toHaveLength(0)
     })
   })
 
