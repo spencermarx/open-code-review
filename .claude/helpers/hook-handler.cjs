@@ -14,6 +14,12 @@
  */
 
 const path = require('path');
+
+// Anchor cwd to the project root before any helper loads: session.js/memory.js/intelligence.cjs
+// resolve `.claude-flow/` from process.cwd(), so hooks fired from a subdirectory would otherwise
+// create stray state dirs there.
+process.chdir(path.join(__dirname, '..', '..'));
+
 const fs = require('fs');
 
 const helpersDir = __dirname;
