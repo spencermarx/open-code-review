@@ -454,17 +454,14 @@ const isCheckMode = process.argv.includes("--check");
 const code = runAll();
 if (code === 0) {
   console.log("\ndoctor OK: all checks passed");
+  process.exit(0);
 } else {
   if (isCheckMode) {
     console.error("doctor FAIL: drift detected — run 'sync --check' to regenerate");
     process.exit(1);
-  } else {
-    // Standalone: print warnings but exit 0 (not a hard gate).
-    for (const msg of failures) {
-      console.error(`doctor WARN: ${msg}`);
-    }
-    process.exit(0);
+  }
+  // Standalone: print warnings but exit 0 (not a hard gate).
+  for (const msg of failures) {
+    console.error(`doctor WARN: ${msg}`);
   }
 }
-
-process.exit(0);

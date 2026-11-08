@@ -28,15 +28,15 @@ export interface AgentArtifact {
   content: string;   // .md file content
 }
 
-// All known dangerous OpenCode actions that must be explicitly denied by default.
+// All known dangerous OpenCode actions — always deny unless explicitly allowed.
 const DANGEROUS_ACTIONS = [
-  "edit",
-  "shell",
-  "subagent",
+  "Edit",
+  "Shell",
+  "Subagent",
   "Write",
   "MultiEdit",
-  "browser",
-  "fetch",
+  "Browser",
+  "Fetch",
 ] as const;
 type DangerousAction = (typeof DANGEROUS_ACTIONS)[number];
 
@@ -218,7 +218,7 @@ export function buildOpenCodeAgent(
   sourceContent: string,
   outRelPath?: string, // e.g. ".opencode/agents/core/reviewer.md"
 ): AgentArtifact {
-  const name = fm.name || "agent";
+  const name = (fm.name || "agent").replace(/[^a-zA-Z0-9_-]/g, "");
   const mode = MODE_MAP[fm.type ?? ""] || "validator";
   const color = fm.color ?? null;
   const description = fm.description || `${name} agent`;
@@ -293,11 +293,14 @@ function capitalizeAction(action: string): string {
 /** Escape a string for YAML double-quoted value. */
 function escapeYaml(s: string): string {
   return s
+    // Must be first — handle backslash before anything else
     .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
+    // Then all special characters that need escaping in YAML double quotes
     .replace(/\n/g, "\\n")
     .replace(/\r/g, "\\r")
-    .replace(/\t/g, "\\t");
+    .replace(/\t/g, "\\t")
+    .replace(/"/g, '\\"')
+    .replace(/\0/g, "\\0");
 }
 
 // ===========================================================================

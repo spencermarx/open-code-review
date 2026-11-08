@@ -67,8 +67,8 @@ Body here.
   const hasGrepAllow = perms.some((p) => p.action === "Grep" && p.effect === "allow");
   assert(hasReadAllow, "Read is allowed (least-privilege default)");
   assert(hasGrepAllow, "Grep is allowed (least-privilege default)");
-  const hasEditDeny = perms.some((p) => p.action === "edit" && p.effect === "deny");
-  const hasShellDeny = perms.some((p) => p.action === "shell" && p.effect === "deny");
+  const hasEditDeny = perms.some((p) => p.action.toLowerCase() === "edit" && p.effect === "deny");
+  const hasShellDeny = perms.some((p) => p.action.toLowerCase() === "shell" && p.effect === "deny");
   assert(hasEditDeny, "edit is denied by default");
   assert(hasShellDeny, "shell is denied by default");
   // CRITICAL: no *:* allow ever
@@ -87,11 +87,11 @@ Body here.
   assert(Array.isArray(fm.tools), "explicit tools list parsed");
 
   const perms = mapPermissions(fm.tools);
-  const hasEditDeny = perms.some((p) => p.action === "edit" && p.effect === "deny");
+  const hasEditDeny = perms.some((p) => p.action.toLowerCase() === "edit" && p.effect === "deny");
   assert(hasEditDeny, "edit denied when tools only has Read+Grep");
-  const hasShellDeny = perms.some((p) => p.action === "shell" && p.effect === "deny");
+  const hasShellDeny = perms.some((p) => p.action.toLowerCase() === "shell" && p.effect === "deny");
   assert(hasShellDeny, "shell denied when tools only has Read+Grep");
-  const hasSubagentDeny = perms.some((p) => p.action === "subagent" && p.effect === "deny");
+  const hasSubagentDeny = perms.some((p) => p.action.toLowerCase() === "subagent" && p.effect === "deny");
   assert(hasSubagentDeny, "subagent denied when not in allowlist");
 
   // Verify that Read and Grep are allowed
@@ -113,7 +113,7 @@ Body here.
     (p) => p.action.toLowerCase() === "edit" && p.effect === "allow",
   );
   assert(hasEditAllow, "Edit is allowed when explicitly in tools");
-  const hasShellDeny2 = perms.some((p) => p.action === "shell" && p.effect === "deny");
+  const hasShellDeny2 = perms.some((p) => p.action.toLowerCase() === "shell" && p.effect === "deny");
   assert(hasShellDeny2, "shell denied when only Edit in tools");
 }
 
@@ -163,7 +163,7 @@ Body.
   );
   // Should contain deny entries for dangerous actions
   assert(
-    artifact.content.includes('action:') && artifact.content.includes('"edit"'),
+    artifact.content.includes('"Edit"') || artifact.content.includes('"edit"'),
     "edit in output",
   );
   assert(
@@ -187,7 +187,7 @@ Body.
   assert(artifact.content.includes("effect:"), "allow effect present in output");
   // Shell should be denied since it's not in the allowlist
   assert(
-    artifact.content.includes('"shell"') || artifact.content.includes('"Shell"'),
+    artifact.content.includes('"Shell"') || artifact.content.includes('"shell"'),
     "deny effects present for non-allowed actions",
   );
 }

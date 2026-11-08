@@ -9,13 +9,13 @@ permissions:
   - action: "Grep"
     resource: "*"
     effect: allow
-  - action: "edit"
+  - action: "Edit"
     resource: "*"
     effect: deny
-  - action: "shell"
+  - action: "Shell"
     resource: "*"
     effect: deny
-  - action: "subagent"
+  - action: "Subagent"
     resource: "*"
     effect: deny
   - action: "Write"
@@ -24,10 +24,10 @@ permissions:
   - action: "MultiEdit"
     resource: "*"
     effect: deny
-  - action: "browser"
+  - action: "Browser"
     resource: "*"
     effect: deny
-  - action: "fetch"
+  - action: "Fetch"
     resource: "*"
     effect: deny
 color: "#4ECDC4"
