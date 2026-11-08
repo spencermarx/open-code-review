@@ -18,9 +18,38 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 <!-- OPENSPEC:END -->
 
 
-# Code Conventions
+## Code Conventions
 
-See `CLAUDE.md` for canonical code conventions
+- **TypeScript only**: Do not create raw `.js` or `.mjs` files unless they serve a config purpose (e.g., `vite.config.mjs`, `eslint.config.mjs`). All project code, scripts, and utilities must be written in TypeScript.
+- **Nx-native automation**: Release process automation must use Nx extension points (e.g., `VersionActions`, `preVersionCommand`), not npm lifecycle scripts or standalone scripts.
+- **Agent assets — edit source, then sync**: Agent docs, skills, commands, references, and other agent-related files have their **source of truth in `packages/agents/`**. ALWAYS edit them there, then run `nx run cli:update` to write the changes out to the local project's `.ocr/` directory. Never hand-edit the generated `.ocr/` copies directly — they will be overwritten on the next sync and your edits will drift from source.
+- **Shared layers live in `packages/shared/*`, apps never depend on apps** (CI-enforced): `cli` and `dashboard` are application packages and MUST NOT depend on one another. This DAG is enforced by `@nx/enforce-module-boundaries` (root `eslint.config.mjs`, keyed off each project's `scope:*` tag) and gated in CI via `nx run-many -t lint` — an accidental `dashboard → cli` (or `shared → app`) import fails the build, not just review. Code both apps need (persistence, domain/state, config, cross-platform utilities) lives in dedicated library packages under `packages/shared/*` that each app depends on directly. The current shared packages are `@open-code-review/platform` (cross-platform/runtime utilities), `@open-code-review/persistence` (the `node:sqlite` adapter `db` + workflow `state` lifecycle + `test-support` + `vendor-resume` + the `node:sqlite` runtime precondition `runtime-checks` — kept in **one** package because `db` and `state` have a mutually-recursive *type* cycle (`db/types.ts` ↔ `state/types.ts`); a package boundary between them would form a dependency cycle. The single-module-instance connection-cache singleton is a *consequence* of that co-location, not its root cause), and `@open-code-review/config` (`runtime-config` + `team-config` + `models`).
+- **Shared packages are source-only, private, and inlined — never published**: each `packages/shared/*` package mirrors `platform` exactly — `private: true`, `version 0.0.0`, every `exports` condition (`types`/`source`/`default`) points at `./src/*.ts` (no `build.mjs`, no `dist`), and it is declared by its **consumers** as a `devDependency: workspace:*` (consumer-side rule). A shared package still declares its own runtime third-party deps in its `dependencies` — they are inlined into the consumer's bundle, so they must resolve at build time. esbuild inlines the `.ts` source into each app's published bundle, so these packages are **excluded from the release set** (`!packages/shared/*` in `nx.json`) and do not join the fixed `cli`+`agents` release group. Do NOT give a shared package a `build` target or a `dist` — that machinery was removed in the cutover and must not return.
+- **Graduation is by cause, not by count**: a slice graduates from an app package into a `packages/shared/*` package the moment it is consumed across a package boundary (by the other app, an e2e package, or another shared package) rather than only by its owning app's own code. There is no subpath-count trigger. A genuinely app-internal module stays in its app; the goal is to keep the dependency graph a DAG of `app → shared → shared`, never `app → app`.
+
+## Release Process (GitHub + npm)
+
+Releases are cut **locally from `main` with `nx release`**; npm publishing happens **only in CI**, gated by a cross-platform install verification. Versioning is conventional-commits driven; `cli` + `agents` are a fixed release group (always bump together — `dashboard`, `shared/*`, and `*-e2e` are excluded from releasing, see `release` in `nx.json`).
+
+1. **Preconditions**: the work is merged to `main`; you are on `main`, pulled, with a clean tree; and the **push-triggered** CI run on `main` is green. (PR CI runs the e2e matrix on ubuntu only — macOS/Windows e2e run on push to `main`, so a green PR does NOT imply a green `main`.)
+2. **Preview the bump** (no writes):
+   ```bash
+   pnpm nx release --skip-publish --dry-run
+   ```
+   Conventional commits since the last `v*` tag decide the specifier (`feat` → minor, `fix` → patch, `BREAKING CHANGE` → major). Sanity-check the computed version and the changelog preview.
+3. **Cut the release**:
+   ```bash
+   GITHUB_TOKEN="$(gh auth token)" pnpm nx release --skip-publish
+   ```
+   This single command: bumps every manifest (including the synced copies in `packages/agents/.claude-plugin/plugin.json` and `packages/agents/skills/ocr/SKILL.md`), updates the lockfile, writes `CHANGELOG.md`, commits `chore(release): {version}`, tags `v{version}`, **pushes the commit + tag**, and **publishes the GitHub release**. Notes: the `GITHUB_TOKEN` env var is required for the GH-release step; `--yes` is mutually exclusive with `--skip-publish` (the latter already auto-answers the only prompt).
+4. **npm publish happens in CI, never locally**: the `v*` tag push triggers `.github/workflows/release.yml`, which packs the real tarballs and **install-verifies them on 3 OS × 2 Node versions** (pnpm 10 with scripts blocked + npm; `ocr doctor --engine-only --probe-write` + a real on-disk state command) **before** running `nx release publish`. Plain `vX.Y.Z` tags publish to dist-tag `latest`; `vX.Y.Z-rc*` tags publish to `next`. The workflow can also be run via manual dispatch (with a dry-run option that skips publishing). **npm auth is OIDC trusted publishing — there is no `NPM_TOKEN` secret.** Both packages are configured on npmjs.com with this repo + `release.yml` as a GitHub Actions trusted publisher; if publishing ever fails with "not logged in", check that config (and that the publish step runs **pnpm ≥ 11** — pnpm 10 ships no OIDC trusted-publishing code at all; that wrong assumption produced exactly this ENEEDAUTH failure on the first v2.2.1 publish attempt) rather than hunting for a token.
+5. **Verify**: watch the Release run to completion (`gh run watch`), then confirm the registry:
+   ```bash
+   npm view @open-code-review/cli version && npm view @open-code-review/agents version
+   ```
+
+Never `npm publish` by hand, never tag without going through `nx release`, and never bypass the verify-install gate — it exists because 2.0.0 shipped an install break that only a real published-tarball install could catch.
+
 
 <!-- OCR:START -->
 ## Open Code Review Instructions
@@ -31,7 +60,7 @@ Always open `.ocr/skills/SKILL.md` when the request:
 - Asks for code review, PR review, or feedback on changes
 - Mentions "review my code" or similar phrases
 - Wants multi-perspective analysis of code quality
-- Asks to map, organize, or navigate a large changeset
+- Asks to map, organize, navigate a large changeset
 
 Use `.ocr/skills/SKILL.md` to learn:
 - How to run the 8-phase review workflow
@@ -41,3 +70,41 @@ Use `.ocr/skills/SKILL.md` to learn:
 
 Keep this managed block so `ocr init` can refresh the instructions.
 <!-- OCR:END -->
+
+## Harness Compatibility
+
+This project uses a **canonical source + projection** model so that shared structural context (code conventions, release process, managed blocks) is authored once and consumed by every supported AI coding harness without duplication.
+
+### The Three-Concept Model
+
+1. **Canonical source** — `AGENTS.md` at the repository root is the single source of truth for all shared project instructions. OpenCode reads it directly; Claude Code imports it via an `@AGENTS.md` pointer in `CLAUDE.md`.
+2. **Projection strategy** — A harness sync tool (`tools/harness/`) regenerates each harness's native instruction files from the canonical source. The model is: *one adapter per harness*; adding a new harness requires only one new adapter, and every existing source immediately projects through it.
+3. **Sync + doctor** — `npx ocr update` (or `nx run cli:update`) re-renders all projections; `ocr doctor` verifies that generated files match the canonical source and reports drift without touching hand-owned ("reserved") files.
+
+### Shared vs. Reserved Split
+
+| Category | What it is | Example |
+|----------|-----------|---------|
+| **Shared** (one source → N projections) | Authored in `AGENTS.md`, projected to every harness | Code conventions, release process, managed blocks |
+| **Reserved** (harness-native, hand-owned, never clobbered) | Per-harness config files — hooks, permissions, plugins | Claude's `.claude/settings.json`; OpenCode's `opencode.json` reserved keys (`permissions`, `model`, etc.) |
+
+Reserved files are never overwritten by the sync. They belong to their respective harness and contain harness-specific policies (permission rules, tool access controls, plugin registrations).
+
+### "Extend Once" Workflow
+
+```
+Author a canonical source in AGENTS.md
+    → all existing harnesses re-render automatically via the sync tool
+    → add one new harness = write one adapter; that source now projects to it too
+```
+
+No per-harness duplication of shared content is needed. The only files you ever edit directly are **reserved** files (harness-specific config) and, for shared context, `AGENTS.md` itself.
+
+### Which Files Each Harness Reads
+
+| Harness | Context file(s) | Notes |
+|---------|----------------|-------|
+| **Claude Code** | `CLAUDE.md` (pointer to `@AGENTS.md`); also reads `.windsurfrules` | A coexisting `CLAUDE.md` suppresses OpenCode's `AGENTS.md`; the `@AGENTS.md` import in `CLAUDE.md` is required for Claude to access shared context. |
+| **OpenCode** | `AGENTS.md` only (no `CLAUDE.md` fallback) | Reads shared context directly; `opencode.json` lists `"AGENTS.md"` in instructions for explicit discovery. |
+
+All other supported tools (Cursor, Windsurf, etc.) read their own native instruction files, which are generated projections of the same canonical `AGENTS.md`.

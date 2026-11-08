@@ -201,7 +201,7 @@ The system SHALL provide Windsurf-compatible workflow files for slash command in
 
 ### Requirement: Platform Compatibility Matrix
 
-The system SHALL document supported features per platform.
+The system SHALL document supported features per platform, including the cross-harness command naming convention. The matrix lists both slash-separated (OpenCode) and colon-separated (Claude Code) command forms so developers can invoke OCR correctly regardless of their chosen tool.
 
 #### Scenario: Feature documentation
 - **GIVEN** OCR README exists
@@ -210,15 +210,30 @@ The system SHALL document supported features per platform.
   - Full support features per platform
   - Degraded features per platform
   - Fallback behavior for unsupported features
+  - Command name form per harness (slash vs. colon)
 
 #### Scenario: Slash command compatibility
 - **GIVEN** OCR is installed
 - **WHEN** slash commands are invoked
 - **THEN**:
   - Claude Code: `/ocr:command` format
+  - OpenCode: `/ocr/command` format
   - Cursor: `/command-name` format
   - Windsurf: `/workflow-name` format
   - Codex/Copilot: Natural language fallback
+
+#### Scenario: OpenCode harness is documented
+- **GIVEN** a developer checks the Platform Compatibility Matrix for OpenCode support
+- **WHEN** they inspect the OpenCode row
+- **THEN** it SHALL show:
+  - Agent Skills support (from `.claude/skills` auto-discovery)
+  - Slash command form (`/ocr/review`, `/ocr:doctor`, etc.)
+  - Native config via `opencode.json` instructions + MCP servers
+
+#### Scenario: Cross-harness command resolution is documented
+- **GIVEN** the Platform Compatibility Matrix lists a command such as "Review"
+- **WHEN** both Claude Code and OpenCode forms are shown
+- **THEN** it SHALL display `/ocr:review` (Claude Code) alongside `/ocr/review` (OpenCode)
 
 ---
 
@@ -298,4 +313,3 @@ The system SHALL gracefully degrade when optional features are unavailable.
 - **GIVEN** optional dependencies are missing
 - **WHEN** `/ocr:doctor` runs
 - **THEN** it SHALL display warnings (not errors) for optional features
-

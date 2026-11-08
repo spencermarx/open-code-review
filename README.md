@@ -63,7 +63,7 @@ When you ask an AI to "review my code," you get a single perspective — one pas
 - **Discourse before synthesis** — Reviewers don't just produce findings — they debate them. They challenge assumptions, validate concerns, and surface questions no single reviewer would ask.
 - **Fully customizable teams** — Pick from 28 reviewer personas (including famous engineers like Martin Fowler, Kent Beck, and Sandi Metz), create your own persistent reviewers, or describe ephemeral one-off reviewers inline.
 - **Requirements-aware** — Pass in a spec, proposal, or acceptance criteria. Every reviewer evaluates the code against your stated requirements, not just general best practices.
-- **Project context** — OCR discovers your standards from `CLAUDE.md`, `.cursorrules`, OpenSpec configs, and other common patterns. Reviewers apply *your* conventions.
+- **Project context** — OCR discovers your standards from `AGENTS.md` (the canonical source), plus projections to `CLAUDE.md`, `.windsurfrules`, OpenSpec configs, and other common patterns. Reviewers apply *your* conventions.
 
 ```
                     ┌─────────────┐
@@ -587,6 +587,23 @@ ocr update --commands    # Commands only
 ocr update --skills      # Skills and references only
 ocr update --inject      # AGENTS.md/CLAUDE.md only
 ```
+
+### Cross-Harness Sync
+
+This repository follows a **canonical source + projection** model. The shared structural context in `AGENTS.md` (code conventions, release process, managed blocks) is authored once and projected to every supported AI coding harness:
+
+- Claude Code reads it via an `@AGENTS.md` import in `CLAUDE.md`.
+- OpenCode reads `AGENTS.md` directly.
+- Other harnesses (Cursor, Windsurf, etc.) receive generated projections of their native files.
+
+The sync tool lives in `tools/harness/` and is invoked as a **non-published** root script: `sync-harness` (which runs `node --import tsx tools/harness/index.ts`). It handles the projection from canonical sources to each harness's native file shape. A `doctor` subcommand verifies that generated files match their sources and reports drift without touching hand-owned ("reserved") files.
+
+**Why tooling is decoupled from the published library**: The sync/doctor tooling (`tools/harness/`) is intentionally kept outside the `packages/` tree, structurally outside the release set (the `nx.json` `release.projects` glob only matches `packages/*`). This means:
+1. Repository-maintenance logic never ships to consumers of `@open-code-review/cli` or `@open-code-review/agents`.
+2. The tooling cannot accidentally become a published package — the directory structure itself prevents it.
+3. It mirrors the repo's established pattern for non-published tooling (like `.github/scripts/`).
+
+The same model applies to OCR agent assets: `packages/agents/` is the source of truth, and generated copies live in `.ocr/`. Always edit the source, then run `nx run cli:update` to sync. **Never hand-edit the generated `.ocr/` copies** — they will be overwritten on the next sync.
 
 ---
 

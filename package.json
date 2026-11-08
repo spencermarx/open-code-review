@@ -23,7 +23,10 @@
     "e2e": "nx run-many -t e2e",
     "e2e:cli": "nx e2e cli-e2e",
     "e2e:dashboard-api": "nx e2e dashboard-api-e2e",
-    "e2e:dashboard-ui": "nx e2e dashboard-ui-e2e"
+    "e2e:dashboard-ui": "nx e2e dashboard-ui-e2e",
+    "sync-harness": "node --import tsx tools/harness/index.ts",
+    "doctor": "node --import tsx tools/harness/doctor.ts",
+    "sync-check": "node --import tsx tools/harness/index.ts --check && node --import tsx tools/harness/doctor.ts --check"
   },
   "devDependencies": {
     "@nx/devkit": "^22.0.0",

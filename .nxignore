@@ -1,3 +1,6 @@
 # Workflow scripts carry a package.json only to set "type": "module" for Node's
 # type stripping; they are not an Nx project (CI typechecks and tests them directly).
 .github/scripts
+
+# Cross-harness sync tooling: decoupled from pnpm workspace, outside release set.
+tools/harness

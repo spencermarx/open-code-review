@@ -1,0 +1,22 @@
+{
+  // Reserved — hand-authored OpenCode configuration.
+  // These keys win during deep merge; no key is dropped from either side.
+
+  "permissions": {
+    "*": "deny"
+  },
+
+  "policies": {},
+
+  "plugins": [],
+
+  "model": {
+    "default_model": "qwen3.6:35b-mlx",
+    "provider": "ollama"
+  },
+
+  "default_agent": {
+    "name": "ocr",
+    "model": "qwen3.6:35b-mlx"
+  }
+}
