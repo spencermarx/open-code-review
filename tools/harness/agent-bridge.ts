@@ -13,7 +13,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, extname } from "node:path";
 
 // ===========================================================================
-// Types (we prefer `type` over `interface`)
+// Types — see CODING-STANDARDS.md: prefer `type` over `interface`.
 // ===========================================================================
 
 /** Minimal shape of a Claude agent's YAML-style frontmatter. */
