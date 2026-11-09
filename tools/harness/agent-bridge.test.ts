@@ -45,7 +45,7 @@ hooks:
 }
 
 // ============================================================================
-// Test: parseFrontmatter handles empty/absent tools → least-privilege
+// Test: empty/absent tools → default to Read + Grep
 // ============================================================================
 {
   const md = `---
@@ -61,60 +61,47 @@ Body here.
   assert(fm.tools === undefined, "no tools field present");
 
   const perms = mapPermissions(fm.tools);
-  // Empty/absent → only Read + Grep allowed, all others denied
+  // Empty/absent → mirror Claude's base permissions: Read + Grep
   assert(perms.length > 0, "permissions non-empty");
-  const hasReadAllow = perms.some((p) => p.action === "Read" && p.effect === "allow");
-  const hasGrepAllow = perms.some((p) => p.action === "Grep" && p.effect === "allow");
-  assert(hasReadAllow, "Read is allowed (least-privilege default)");
-  assert(hasGrepAllow, "Grep is allowed (least-privilege default)");
-  const hasEditDeny = perms.some((p) => p.action.toLowerCase() === "edit" && p.effect === "deny");
-  const hasShellDeny = perms.some((p) => p.action.toLowerCase() === "shell" && p.effect === "deny");
-  assert(hasEditDeny, "edit is denied by default");
-  assert(hasShellDeny, "shell is denied by default");
-  // CRITICAL: no *:* allow ever
-  const hasWildcardAllow = perms.some(
-    (p) => p.action === "*:*" || p.action === "*" && p.resource === "*",
-  );
-  assert(!hasWildcardAllow, "no wildcard allow present");
+  const hasReadAllow = perms.some((p) => p.action.toLowerCase() === "read" && p.effect === "allow");
+  const hasGrepAllow = perms.some((p) => p.action.toLowerCase() === "grep" && p.effect === "allow");
+  assert(hasReadAllow, "Read is allowed (base permissions default)");
+  assert(hasGrepAllow, "Grep is allowed (base permissions default)");
 }
 
 // ============================================================================
-// Test: tools:[Read,Grep] → deny edit/shell/subagent
+// Test: tools:[Read,Grep] → mirror those exactly
 // ============================================================================
 {
   // Agent with explicit tools: Read + Grep only
   const fm = parseFrontmatter(`---\nname: researcher\nkind: analyst\ntools:\n  - Read\n  - Grep\n---\nBody\n`);
   assert(Array.isArray(fm.tools), "explicit tools list parsed");
 
-  const perms = mapPermissions(fm.tools);
-  const hasEditDeny = perms.some((p) => p.action.toLowerCase() === "edit" && p.effect === "deny");
-  assert(hasEditDeny, "edit denied when tools only has Read+Grep");
-  const hasShellDeny = perms.some((p) => p.action.toLowerCase() === "shell" && p.effect === "deny");
-  assert(hasShellDeny, "shell denied when tools only has Read+Grep");
-  const hasSubagentDeny = perms.some((p) => p.action.toLowerCase() === "subagent" && p.effect === "deny");
-  assert(hasSubagentDeny, "subagent denied when not in allowlist");
+  const perms = mapPermissions(fm.tools!);
+  // Mirror exactly what's listed — no arbitrary deny entries
+  const hasReadAllow = perms.some((p) => p.action.toLowerCase() === "read" && p.effect === "allow");
+  const hasGrepAllow = perms.some((p) => p.action.toLowerCase() === "grep" && p.effect === "allow");
+  assert(hasReadAllow, "Read is allowed (mirrored from tools)");
+  assert(hasGrepAllow, "Grep is allowed (mirrored from tools)");
 
-  // Verify that Read and Grep are allowed
-  const hasReadAllow = perms.some((p) => (p.action === "read" || p.action === "Read") && p.effect === "allow");
-  assert(hasReadAllow, "Read is explicitly allowed");
-  const hasGrepAllow = perms.some((p) => (p.action === "grep" || p.action === "Grep") && p.effect === "allow");
-  assert(hasGrepAllow, "Grep is explicitly allowed");
+  // No extra deny entries — we mirror, we don't constrain
+  const hasDenyEntries = perms.some((p) => p.effect === "deny");
+  assert(!hasDenyEntries, "no arbitrary deny entries");
 }
 
 // ============================================================================
-// Test: tools:[Edit] → deny shell/subagent but allow edit
+// Test: tools:[Edit] → allow edit, nothing extra
 // ============================================================================
 {
   const fm = parseFrontmatter(`---\nname: editor\nkind: editor\ntools:\n  - Edit\n---\nBody\n`);
   assert(Array.isArray(fm.tools), "single tool parsed");
 
-  const perms = mapPermissions(fm.tools);
-  const hasEditAllow = perms.some(
-    (p) => p.action.toLowerCase() === "edit" && p.effect === "allow",
-  );
-  assert(hasEditAllow, "Edit is allowed when explicitly in tools");
-  const hasShellDeny2 = perms.some((p) => p.action.toLowerCase() === "shell" && p.effect === "deny");
-  assert(hasShellDeny2, "shell denied when only Edit in tools");
+  const perms = mapPermissions(fm.tools!);
+  const hasEditAllow = perms.some((p) => p.action.toLowerCase() === "edit" && p.effect === "allow");
+  assert(hasEditAllow, "Edit is allowed when in tools");
+  // No extra deny entries — we mirror Claude's setup, not add constraints
+  const hasDenyEntries = perms.some((p) => p.effect === "deny");
+  assert(!hasDenyEntries, "no arbitrary deny entries for unsupported actions");
 }
 
 // ============================================================================
@@ -161,19 +148,10 @@ Body.
     artifact.content.includes("Code review specialist"),
     "description preserved",
   );
-  // Should contain deny entries for dangerous actions
-  assert(
-    artifact.content.includes('"Edit"') || artifact.content.includes('"edit"'),
-    "edit in output",
-  );
-  assert(
-    artifact.content.includes('"shell"') || artifact.content.includes('"Shell"'),
-    "shell denied in output",
-  );
 }
 
 // ============================================================================
-// Test: buildOpenCodeAgent with explicit tools includes allowed actions
+// Test: buildOpenCodeAgent with explicit tools mirrors them
 // ============================================================================
 {
   const fm = {
@@ -184,12 +162,9 @@ Body.
   };
   const artifact = buildOpenCodeAgent(fm, "---\nname: editor\n---\nBody\n");
 
+  // Should contain allow entries for both Read and Edit
   assert(artifact.content.includes("effect:"), "allow effect present in output");
-  // Shell should be denied since it's not in the allowlist
-  assert(
-    artifact.content.includes('"Shell"') || artifact.content.includes('"shell"'),
-    "deny effects present for non-allowed actions",
-  );
+  // The bridge mirrors — no arbitrary deny constraints
 }
 
 // ============================================================================
@@ -197,29 +172,29 @@ Body.
 // ============================================================================
 {
   const testCases = [
-    { tools: undefined as string[] | undefined }, // empty/absent → least-privilege
+    { tools: undefined as string[] | undefined }, // empty/absent → base perms
     { tools: ["Read"] }, // single tool
-    { tools: ["Edit", "Shell", "Read"] }, // some dangerous ones
+    { tools: ["Edit", "Shell", "Read"] }, // multiple tools
   ];
 
   for (const tc of testCases) {
     const perms = mapPermissions(tc.tools);
     const hasWildcard = perms.some(
-      (p) => p.action === "*:*" || p.action === "*" && p.resource === "*",
+      (p) => p.action === "*:*" || (p.action === "*" && p.resource === "*"),
     );
     assert(!hasWildcard, `no wildcard allow with tools=${JSON.stringify(tc.tools)}`);
   }
 }
 
 // ============================================================================
-// Test: empty tools array → least-privilege (same as absent)
+// Test: empty tools array → base permissions (same as absent)
 // ============================================================================
 {
   const perms = mapPermissions([]);
-  const hasReadAllow = perms.some((p) => p.action === "Read" && p.effect === "allow");
-  const hasGrepAllow = perms.some((p) => p.action === "Grep" && p.effect === "allow");
-  assert(hasReadAllow, "empty tools → Read allowed (least-privilege)");
-  assert(hasGrepAllow, "empty tools → Grep allowed (least-privilege)");
+  const hasReadAllow = perms.some((p) => p.action.toLowerCase() === "read" && p.effect === "allow");
+  const hasGrepAllow = perms.some((p) => p.action.toLowerCase() === "grep" && p.effect === "allow");
+  assert(hasReadAllow, "empty tools → Read allowed (base permissions)");
+  assert(hasGrepAllow, "empty tools → Grep allowed (base permissions)");
 }
 
 // ============================================================================

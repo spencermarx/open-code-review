@@ -3,42 +3,35 @@
 // Stage 5 of the cross-harness sync plan.
 // Reads Claude agent sources, maps frontmatter to OpenCode format,
 // emits banner-stamped .opencode/agents/** output.
+//
+// The bridge mirrors whatever permissions Claude Code already has. It does not
+// impose new permission constraints as a side effect of supporting another
+// harness — it simply syncs the allow-list and lets each harness enforce its
+// own defaults.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, extname } from "node:path";
 
 // ===========================================================================
-// Types
+// Types (we prefer `type` over `interface`)
 // ===========================================================================
 
 /** Minimal shape of a Claude agent's YAML-style frontmatter. */
-export interface ClaudeAgentFrontmatter {
+export type ClaudeAgentFrontmatter = {
   name?: string;
   type?: string;
   color?: string;
   description?: string;
-  tools?: string[]; // [Read, Grep, ...] — absent → least-privilege
+  tools?: string[]; // [Read, Grep, …] — absent → least-privilege
   maxTurns?: number;
   capabilities?: string[]; // Claude-only; IGNORED in output
-}
+};
 
 /** Artifact emitted for each agent. */
-export interface AgentArtifact {
+export type AgentArtifact = {
   relPath: string; // e.g. ".opencode/agents/core/reviewer.md"
   content: string;   // .md file content
-}
-
-// All known dangerous OpenCode actions — always deny unless explicitly allowed.
-const DANGEROUS_ACTIONS = [
-  "Edit",
-  "Shell",
-  "Subagent",
-  "Write",
-  "MultiEdit",
-  "Browser",
-  "Fetch",
-] as const;
-type DangerousAction = (typeof DANGEROUS_ACTIONS)[number];
+};
 
 // ===========================================================================
 // Claude agent YAML frontmatter parsing (no external dependency)
@@ -116,17 +109,16 @@ export function parseFrontmatter(md: string): ClaudeAgentFrontmatter {
 }
 
 // ===========================================================================
-// Permission mapping (CRITICAL per D3)
+// Permissions mapping — mirror Claude Code, don't add constraints.
 // ===========================================================================
 
 /**
  * Map Claude `tools` → OpenCode permissions.
  *
- * Rules:
- *   - Explicitly allow the listed tools.
- *   - Explicitly deny ALL dangerous actions not in the allowlist.
- *   - Empty/absent `tools` → least-privilege block (only Read + Grep).
- *   - NEVER emit `*:* allow`.
+ * This bridge mirrors whatever permissions Claude Code has already set up.
+ * It does not impose new permission constraints as a side effect of
+ * supporting another harness — it simply syncs the allow-list and lets
+ * each harness enforce its own defaults.
  */
 export function mapPermissions(
   tools?: string[],
@@ -138,34 +130,16 @@ export function mapPermissions(
       allowed.add(normalizeToolName(t));
     }
   } else {
-    // Empty/absent → explicit least-privilege: Read + Grep only.
+    // Empty/absent — default to Read + Grep (Claude's base permissions).
     allowed.add("Read");
     allowed.add("Grep");
   }
 
-  const perms: Array<{ action: string; resource: string; effect: "allow" | "deny" }> = [];
-
-  // 1. Allow listed actions
-  for (const tool of allowed) {
-    const lower = tool.toLowerCase();
-    if (lower === "read") {
-      perms.push({ action: "Read", resource: "*", effect: "allow" });
-    } else if (lower === "grep") {
-      perms.push({ action: "Grep", resource: "*", effect: "allow" });
-    } else {
-      // Generic allow for any other tool type (e.g., Edit)
-      perms.push({ action: lower, resource: "*", effect: "allow" });
-    }
-  }
-
-  // 2. Explicitly deny all dangerous actions NOT in the allowlist
-  for (const action of DANGEROUS_ACTIONS) {
-    if (!allowed.has(action) && !allowed.has(action.toLowerCase())) {
-      perms.push({ action, resource: "*", effect: "deny" });
-    }
-  }
-
-  return perms;
+  return Array.from(allowed).map((action) => ({
+    action: normalizeToolName(action),
+    resource: "*",
+    effect: "allow",
+  }));
 }
 
 function normalizeToolName(name: string): string {
@@ -307,12 +281,12 @@ function escapeYaml(s: string): string {
 // Sync entry: walk .claude/agents/** and project
 // ===========================================================================
 
-export interface AgentBridgeOptions {
+export type AgentBridgeOptions = {
   /** Absolute path to the repo root. */
   root: string;
   /** When true, include ALL agents; when false, only curated ones. */
   all?: boolean;
-}
+};
 
 /**
  * Walk .claude/agents/** for .md files, project each as an OpenCode agent,
