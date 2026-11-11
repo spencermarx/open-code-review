@@ -285,3 +285,25 @@ The system SHALL provide `/ocr:map` as the command for generating code review ma
 - **WHEN** requirements are provided inline or by reference
 - **THEN** the system SHALL include requirements mapping in the output
 
+---
+
+### Requirement: Cross-Harness Slash Command Namespacing
+
+OCR commands resolve differently across AI coding harnesses due to divergent nesting conventions. The same command resolves to a **slash-separated name** in OpenCode (e.g., `/ocr/review`) and a **colon-separated name** in Claude Code (e.g., `/ocr:review`). The `plugin-distribution` Platform Compatibility Matrix documents every command with both forms so developers can invoke OCR correctly regardless of which harness they are using.
+
+The cross-harness sync projectors SHALL generate the appropriate namespace for each target harness — slash nesting for OpenCode, colon nesting for Claude Code — while sharing the same command body content. This ensures the command `body` is authored once but the *invocation path* adapts per harness.
+
+#### Scenario: Same command, different invocation
+- **GIVEN** an OCR command file defines the `/ocr:review` workflow
+- **WHEN** a developer using OpenCode invokes `/ocr/review`
+- **THEN** OpenCode SHALL resolve it to the same underlying command body as Claude Code's `/ocr:review`
+
+#### Scenario: Platform compatibility matrix lists both forms
+- **GIVEN** the `plugin-distribution` Platform Compatibility Matrix is read
+- **WHEN** a specific command row (e.g., "Review") is inspected
+- **THEN** it SHALL show both invocation forms: `/ocr/review` (OpenCode) and `/ocr:review` (Claude Code)
+
+#### Scenario: Slash commands are namespaced under /ocr in OpenCode
+- **GIVEN** a project has the cross-harness sync applied for OpenCode
+- **WHEN** the OpenCode command directory is inspected (`.opencode/commands/ocr/`)
+- **THEN** every OCR command SHALL be under an `ocr` subdirectory, resolving to `/ocr/<name>` in OpenCode

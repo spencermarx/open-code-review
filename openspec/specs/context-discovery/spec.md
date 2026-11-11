@@ -160,3 +160,23 @@ The context discovery process SHALL be thorough and exhaustive, reading complete
 - **WHEN** context is gathered
 - **THEN** the system SHALL include active change proposals from `openspec/changes/**/*.md` for awareness of in-flight work
 
+---
+
+### Requirement: Cross-Harness Context Discovery
+
+When multiple AI coding harnesses are configured in the project, context discovery SHALL treat `AGENTS.md` as the canonical source of truth and recognize that different harnesses read different native files. Discovery SHALL NOT assume a harness reads a file another harness ignores. This ensures that shared project instructions (code conventions, release process, managed blocks) authored in the canonical context are always accessible regardless of which harness is performing the discovery.
+
+#### Scenario: OpenCode reads AGENTS.md, not CLAUDE.md
+- **GIVEN** a project has both `AGENTS.md` and `CLAUDE.md`
+- **WHEN** OpenCode performs context discovery
+- **THEN** OpenCode SHALL read `AGENTS.md` and SHALL NOT attempt to read `CLAUDE.md` as its context source
+
+#### Scenario: Projection keeps every harness current
+- **GIVEN** shared project context is updated in `AGENTS.md`
+- **WHEN** the cross-harness sync runs (e.g., `npx ocr update`)
+- **THEN** all native instruction files (`CLAUDE.md`, `.windsurfrules`, etc.) SHALL be regenerated from `AGENTS.md` so that every harness sees the latest context
+
+#### Scenario: Discovery resolves through projection
+- **GIVEN** `AGENTS.md` is the canonical source and `CLAUDE.md` is an `@AGENTS.md` import pointer
+- **WHEN** a harness discovers project context
+- **THEN** the harness SHALL resolve the same shared instructions regardless of whether it reads `AGENTS.md` directly or through the `CLAUDE.md` import
