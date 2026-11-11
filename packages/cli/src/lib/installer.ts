@@ -104,10 +104,7 @@ function installCommandsForTool(
   commandsSource: string,
   targetDir: string,
 ): boolean {
-  const toolCommandsDir = join(targetDir, tool.commandsDir);
   const centralCommandsDir = join(targetDir, ".ocr", "commands");
-
-  ensureDir(toolCommandsDir);
   ensureDir(centralCommandsDir);
 
   try {
@@ -126,8 +123,16 @@ function installCommandsForTool(
       }
     }
 
+    // A target without a commands directory (e.g. `agents`) gets no reference
+    // files — only the central copies above.
+    if (tool.commandsDir === undefined) {
+      return true;
+    }
+    const toolCommandsDir = join(targetDir, tool.commandsDir);
+    ensureDir(toolCommandsDir);
+
     // Then, create reference files in tool-specific directories
-    if (tool.commandStrategy === "subdirectory") {
+    if (tool.commandStrategy !== "flat-prefixed") {
       // Create ocr/ subdirectory with reference files
       // Files: .claude/commands/ocr/review.md → references .ocr/commands/review.md
       const ocrSubdir = join(toolCommandsDir, "ocr");
@@ -166,6 +171,46 @@ function installCommandsForTool(
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Generate the thin pointer skill written to `<skillPointerDir>/ocr/SKILL.md`.
+ * The frontmatter is copied verbatim from the packaged SKILL.md so `name`,
+ * `description` and `metadata.version` never drift; the body defers to the
+ * single source of truth in `.ocr/skills/SKILL.md`.
+ */
+export function generateSkillPointer(sourceSkillContent: string): string {
+  const match = sourceSkillContent.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+  if (!match) {
+    throw new Error("Packaged SKILL.md has no frontmatter block");
+  }
+  return `${match[0]}
+# OCR: Code Review
+
+This skill is managed by Open Code Review.
+
+**Execute this skill by reading and following:** \`.ocr/skills/SKILL.md\`
+
+If \`.ocr/skills/SKILL.md\` does not exist, OCR is not set up in this project — tell the user to run \`ocr init\`.
+`;
+}
+
+function installSkillPointer(
+  tool: AIToolConfig,
+  ocrSkillsSource: string,
+  targetDir: string,
+): string | null {
+  if (tool.skillPointerDir === undefined) return null;
+  try {
+    const source = readFileSync(join(ocrSkillsSource, "SKILL.md"), "utf-8");
+    const dest = join(targetDir, tool.skillPointerDir, "ocr", "SKILL.md");
+    ensureDir(dirname(dest));
+    writeFileSync(dest, generateSkillPointer(source));
+    return null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown error";
+    return `Failed to install OCR skill pointer to ${tool.skillPointerDir}/ocr/: ${msg}`;
   }
 }
 
@@ -427,8 +472,13 @@ export function installForTool(
     return {
       tool,
       success: false,
-      error: `Failed to install OCR commands to ${tool.commandsDir}`,
+      error: `Failed to install OCR commands to ${tool.commandsDir ?? ".ocr/commands"}`,
     };
+  }
+
+  const pointerError = installSkillPointer(tool, ocrSkillsSource, targetDir);
+  if (pointerError) {
+    return { tool, success: false, error: pointerError };
   }
 
   return {

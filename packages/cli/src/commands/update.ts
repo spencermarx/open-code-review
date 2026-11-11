@@ -32,8 +32,18 @@ type UpdateOptions = {
  */
 function detectConfiguredTools(targetDir: string): AIToolConfig[] {
   return AI_TOOLS.filter((tool) => {
+    // Skill-pointer targets (e.g. `agents`): check for the pointer skill
+    if (
+      tool.skillPointerDir !== undefined &&
+      existsSync(join(targetDir, tool.skillPointerDir, "ocr", "SKILL.md"))
+    ) {
+      return true;
+    }
+    if (tool.commandsDir === undefined) {
+      return false;
+    }
     // Check if tool has OCR commands installed
-    if (tool.commandStrategy === "subdirectory") {
+    if (tool.commandStrategy !== "flat-prefixed") {
       const ocrDir = join(targetDir, tool.commandsDir, "ocr");
       return existsSync(ocrDir);
     } else {
@@ -119,13 +129,23 @@ export const updateCommand = new Command("update")
           chalk.dim("    • .ocr/skills/references/ (except reviewers/)"),
         );
         console.log(chalk.dim("    • .ocr/skills/assets/reviewer-template.md"));
+        for (const tool of toolsToUpdate) {
+          if (tool.skillPointerDir !== undefined) {
+            console.log(
+              chalk.dim(`    • ${tool.skillPointerDir}/ocr/SKILL.md (skill pointer)`),
+            );
+          }
+        }
         console.log(chalk.dim("  Preserved (not modified):"));
         console.log(chalk.dim("    • .ocr/config.yaml"));
         console.log(
           chalk.dim("    • .ocr/skills/references/reviewers/ (all reviewers)"),
         );
         for (const tool of toolsToUpdate) {
-          if (tool.commandStrategy === "subdirectory") {
+          if (tool.commandsDir === undefined) {
+            continue;
+          }
+          if (tool.commandStrategy !== "flat-prefixed") {
             console.log(chalk.dim(`    • ${tool.commandsDir}/ocr/ (commands)`));
           } else {
             console.log(

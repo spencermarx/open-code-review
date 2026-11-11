@@ -9,15 +9,14 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { installForTool } from "./installer";
-import type { AIToolConfig } from "./config";
+import { installForTool, generateSkillPointer } from "./installer";
+import { getToolById, type AIToolConfig } from "./config";
 
 const TEST_TOOL: AIToolConfig = {
   id: "windsurf",
   name: "Windsurf",
   configDir: ".windsurf",
   commandsDir: ".windsurf/workflows",
-  skillsDir: ".windsurf/skills",
   commandStrategy: "flat-prefixed",
 };
 
@@ -260,9 +259,70 @@ describe("installForTool", () => {
       installForTool(TEST_TOOL, testDir);
 
       // For flat-prefixed tools like Windsurf
-      const commandsDir = join(testDir, TEST_TOOL.commandsDir);
+      const commandsDir = join(testDir, TEST_TOOL.commandsDir!);
       expect(existsSync(commandsDir)).toBe(true);
       expect(existsSync(join(commandsDir, "ocr-review.md"))).toBe(true);
     });
+  });
+});
+
+describe("universal agents target", () => {
+  const AGENTS_TOOL = getToolById("agents")!;
+  let testDir: string;
+
+  const sourceSkill = () =>
+    readFileSync(
+      join(import.meta.dirname, "..", "..", "..", "agents", "skills", "ocr", "SKILL.md"),
+      "utf-8",
+    );
+  const frontmatterOf = (content: string) =>
+    content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/)?.[0];
+
+  beforeEach(() => {
+    testDir = createTempDir();
+  });
+
+  afterEach(() => {
+    cleanupTempDir(testDir);
+  });
+
+  it("writes a pointer skill whose frontmatter matches the packaged SKILL.md", () => {
+    const result = installForTool(AGENTS_TOOL, testDir);
+    expect(result.success).toBe(true);
+
+    const pointerPath = join(testDir, ".agents", "skills", "ocr", "SKILL.md");
+    expect(existsSync(pointerPath)).toBe(true);
+
+    const pointer = readFileSync(pointerPath, "utf-8");
+    expect(frontmatterOf(pointer)).toBe(frontmatterOf(sourceSkill()));
+    // Agent Skills: `name` must match the parent directory name.
+    expect(pointer).toMatch(/^name: ocr$/m);
+    expect(pointer).toContain(
+      "**Execute this skill by reading and following:** `.ocr/skills/SKILL.md`",
+    );
+  });
+
+  it("installs the full skill and central commands but no tool command refs", () => {
+    installForTool(AGENTS_TOOL, testDir);
+
+    expect(existsSync(join(testDir, ".ocr", "skills", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(testDir, ".ocr", "commands", "review.md"))).toBe(true);
+    expect(existsSync(join(testDir, ".agents", "commands"))).toBe(false);
+    // Only the pointer lives under .agents/skills/ocr — not a full copy.
+    expect(existsSync(join(testDir, ".agents", "skills", "ocr", "references"))).toBe(false);
+  });
+
+  it("overwrites a stale pointer on re-install", () => {
+    const pointerPath = join(testDir, ".agents", "skills", "ocr", "SKILL.md");
+    mkdirSync(join(testDir, ".agents", "skills", "ocr"), { recursive: true });
+    writeFileSync(pointerPath, "stale");
+
+    installForTool(AGENTS_TOOL, testDir);
+
+    expect(readFileSync(pointerPath, "utf-8")).not.toBe("stale");
+  });
+
+  it("generateSkillPointer rejects a source without frontmatter", () => {
+    expect(() => generateSkillPointer("# no frontmatter")).toThrow();
   });
 });
