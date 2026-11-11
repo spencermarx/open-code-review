@@ -52,23 +52,16 @@ export type InstructionFileTarget = {
   format: InstructionFileFormat;
 };
 
-export type AIToolConfig = {
+/** Where a host's OCR command reference files go, and how they are named. */
+export type CommandsConfig = {
+  dir: string;
+  strategy: CommandStrategy;
+};
+
+type BaseToolConfig = {
   id: AIToolId;
   name: string;
   configDir: string;
-  /**
-   * Where the tool's OCR command reference files go. Omitted ⇒ the target
-   * installs no commands (e.g. the vendor-neutral `agents` target); the full
-   * commands are still installed to `.ocr/commands/`.
-   */
-  commandsDir?: string;
-  /** Naming convention for command reference files. Required with `commandsDir`. */
-  commandStrategy?: CommandStrategy;
-  /**
-   * Skills discovery root that receives a thin `ocr/SKILL.md` pointer to
-   * `.ocr/skills/SKILL.md`. Only the vendor-neutral `agents` target sets it.
-   */
-  skillPointerDir?: string;
   /**
    * The tool's NATIVE instruction file(s), beyond the universal `AGENTS.md`.
    * Omitted ⇒ the tool reads `AGENTS.md` natively (Codex, OpenCode, Cursor,
@@ -83,6 +76,43 @@ export type AIToolConfig = {
   vendorBinary?: string;
 };
 
+/**
+ * An agentic host: an AI coding environment that runs OCR. Hosts receive
+ * command reference files and are listed by `ocr host capabilities`.
+ */
+export type HostToolConfig = BaseToolConfig & {
+  kind: "host";
+  commands: CommandsConfig;
+};
+
+/**
+ * A passive skills-discovery target (e.g. the vendor-neutral `.agents/`
+ * root). It is not a host: it receives only a thin `ocr/SKILL.md` pointer to
+ * `.ocr/skills/SKILL.md`, no commands, and no extra instruction file.
+ */
+export type DiscoveryToolConfig = BaseToolConfig & {
+  kind: "discovery";
+  /** Skills root that receives the pointer, e.g. `.agents/skills`. */
+  skillPointerDir: string;
+};
+
+export type AIToolConfig = HostToolConfig | DiscoveryToolConfig;
+
+/**
+ * First body line of every OCR-generated skill pointer. Its presence is what
+ * marks a pointer as OCR-managed: a `SKILL.md` without it was written by
+ * someone else and must never be overwritten or treated as configured.
+ */
+export const SKILL_POINTER_MARKER = "This skill is managed by Open Code Review.";
+
+/**
+ * Project-relative path (forward slashes) of a discovery target's pointer
+ * skill, e.g. `.agents/skills/ocr/SKILL.md`. The single source of this layout.
+ */
+export function skillPointerPath(tool: DiscoveryToolConfig): string {
+  return `${tool.skillPointerDir}/ocr/SKILL.md`;
+}
+
 // NOTE on splitting AIToolConfig (watch-list): the install-time fields and the
 // runtime cluster (`vendorBinary`) are not a Data Clump today. Consider splitting
 // when ANY of: (a) the runtime cluster grows a third field, (b) a function takes
@@ -95,22 +125,22 @@ export const AI_TOOLS: AIToolConfig[] = [
     id: "amazon-q",
     name: "Amazon Q Developer",
     configDir: ".aws/amazonq",
-    commandsDir: ".aws/amazonq/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".aws/amazonq/commands", strategy: "subdirectory" },
   },
   {
     id: "augment",
     name: "Augment (Auggie)",
     configDir: ".augment",
-    commandsDir: ".augment/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".augment/commands", strategy: "subdirectory" },
   },
   {
     id: "claude",
     name: "Claude Code",
     configDir: ".claude",
-    commandsDir: ".claude/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".claude/commands", strategy: "subdirectory" },
     instructionFiles: [{ path: "CLAUDE.md", format: "markdown" }],
     vendorBinary: "claude",
   },
@@ -118,15 +148,15 @@ export const AI_TOOLS: AIToolConfig[] = [
     id: "cline",
     name: "Cline",
     configDir: ".cline",
-    commandsDir: ".cline/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".cline/commands", strategy: "subdirectory" },
   },
   {
     id: "codex",
     name: "Codex",
     configDir: ".codex",
-    commandsDir: ".codex/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".codex/commands", strategy: "subdirectory" },
     // Codex reads AGENTS.md natively — no extra instruction file.
     vendorBinary: "codex",
   },
@@ -134,22 +164,22 @@ export const AI_TOOLS: AIToolConfig[] = [
     id: "continue",
     name: "Continue",
     configDir: ".continue",
-    commandsDir: ".continue/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".continue/commands", strategy: "subdirectory" },
   },
   {
     id: "cursor",
     name: "Cursor",
     configDir: ".cursor",
-    commandsDir: ".cursor/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".cursor/commands", strategy: "subdirectory" },
   },
   {
     id: "gemini",
     name: "Gemini CLI",
     configDir: ".gemini",
-    commandsDir: ".gemini/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".gemini/commands", strategy: "subdirectory" },
     instructionFiles: [{ path: "GEMINI.md", format: "markdown" }],
     vendorBinary: "gemini",
   },
@@ -157,8 +187,8 @@ export const AI_TOOLS: AIToolConfig[] = [
     id: "github-copilot",
     name: "GitHub Copilot",
     configDir: ".github",
-    commandsDir: ".github/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".github/commands", strategy: "subdirectory" },
     instructionFiles: [
       { path: ".github/copilot-instructions.md", format: "markdown" },
     ],
@@ -167,15 +197,15 @@ export const AI_TOOLS: AIToolConfig[] = [
     id: "kilo-code",
     name: "Kilo Code",
     configDir: ".kilocode",
-    commandsDir: ".kilocode/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".kilocode/commands", strategy: "subdirectory" },
   },
   {
     id: "opencode",
     name: "OpenCode",
     configDir: ".opencode",
-    commandsDir: ".opencode/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".opencode/commands", strategy: "subdirectory" },
     // OpenCode reads AGENTS.md natively — no extra instruction file.
     vendorBinary: "opencode",
   },
@@ -183,22 +213,22 @@ export const AI_TOOLS: AIToolConfig[] = [
     id: "qoder",
     name: "Qoder",
     configDir: ".qoder",
-    commandsDir: ".qoder/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".qoder/commands", strategy: "subdirectory" },
   },
   {
     id: "roo-code",
     name: "RooCode",
     configDir: ".roo",
-    commandsDir: ".roo/commands",
-    commandStrategy: "subdirectory",
+    kind: "host",
+    commands: { dir: ".roo/commands", strategy: "subdirectory" },
   },
   {
     id: "windsurf",
     name: "Windsurf",
     configDir: ".windsurf",
-    commandsDir: ".windsurf/workflows",
-    commandStrategy: "flat-prefixed",
+    kind: "host",
+    commands: { dir: ".windsurf/workflows", strategy: "flat-prefixed" },
     instructionFiles: [{ path: ".windsurfrules", format: "plaintext" }],
   },
   {
@@ -208,17 +238,17 @@ export const AI_TOOLS: AIToolConfig[] = [
     id: "agents",
     name: "Universal (.agents)",
     configDir: ".agents",
+    kind: "discovery",
     skillPointerDir: ".agents/skills",
   },
 ];
 
 /**
  * Is this entry an agentic host (something that runs OCR), as opposed to a
- * passive discovery target like `agents`? Hosts install commands or have a
- * spawnable CLI.
+ * passive discovery target like `agents`? Declared explicitly via `kind`.
  */
-export function isHostTool(tool: AIToolConfig): boolean {
-  return tool.commandsDir !== undefined || tool.vendorBinary !== undefined;
+export function isHostTool(tool: AIToolConfig): tool is HostToolConfig {
+  return tool.kind === "host";
 }
 
 export function getToolById(id: AIToolId): AIToolConfig | undefined {

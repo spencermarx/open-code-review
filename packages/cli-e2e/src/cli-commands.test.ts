@@ -6,7 +6,7 @@
  * stdout content, and filesystem side effects.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, afterAll } from "vitest";
 import { spawnCli } from "./helpers/spawn-cli.js";
@@ -85,6 +85,84 @@ describe("CLI smoke tests", () => {
       expect(result.exitCode).toBe(0);
       expect(existsSync(resolve(project.dir, ".ocr"))).toBe(true);
       expect(existsSync(resolve(project.dir, ".ocr", "skills"))).toBe(true);
+      expect(
+        existsSync(resolve(project.dir, ".cursor", "commands", "ocr", "review.md")),
+      ).toBe(true);
+      expect(result.stderr).not.toContain("Some installations failed");
+    });
+  });
+
+  describe("universal agents target", () => {
+    const pointerOf = (dir: string) =>
+      resolve(dir, ".agents", "skills", "ocr", "SKILL.md");
+
+    it("ocr init --tools agents writes only the skill pointer", async () => {
+      const project = tracked(createTempProject());
+
+      const result = await spawnCli(["init", "--tools", "agents"], {
+        cwd: project.dir,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(readFileSync(pointerOf(project.dir), "utf-8")).toContain(
+        "`.ocr/skills/SKILL.md` at the repository root",
+      );
+      expect(existsSync(resolve(project.dir, ".ocr", "skills", "SKILL.md"))).toBe(true);
+      expect(existsSync(resolve(project.dir, ".agents", "commands"))).toBe(false);
+      // No slash commands were installed, so Next steps does not advertise them.
+      const nextSteps = result.stdout.split("Next steps:")[1] ?? "";
+      expect(nextSteps).toContain("review my changes");
+      expect(nextSteps).not.toContain("/ocr:review");
+    });
+
+    it("ocr update --dry-run lists the pointer among files it would update", async () => {
+      const project = tracked(createTempProject());
+      await spawnCli(["init", "--tools", "agents"], { cwd: project.dir });
+
+      const result = await spawnCli(["update", "--dry-run"], { cwd: project.dir });
+
+      expect(result.exitCode).toBe(0);
+      const wouldUpdate = result.stdout.split("Preserved (not modified):")[0] ?? "";
+      expect(wouldUpdate).toContain(".agents/skills/ocr/SKILL.md (skill pointer)");
+    });
+
+    it("ocr update refreshes an outdated OCR-managed pointer", async () => {
+      const project = tracked(createTempProject());
+      await spawnCli(["init", "--tools", "agents"], { cwd: project.dir });
+      const fresh = readFileSync(pointerOf(project.dir), "utf-8");
+      writeFileSync(
+        pointerOf(project.dir),
+        "---\nname: ocr\n---\n\nThis skill is managed by Open Code Review.\n\nold\n",
+      );
+
+      const result = await spawnCli(["update"], { cwd: project.dir });
+
+      expect(result.exitCode).toBe(0);
+      expect(readFileSync(pointerOf(project.dir), "utf-8")).toBe(fresh);
+    });
+
+    it("ocr host capabilities omits agents but --tool agents resolves the default", async () => {
+      const all = await spawnCli(["host", "capabilities", "--json"]);
+      const single = await spawnCli(["host", "capabilities", "--tool", "agents", "--json"]);
+
+      expect(all.exitCode).toBe(0);
+      const ids = (JSON.parse(all.stdout) as { id: string }[]).map((row) => row.id);
+      expect(ids).toContain("claude");
+      expect(ids).not.toContain("agents");
+      expect(single.exitCode).toBe(0);
+      expect(JSON.parse(single.stdout)).toMatchObject({
+        id: "agents",
+        subagentSpawn: false,
+        perTaskModel: false,
+      });
+    });
+
+    it("ocr init --help lists the valid tool ids", async () => {
+      const result = await spawnCli(["init", "--help"]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("agents");
+      expect(result.stdout).toContain("claude");
     });
   });
 

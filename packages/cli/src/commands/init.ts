@@ -4,6 +4,8 @@ import chalk from "chalk";
 import ora from "ora";
 import {
   AI_TOOLS,
+  getToolIds,
+  isHostTool,
   parseToolsArg,
   type AIToolConfig,
   type AIToolId,
@@ -11,6 +13,7 @@ import {
 import {
   installForTool,
   detectInstalledTools,
+  findStaleSkillPointers,
   type InstallResult,
 } from "../lib/installer.js";
 import {
@@ -29,7 +32,10 @@ import {
 
 export const initCommand = new Command("init")
   .description("Set up OCR for AI coding environments")
-  .option("-t, --tools <tools>", 'Comma-separated tool IDs or "all"')
+  .option(
+    "-t, --tools <tools>",
+    `Comma-separated tool IDs or "all" (${getToolIds().join(", ")})`,
+  )
   .option("--no-inject", "Skip injecting instructions into project instruction files (AGENTS.md + each tool's native file)")
   .action(async (options: { tools?: string; inject: boolean }) => {
     printBanner();
@@ -142,6 +148,19 @@ export const initCommand = new Command("init")
       }
     }
 
+    const stalePointers = findStaleSkillPointers(
+      targetDir,
+      AI_TOOLS,
+      successful.map((r) => r.tool.id),
+    );
+    for (const path of stalePointers) {
+      console.log(
+        chalk.yellow(
+          `  ⚠ ${path} is an OCR skill pointer for a tool that is no longer selected — delete it if unwanted`,
+        ),
+      );
+    }
+
     if (options.inject && successful.length > 0) {
       console.log();
       const injectSpinner = ora(
@@ -177,8 +196,13 @@ export const initCommand = new Command("init")
       ),
     );
     console.log();
+    // Discovery-only installs (e.g. just `agents`) get no slash commands; the
+    // agent picks up the `ocr` skill from its skills directory instead.
+    const hasHost = successful.some((r) => isHostTool(r.tool));
     console.log(
-      `  ${chalk.cyan("2.")} Run ${chalk.yellow("/ocr:review")} in your IDE to start a code review.`,
+      hasHost
+        ? `  ${chalk.cyan("2.")} Run ${chalk.yellow("/ocr:review")} in your IDE to start a code review.`
+        : `  ${chalk.cyan("2.")} Ask your agent to ${chalk.yellow("review my changes")} — it loads the ${chalk.yellow("ocr")} skill.`,
     );
     console.log();
     console.log(

@@ -3,10 +3,11 @@ import chalk from "chalk";
 import ora from "ora";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { AI_TOOLS, type AIToolConfig } from "../lib/config.js";
+import { AI_TOOLS, isHostTool, skillPointerPath } from "../lib/config.js";
 import {
   installForTool,
-  detectInstalledTools,
+  resolveToolsToUpdate,
+  findStaleSkillPointers,
   type InstallResult,
 } from "../lib/installer.js";
 import {
@@ -27,33 +28,6 @@ type UpdateOptions = {
   dryRun?: boolean;
 };
 
-/**
- * Detect which AI tools have OCR commands installed
- */
-function detectConfiguredTools(targetDir: string): AIToolConfig[] {
-  return AI_TOOLS.filter((tool) => {
-    // Skill-pointer targets (e.g. `agents`): check for the pointer skill
-    if (
-      tool.skillPointerDir !== undefined &&
-      existsSync(join(targetDir, tool.skillPointerDir, "ocr", "SKILL.md"))
-    ) {
-      return true;
-    }
-    if (tool.commandsDir === undefined) {
-      return false;
-    }
-    // Check if tool has OCR commands installed
-    if (tool.commandStrategy !== "flat-prefixed") {
-      const ocrDir = join(targetDir, tool.commandsDir, "ocr");
-      return existsSync(ocrDir);
-    } else {
-      // flat-prefixed: check for ocr-review.md
-      const reviewCmd = join(targetDir, tool.commandsDir, "ocr-review.md");
-      return existsSync(reviewCmd);
-    }
-  });
-}
-
 export const updateCommand = new Command("update")
   .description("Update OCR assets after package upgrade")
   .option("--commands", "Update only commands/workflows")
@@ -73,27 +47,11 @@ export const updateCommand = new Command("update")
     console.log(chalk.bold.cyan("  Open Code Review - Update"));
     console.log();
 
-    // Priority order for determining tools to update:
-    // 1. CLI config (user's saved preferences from init)
-    // 2. Detect tools with existing OCR commands installed
-    // 3. Detect tools with config directories (fallback)
+    // Saved preferences from `ocr init` win; legacy installs fall back to
+    // tools that already carry an OCR install plus hosts whose config
+    // directory exists (see `resolveToolsToUpdate`).
     const savedToolIds = getConfiguredToolIds(targetDir);
-    const configuredTools = detectConfiguredTools(targetDir);
-    const installedTools = detectInstalledTools(targetDir, AI_TOOLS);
-
-    let toolsToUpdate: AIToolConfig[];
-
-    if (savedToolIds.length > 0) {
-      // Use saved preferences from CLI config
-      toolsToUpdate = AI_TOOLS.filter((tool) => savedToolIds.includes(tool.id));
-    } else {
-      // Fallback: merge tools with OCR commands OR tool config directories
-      toolsToUpdate = AI_TOOLS.filter(
-        (tool) =>
-          configuredTools.some((t) => t.id === tool.id) ||
-          installedTools.some((t) => t.id === tool.id),
-      );
-    }
+    const toolsToUpdate = resolveToolsToUpdate(targetDir, AI_TOOLS, savedToolIds);
 
     if (toolsToUpdate.length === 0) {
       console.error(chalk.yellow("  No configured AI tools found."));
@@ -130,9 +88,9 @@ export const updateCommand = new Command("update")
         );
         console.log(chalk.dim("    • .ocr/skills/assets/reviewer-template.md"));
         for (const tool of toolsToUpdate) {
-          if (tool.skillPointerDir !== undefined) {
+          if (!isHostTool(tool)) {
             console.log(
-              chalk.dim(`    • ${tool.skillPointerDir}/ocr/SKILL.md (skill pointer)`),
+              chalk.dim(`    • ${skillPointerPath(tool)} (skill pointer)`),
             );
           }
         }
@@ -142,16 +100,14 @@ export const updateCommand = new Command("update")
           chalk.dim("    • .ocr/skills/references/reviewers/ (all reviewers)"),
         );
         for (const tool of toolsToUpdate) {
-          if (tool.commandsDir === undefined) {
+          if (!isHostTool(tool)) {
             continue;
           }
-          if (tool.commandStrategy !== "flat-prefixed") {
-            console.log(chalk.dim(`    • ${tool.commandsDir}/ocr/ (commands)`));
-          } else {
-            console.log(
-              chalk.dim(`    • ${tool.commandsDir}/ocr-*.md (commands)`),
-            );
-          }
+          const pattern =
+            tool.commands.strategy === "flat-prefixed" ? "ocr-*.md" : "ocr/";
+          console.log(
+            chalk.dim(`    • ${tool.commands.dir}/${pattern} (commands)`),
+          );
         }
         console.log();
       } else {
@@ -200,6 +156,19 @@ export const updateCommand = new Command("update")
           for (const warning of allWarnings) {
             console.error(`    ${chalk.yellow("⚠")} ${warning}`);
           }
+        }
+
+        const stalePointers = findStaleSkillPointers(
+          targetDir,
+          AI_TOOLS,
+          toolsToUpdate.map((t) => t.id),
+        );
+        for (const path of stalePointers) {
+          console.log(
+            chalk.yellow(
+              `  ⚠ ${path} is an OCR skill pointer for a tool that is no longer selected — delete it if unwanted`,
+            ),
+          );
         }
 
         console.log();

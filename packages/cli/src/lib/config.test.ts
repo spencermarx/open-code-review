@@ -7,6 +7,7 @@ import {
   DEFAULT_HOST_CAPABILITIES,
   parseToolsArg,
   isHostTool,
+  skillPointerPath,
 } from "./config.js";
 
 describe("host capabilities (issue #28)", () => {
@@ -66,21 +67,21 @@ describe("universal agents target", () => {
     expect(parseToolsArg("all")).toContain("agents");
   });
 
-  it("installs a skill pointer only — no commands, no instruction file, no vendor binary", () => {
+  it("is a discovery target whose pointer lands at .agents/skills/ocr/SKILL.md", () => {
     const agents = getToolById("agents");
-    expect(agents?.configDir).toBe(".agents");
-    expect(agents?.skillPointerDir).toBe(".agents/skills");
-    expect(agents?.commandsDir).toBeUndefined();
-    expect(agents?.instructionFiles).toBeUndefined();
-    expect(agents?.vendorBinary).toBeUndefined();
-  });
-
-  it("only the agents target declares a skillPointerDir", () => {
-    const withPointer = AI_TOOLS.filter((t) => t.skillPointerDir).map((t) => t.id);
-    expect(withPointer).toEqual(["agents"]);
+    if (agents === undefined || isHostTool(agents)) {
+      throw new Error("expected `agents` to be a discovery target");
+    }
+    expect(skillPointerPath(agents)).toBe(".agents/skills/ocr/SKILL.md");
+    expect(agents.instructionFiles).toBeUndefined();
+    expect(agents.vendorBinary).toBeUndefined();
   });
 
   it("is the only registry entry that is not a host", () => {
     expect(AI_TOOLS.filter((t) => !isHostTool(t)).map((t) => t.id)).toEqual(["agents"]);
+  });
+
+  it("still resolves the conservative default capabilities for --tool agents", () => {
+    expect(getHostCapabilities("agents")).toEqual(DEFAULT_HOST_CAPABILITIES);
   });
 });
