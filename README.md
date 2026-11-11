@@ -610,7 +610,7 @@ ocr update --inject      # AGENTS.md/CLAUDE.md only
 | Qoder | `.qoder/` |
 | RooCode | `.roo/` |
 | Windsurf | `.windsurf/` |
-| Universal (`--tools agents`) | `.agents/` — writes only `.agents/skills/ocr/SKILL.md`, a pointer skill for any [Agent Skills](https://agentskills.io)-compatible agent; no commands |
+| Universal (.agents), `--tools agents` | `.agents/` — writes only `.agents/skills/ocr/SKILL.md`, a pointer skill for any [Agent Skills](https://agentskills.io)-compatible agent; no commands. Detected when `.agents/skills/` exists |
 
 ---
 

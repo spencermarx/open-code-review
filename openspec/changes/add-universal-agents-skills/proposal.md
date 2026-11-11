@@ -10,21 +10,23 @@ The tool registry also carries a dead field: every `AIToolConfig` declares a `sk
 
 ## What Changes
 
-- Add a new selectable install target, **Universal (`.agents`)**, with tool id `agents`, to the `AI_TOOLS` registry. It shows up in the `ocr init` checkbox prompt and is accepted by `--tools agents` / `--tools all`.
-- When `agents` is selected, `ocr init` (and `ocr update`) writes a **thin skill pointer** to `.agents/skills/ocr/SKILL.md`. It carries the source `SKILL.md` frontmatter verbatim and a body that tells the agent to read and follow `.ocr/skills/SKILL.md`. The full skill stays only in `.ocr/skills/`, the same pattern the command reference files use.
-- The `agents` target installs **no commands**. `commandsDir` and `commandStrategy` become optional on `AIToolConfig`, and command installation, update detection, and update dry-run output skip tools that declare no commands directory.
+- Add a new selectable install target, **Universal (.agents)**, with tool id `agents`, to the `AI_TOOLS` registry. It shows up in the `ocr init` checkbox prompt and is accepted by `--tools agents` / `--tools all`.
+- When `agents` is selected, `ocr init` (and `ocr update`) writes a **thin skill pointer** to `.agents/skills/ocr/SKILL.md`. It carries the source `SKILL.md` frontmatter verbatim, an OCR marker line, and a body that tells the agent to read and follow `.ocr/skills/SKILL.md` at the repository root. The full skill stays only in `.ocr/skills/`, the same pattern the command reference files use. A `SKILL.md` at that path without the marker is never overwritten.
+- The `agents` target installs **no commands**. `AIToolConfig` becomes a discriminated union: hosts (`kind: "host"`) carry `commands: { dir, strategy }`; discovery targets (`kind: "discovery"`) carry `skillPointerDir` and no commands. Command installation, update detection, and update dry-run output follow `kind`.
+- `init` pre-selects `agents` only when `.agents/skills/` exists (as OpenSpec does); legacy `ocr update` never adopts it from directories alone. A pointer left behind after deselecting `agents` is reported, not deleted.
 - The `agents` target declares no extra instruction file. It relies on the universal `AGENTS.md` that the injector already always writes.
-- The `agents` target is not an agentic host, so it is excluded from `ocr host capabilities` listings.
-- **Cleanup:** remove the unused `skillsDir` field from `AIToolConfig` and from every registry entry. The new target uses a distinct, actually-consumed optional field (`skillPointerDir`).
+- The `agents` target is not an agentic host, so it is excluded from the `ocr host capabilities` listing (the *Host Capability Query Command* requirement now says "every supported host tool").
+- **Cleanup:** remove the unused `skillsDir` field from `AIToolConfig` and from every registry entry. The new target uses a distinct, actually-consumed field (`skillPointerDir`) on the discovery variant.
 
 ## Impact
 
-- Affected specs: `cli` (Supported AI Tools, Tool-Specific Command Installation, new Universal Agent Skill Pointer requirement)
+- Affected specs: `cli` (Supported AI Tools, Tool-Specific Command Installation, Host Capability Query Command, new Universal Agent Skill Pointer requirement)
 - Affected code:
   - `packages/cli/src/lib/config.ts`: `AIToolId`, `AIToolConfig`, `AI_TOOLS`
-  - `packages/cli/src/lib/installer.ts`: skill-pointer writer, optional commands, detection
-  - `packages/cli/src/commands/update.ts`: `detectConfiguredTools`, dry-run listing
+  - `packages/cli/src/lib/installer.ts`: skill-pointer writer, host-only command refs, detection, update resolution, stale-pointer lookup
+  - `packages/cli/src/commands/init.ts`: `--tools` help, next steps, stale-pointer warning
+  - `packages/cli/src/commands/update.ts`: tool resolution, dry-run listing, stale-pointer warning
   - `packages/cli/src/commands/host.ts`: exclude non-host targets
-  - tests: `config.test.ts`, `installer.test.ts`, and the CLI e2e package if it asserts the tool list
+  - tests: `config.test.ts`, `installer.test.ts`, and `cli-e2e/src/cli-commands.test.ts`
 - Not affected: the skill sources in `packages/agents/` (the pointer is generated from them), and the injector (`AGENTS.md` is already universal).
 - Backward compatibility: purely additive for users. Existing installs are unaffected until someone selects `agents`. `skillsDir` is internal (not exported to other packages), so removing it is not a public API break.
