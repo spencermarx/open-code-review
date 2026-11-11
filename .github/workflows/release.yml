@@ -235,18 +235,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Retry: npm's read replicas lag publishes by a few seconds — the
-          # v2.2.1 publish SUCCEEDED but this guard false-alarmed by querying
-          # immediately (run 27351074620). Give propagation up to ~60s.
+          # Retry: npm's read replicas can lag a successful publish by seconds
+          # to minutes. v2.2.1 false-alarmed by querying immediately (run
+          # 27351074620); v2.5.1 (run 41303642670) became visible ~2m17s after
+          # publish (checked manually), past the old 60s budget. Allow ~5 min
+          # per package, measured as a deadline rather than an attempt count.
+          # Each `npm view` is hard-capped with `timeout`: npm's own
+          # --fetch-timeout doesn't cover a stalled TCP connect, and its
+          # defaults (5 min timeout, 2 retries) let one hung call outlast the
+          # 20-min job timeout and swallow the MISSING line. The last output
+          # is kept so a failure says whether it was lag (E404), a timeout
+          # (exit 124), or an outage/auth error.
           VER="$(node -p "require('./packages/cli/package.json').version")"
+          WINDOW=300; INTERVAL=10; CALL_TIMEOUT=20
           for pkg in @open-code-review/cli @open-code-review/agents; do
-            ok=""
-            for i in 1 2 3 4 5 6; do
-              if npm view "$pkg@$VER" version >/dev/null 2>&1; then
+            ok=""; deadline=$((SECONDS + WINDOW))
+            while :; do
+              rc=0
+              last="$(timeout "$CALL_TIMEOUT" npm view --fetch-retries=0 "$pkg@$VER" version 2>&1)" || rc=$?
+              if [ "$rc" -eq 0 ]; then
                 echo "  ok $pkg@$VER"; ok=1; break
               fi
-              echo "  not yet visible: $pkg@$VER (attempt $i) — waiting 10s"
-              sleep 10
+              [ "$SECONDS" -lt "$deadline" ] || break
+              echo "  not yet visible: $pkg@$VER ($((deadline - SECONDS))s left) — waiting ${INTERVAL}s"
+              sleep "$INTERVAL"
             done
-            [ -n "$ok" ] || { echo "  MISSING $pkg@$VER" >&2; exit 1; }
+            [ -n "$ok" ] || { printf '  MISSING %s@%s — last npm view (exit %s):\n%s\n' "$pkg" "$VER" "$rc" "$last" >&2; exit 1; }
           done
