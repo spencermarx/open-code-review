@@ -17,6 +17,7 @@ import {
   getToolById,
   getHostCapabilities,
   getToolIds,
+  isHostTool,
   type AIToolId,
   type HostCapabilities,
 } from "../lib/config.js";
@@ -64,7 +65,8 @@ const capabilitiesSubcommand = new Command("capabilities")
       return;
     }
 
-    const rows = AI_TOOLS.map((t) => describeRow(t.id));
+    // Passive discovery targets (e.g. `agents`) are not hosts — omit them.
+    const rows = AI_TOOLS.filter(isHostTool).map((t) => describeRow(t.id));
     if (options.json) {
       console.log(JSON.stringify(rows, null, 2));
     } else {

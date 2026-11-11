@@ -9,7 +9,14 @@ import {
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { createRequire } from "node:module";
-import type { AIToolConfig } from "./config";
+import {
+  isHostTool,
+  skillPointerPath,
+  SKILL_POINTER_MARKER,
+  type AIToolConfig,
+  type CommandStrategy,
+  type DiscoveryToolConfig,
+} from "./config.js";
 import { ensureGitignore } from "./gitignore.js";
 import type { ReviewersMeta, ReviewerMeta, ReviewerTier } from "@open-code-review/persistence/state";
 import { parseTeamConfigYaml } from "@open-code-review/config/team-config";
@@ -104,10 +111,7 @@ function installCommandsForTool(
   commandsSource: string,
   targetDir: string,
 ): boolean {
-  const toolCommandsDir = join(targetDir, tool.commandsDir);
   const centralCommandsDir = join(targetDir, ".ocr", "commands");
-
-  ensureDir(toolCommandsDir);
   ensureDir(centralCommandsDir);
 
   try {
@@ -126,46 +130,123 @@ function installCommandsForTool(
       }
     }
 
-    // Then, create reference files in tool-specific directories
-    if (tool.commandStrategy === "subdirectory") {
-      // Create ocr/ subdirectory with reference files
-      // Files: .claude/commands/ocr/review.md → references .ocr/commands/review.md
-      const ocrSubdir = join(toolCommandsDir, "ocr");
-      ensureDir(ocrSubdir);
+    // Discovery targets (e.g. `agents`) get no reference files — only the
+    // central copies above.
+    if (!isHostTool(tool)) {
+      return true;
+    }
+    const toolCommandsDir = join(targetDir, tool.commands.dir);
 
-      for (const file of commandFiles) {
-        const srcPath = join(commandsSource, file);
-        const content = readFileSync(srcPath, "utf-8");
-        const description = extractDescription(content);
-        const normalizedName = file.replace(/^ocr-/, "");
-        const refContent = generateCommandReference(
-          normalizedName,
-          description,
-        );
-        const destPath = join(ocrSubdir, normalizedName);
-        writeFileSync(destPath, refContent);
-      }
-    } else {
-      // flat-prefixed: Create reference files with ocr- prefix
-      // Files: .windsurf/workflows/ocr-review.md → references .ocr/commands/review.md
-      for (const file of commandFiles) {
-        const srcPath = join(commandsSource, file);
-        const content = readFileSync(srcPath, "utf-8");
-        const description = extractDescription(content);
-        const normalizedName = file.replace(/^ocr-/, "");
-        const destName = `ocr-${normalizedName}`;
-        const refContent = generateCommandReference(
-          normalizedName,
-          description,
-        );
-        const destPath = join(toolCommandsDir, destName);
-        writeFileSync(destPath, refContent);
-      }
+    // Then, create reference files in the tool-specific directory
+    for (const file of commandFiles) {
+      const content = readFileSync(join(commandsSource, file), "utf-8");
+      const normalizedName = file.replace(/^ocr-/, "");
+      const refContent = generateCommandReference(
+        normalizedName,
+        extractDescription(content),
+      );
+      const refPath = join(
+        toolCommandsDir,
+        commandReferenceFile(tool.commands.strategy, normalizedName),
+      );
+      ensureDir(dirname(refPath));
+      writeFileSync(refPath, refContent);
     }
 
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Path of one command reference file, relative to the tool's commands dir:
+ * - subdirectory:  `ocr/review.md`    → `/ocr:review`
+ * - flat-prefixed: `ocr-review.md`    → `/ocr-review`
+ */
+function commandReferenceFile(strategy: CommandStrategy, name: string): string {
+  switch (strategy) {
+    case "subdirectory":
+      return join("ocr", name);
+    case "flat-prefixed":
+      return `ocr-${name}`;
+    default: {
+      const unreachable: never = strategy;
+      throw new Error(`Unknown command strategy: ${String(unreachable)}`);
+    }
+  }
+}
+
+/**
+ * Generate the thin pointer skill written to `<skillPointerDir>/ocr/SKILL.md`.
+ * The frontmatter is copied verbatim from the packaged SKILL.md so `name`,
+ * `description` and `metadata.version` never drift; the body defers to the
+ * single source of truth in `.ocr/skills/SKILL.md`. The body uses the same
+ * line ending as the source frontmatter, so the file is never mixed CRLF/LF.
+ */
+export function generateSkillPointer(sourceSkillContent: string): string {
+  const match = sourceSkillContent.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+  if (!match) {
+    throw new Error("Packaged SKILL.md has no frontmatter block");
+  }
+  const frontmatter = match[0];
+  const eol = frontmatter.endsWith("\r\n") ? "\r\n" : "\n";
+  const body = [
+    "",
+    "# OCR: Code Review",
+    "",
+    SKILL_POINTER_MARKER,
+    "",
+    "**Execute this skill by reading and following:** `.ocr/skills/SKILL.md` at the " +
+      "repository root (not relative to this skill's directory).",
+    "",
+    "If `.ocr/skills/SKILL.md` does not exist at the repository root, OCR is not set up " +
+      "in this project — tell the user to run `ocr init`.",
+    "",
+  ];
+  return frontmatter + body.join(eol);
+}
+
+/** Is the file at `path` an OCR-generated skill pointer (carries the marker)? */
+export function isManagedSkillPointer(path: string): boolean {
+  if (!existsSync(path)) return false;
+  try {
+    return readFileSync(path, "utf-8").includes(SKILL_POINTER_MARKER);
+  } catch {
+    return false;
+  }
+}
+
+type SkillPointerResult =
+  | { status: "written" }
+  | { status: "skipped"; warning: string }
+  | { status: "failed"; error: string };
+
+/**
+ * Write a discovery target's pointer skill. A pre-existing `SKILL.md` that
+ * OCR did not write (no marker) is left untouched and reported as a warning.
+ */
+function installSkillPointer(
+  tool: DiscoveryToolConfig,
+  ocrSkillsSource: string,
+  targetDir: string,
+): SkillPointerResult {
+  const relPath = skillPointerPath(tool);
+  const dest = join(targetDir, relPath);
+  if (existsSync(dest) && !isManagedSkillPointer(dest)) {
+    return {
+      status: "skipped",
+      warning: `${relPath} exists and was not written by OCR — left untouched. Remove or rename it to install the OCR skill pointer.`,
+    };
+  }
+  try {
+    const source = readFileSync(join(ocrSkillsSource, "SKILL.md"), "utf-8");
+    ensureDir(dirname(dest));
+    writeFileSync(dest, generateSkillPointer(source));
+    return { status: "written" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown error";
+    return { status: "failed", error: `Failed to install OCR skill pointer to ${relPath}: ${msg}` };
   }
 }
 
@@ -427,8 +508,24 @@ export function installForTool(
     return {
       tool,
       success: false,
-      error: `Failed to install OCR commands to ${tool.commandsDir}`,
+      error: `Failed to install OCR commands to ${isHostTool(tool) ? tool.commands.dir : ".ocr/commands"}`,
+      warnings: warnings.length > 0 ? warnings : undefined,
     };
+  }
+
+  if (!isHostTool(tool)) {
+    const pointer = installSkillPointer(tool, ocrSkillsSource, targetDir);
+    if (pointer.status === "failed") {
+      return {
+        tool,
+        success: false,
+        error: pointer.error,
+        warnings: warnings.length > 0 ? warnings : undefined,
+      };
+    }
+    if (pointer.status === "skipped") {
+      warnings.push(pointer.warning);
+    }
   }
 
   return {
@@ -466,6 +563,78 @@ export function detectInstalledTools(
       );
     }
 
+    // Discovery targets: a bare root (e.g. `.agents/`) is shared with rules and
+    // subagent definitions, so only the skills root itself signals intent.
+    if (!isHostTool(tool)) {
+      return existsSync(join(targetDir, tool.skillPointerDir));
+    }
+
     return existsSync(configPath);
   });
+}
+
+/**
+ * Tools that already carry an OCR install: a host with OCR command
+ * references, or a discovery target with an OCR-managed pointer skill (a
+ * foreign `SKILL.md` without the marker does not count).
+ */
+export function detectConfiguredTools(
+  targetDir: string,
+  tools: AIToolConfig[],
+): AIToolConfig[] {
+  return tools.filter((tool) => {
+    if (!isHostTool(tool)) {
+      return isManagedSkillPointer(join(targetDir, skillPointerPath(tool)));
+    }
+    const commandsDir = join(targetDir, tool.commands.dir);
+    switch (tool.commands.strategy) {
+      case "subdirectory":
+        return existsSync(join(commandsDir, "ocr"));
+      case "flat-prefixed":
+        return existsSync(join(commandsDir, "ocr-review.md"));
+      default: {
+        const unreachable: never = tool.commands.strategy;
+        throw new Error(`Unknown command strategy: ${String(unreachable)}`);
+      }
+    }
+  });
+}
+
+/**
+ * Which tools `ocr update` refreshes. Saved preferences from `ocr init` win.
+ * Without them (legacy installs), fall back to tools that already carry an
+ * OCR install, plus hosts whose config directory exists. Discovery targets
+ * are never adopted from directory presence alone: `update` writes without
+ * asking, so it only refreshes a pointer OCR already owns.
+ */
+export function resolveToolsToUpdate(
+  targetDir: string,
+  tools: AIToolConfig[],
+  savedToolIds: readonly string[],
+): AIToolConfig[] {
+  if (savedToolIds.length > 0) {
+    return tools.filter((tool) => savedToolIds.includes(tool.id));
+  }
+  const configured = new Set(detectConfiguredTools(targetDir, tools).map((t) => t.id));
+  const installedHosts = new Set(
+    detectInstalledTools(targetDir, tools.filter(isHostTool)).map((t) => t.id),
+  );
+  return tools.filter((tool) => configured.has(tool.id) || installedHosts.has(tool.id));
+}
+
+/**
+ * OCR-managed pointer skills left behind by discovery targets that are not
+ * in the current selection (e.g. `agents` was deselected). Reported, never
+ * deleted — mirrors stale instruction-file handling.
+ */
+export function findStaleSkillPointers(
+  targetDir: string,
+  tools: AIToolConfig[],
+  selectedToolIds: readonly string[],
+): string[] {
+  return tools
+    .filter((tool): tool is DiscoveryToolConfig => !isHostTool(tool))
+    .filter((tool) => !selectedToolIds.includes(tool.id))
+    .map(skillPointerPath)
+    .filter((relPath) => isManagedSkillPointer(join(targetDir, relPath)));
 }

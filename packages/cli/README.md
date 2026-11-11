@@ -163,6 +163,7 @@ ocr state sync                      # Rebuild state from filesystem
 | Qoder | `.qoder/` |
 | RooCode | `.roo/` |
 | Windsurf | `.windsurf/` |
+| Universal (.agents), `--tools agents` | `.agents/` — writes only `.agents/skills/ocr/SKILL.md`, a pointer skill for any [Agent Skills](https://agentskills.io)-compatible agent; no commands. Detected when `.agents/skills/` exists |
 
 ## Updating
 
